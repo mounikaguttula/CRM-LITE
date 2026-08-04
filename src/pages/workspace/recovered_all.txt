@@ -1,0 +1,657 @@
+Created At: 2026-07-29T15:30:28Z
+Completed At: 2026-07-29T15:30:28Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1 to 800
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useEffect, useRef } from 'react';
+2: import { useNavigate, useParams } from 'react-router-dom';
+3: import { useWorkspace } from '../../context/WorkspaceContext';
+4: import { apiGet, apiPost } from '../../api/client';
+5: import {
+6:   Users,
+7:   Columns3,
+8:   Search,
+9:   TrendingUp,
+10:   TrendingDown,
+11:   MoreHorizontal,
+12:   Mail,
+13:   Phone,
+14:   ArrowUpRight,
+15:   SlidersHorizontal,
+16:   Plus,
+17:   Calendar,
+18:   Download,
+19:   UploadCloud,
+20:   Upload,
+21:   X,
+22:   Check,
+23:   FileSpreadsheet,
+24:   CheckCircle2,
+25: } from 'lucide-react';
+26: import {
+27:   AreaChart,
+28:   Area,
+29:   ResponsiveContainer,
+30:   XAxis,
+31:   YAxis,
+32:   Tooltip,
+33: } from 'recharts';
+34: 
+35: /* ---------------------------------- THEME & COLORS ---------------------------------- */
+36: 
+37: const COLOR = {
+38:   indigo: '#6366f1',
+39:   cyan: '#22d3ee',
+40:   violet: '#a78bfa',
+41:   success: '#34d399',
+42:   warning: '#fbbf24',
+43:   danger: '#fb7185',
+44:   textDim: '#6b7290',
+45: };
+46: 
+47: const revenueData = [
+48:   { m: 'Feb', v: 62 },
+49:   { m: 'Mar', v: 71 },
+50:   { m: 'Apr', v: 68 },
+51:   { m: 'May', v: 84 },
+52:   { m: 'Jun', v: 90 },
+53:   { m: 'Jul', v: 112 },
+54: ];
+55: 
+56: const stageOrder = ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won'];
+57: const stageColors = {
+58:   Lead: COLOR.textDim,
+59:   Qualified: COLOR.violet,
+60:   Proposal: COLOR.indigo,
+61:   Negotiation: COLOR.warning,
+62:   Won: COLOR.success,
+63: };
+64: 
+65: const BADGE_TEXT = {
+66:   [COLOR.indigo]: 
+<truncated 37741 bytes>
+62:               display: 'flex', alignItems: 'center', justifyContent: 'center',
+763:               flexShrink: 0,
+764:               boxShadow: `0 4px 10px ${glow}30`,
+765:               transition: 'transform 0.25s ease',
+766:               transform: hov ? 'scale(1.1)' : 'scale(1)',
+767:             }}>
+768:               <Icon size={15} style={{ color: '#fff' }} />
+769:             </div>
+770:             <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+771:           </div>
+772:           <span style={{
+773:             fontSize: '0.65rem', fontWeight: 700,
+774:             color: up ? '#059669' : '#dc2626',
+775:             background: up ? '#ecfdf5' : '#fef2f2',
+776:             padding: '2px 7px', borderRadius: 6,
+777:             border: `1px solid ${up ? '#a7f3d0' : '#fecaca'}`,
+778:           }}>{delta}</span>
+779:         </div>
+780: 
+781:         {/* Value */}
+782:         <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#111827', lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
+783:           {display}
+784:         </div>
+785:         <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem' }}>
+786:           {up ? <TrendingUp size={10} style={{ color: '#059669' }} /> : <TrendingDown size={10} style={{ color: '#dc2626' }} />}
+787:           <span style={{ color: '#8990ac' }}>vs last month</span>
+788:         </div>
+789:       </div>
+790: 
+791:       {/* Bottom accent glow on hover */}
+792:       {hov && (
+793:         <div style={{
+794:           position: 'absolute', bottom: 0, left: '10%', right: '10%', height: 1,
+795:           background: `linear-gradient(90deg, transparent, ${glow}60, transparent)`,
+796:         }} />
+797:       )}
+798:     </div>
+799:   );
+800: }
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:29:48Z
+Completed At: 2026-07-29T16:29:48Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1050 to 1250
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1050:       const mapHeader = (h) => {
+1051:         if (h.includes('first') || h === 'fname') return 'first_name';
+1052:         if (h.includes('last') || h === 'lname') return 'last_name';
+1053:         if (h.includes('email')) return 'email';
+1054:         if (h.includes('phone') || h.includes('tel') || h.includes('mobile') || h.includes('alt')) return 'phone';
+1055:         if (h.includes('company') || h.includes('organization') || h.includes('org')) return 'company';
+1056:         if (h.includes('title') || h.includes('job') || h.includes('position')) return 'title';
+1057:         if (h.includes('source') || h.includes('lead source')) return 'lead_source';
+1058:         if (h.includes('status')) return 'status';
+1059:         if (h.includes('description') || h.includes('note') || h.includes('memo')) return 'description';
+1060:         if (h === 'name' || h === 'full name') return 'name';
+1061:         return h;
+1062:       };
+1063: 
+1064:       const headers = rawHeaders.map(mapHeader);
+1065:       const parsedList = [];
+1066: 
+1067:       for (let i = 1; i < lines.length; i++) {
+1068:         const currentLine = lines[i];
+1069:         if (!currentLine.trim()) continue;
+1070: 
+1071:         const rowValues = [];
+1072:         let inQuotes = false;
+1073:         let val = '';
+1074:         for (let c = 0; c < currentLine.length; c++) {
+1075:           const char = currentLine[c];
+1076:           if (char === '"') {
+1077:             inQuotes = !inQuotes;
+1078:           } else if (char === ',' && !inQuotes) {
+1079:       
+<truncated 5024 bytes>
+ground: '#ffffff',
+1207:               cursor: 'pointer',
+1208:               boxShadow: '0 2px 8px rgba(99, 102, 241, 0.08)',
+1209:               transition: 'all 0.2s ease',
+1210:             }}
+1211:           >
+1212:             <UploadCloud size={15} style={{ color: '#6366f1' }} /> Import CSV
+1213:           </button>
+1214: 
+1215:           {permissions.canCreate && (
+1216:             <button
+1217:               onClick={handleNewClick}
+1218:               className="orbit-btn-primary"
+1219:               style={{
+1220:                 display: 'flex',
+1221:                 alignItems: 'center',
+1222:                 gap: 6,
+1223:                 padding: '9px 18px',
+1224:                 borderRadius: 10,
+1225:                 fontSize: 13,
+1226:                 fontWeight: 700,
+1227:                 cursor: 'pointer',
+1228:                 background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+1229:                 color: '#ffffff',
+1230:                 border: 'none',
+1231:                 boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+1232:               }}
+1233:             >
+1234:               <Plus size={15} /> New {meta.displayName}
+1235:             </button>
+1236:           )}
+1237:         </div>
+1238:       </div>
+1239: 
+1240:       {/* Main Glass Panel */}
+1241:       <div className="glass" style={{ padding: 8, borderRadius: 16 }}>
+1242:         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--panel-border)' }}>
+1243:           <div style={{ position: 'relative' }}>
+1244:             <Search
+1245:               size={14}
+1246:               style={{
+1247:                 position: 'absolute',
+1248:                 left: 12,
+1249:                 top: '50%',
+1250:                 transform: 'translateY(-50%)',
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:29:54Z
+Completed At: 2026-07-29T16:29:55Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1250 to 1600
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1250:                 transform: 'translateY(-50%)',
+1251:                 color: 'var(--text-faint)',
+1252:               }}
+1253:             />
+1254:             <input
+1255:               className="orbit-input"
+1256:               value={query}
+1257:               onChange={(e) => setQuery(e.target.value)}
+1258:               placeholder={`Filter ${meta.pluralDisplayName.toLowerCase()}…`}
+1259:               style={{ width: 220, padding: '8px 12px 8px 34px', borderRadius: 10, fontSize: 12.5 }}
+1260:             />
+1261:           </div>
+1262: 
+1263:           <button
+1264:             style={{
+1265:               display: 'flex',
+1266:               alignItems: 'center',
+1267:               gap: 6,
+1268:               background: 'transparent',
+1269:               border: '1px solid var(--panel-border)',
+1270:               color: 'var(--text-dim)',
+1271:               padding: '8px 14px',
+1272:               borderRadius: 10,
+1273:               fontSize: 12.5,
+1274:               fontWeight: 500,
+1275:               cursor: 'pointer',
+1276:             }}
+1277:           >
+1278:             <SlidersHorizontal size={13} /> Filter
+1279:           </button>
+1280:         </div>
+1281: 
+1282:         <div style={{ overflowX: 'auto' }} className="orbit-scrollbar">
+1283:           {error ? (
+1284:             <div style={{ padding: '32px', textAlign: 'center', color: '#be123c', fontSize: 13 }}>
+1285:               ⚠️ {error}
+1286:             </div>
+1287:           ) : loading ? (
+1288:             <div style={{ padding:
+<truncated 15501 bytes>
+) => { setSelectedFile(null); setParsedRecords([]); }}
+1575:                     style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}
+1576:                   >
+1577:                     Remove
+1578:                   </button>
+1579:                 </div>
+1580: 
+1581:                 {/* Preview Table of First 3 Records */}
+1582:                 {parsedRecords.length > 0 && (
+1583:                   <div style={{ marginTop: 10, background: '#ffffff', borderRadius: 8, border: '1px solid #e2e8f0', padding: 8, overflowX: 'auto' }}>
+1584:                     <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 6 }}>
+1585:                       Preview (First 3 rows)
+1586:                     </div>
+1587:                     <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+1588:                       <thead>
+1589:                         <tr style={{ color: '#64748b', borderBottom: '1px solid #f1f5f9', textAlign: 'left' }}>
+1590:                           <th style={{ padding: 4 }}>Name</th>
+1591:                           <th style={{ padding: 4 }}>Email</th>
+1592:                           <th style={{ padding: 4 }}>Company</th>
+1593:                           <th style={{ padding: 4 }}>Status</th>
+1594:                         </tr>
+1595:                       </thead>
+1596:                       <tbody>
+1597:                         {parsedRecords.slice(0, 3).map((r, i) => (
+1598:                           <tr key={i} style={{ borderBottom: '1px solid #f8fafc' }}>
+1599:                             <td style={{ padding: 4, fontWeight: 600, color: '#0f172a' }}>{r.name}</td>
+1600:                             <td style={{ padding: 4, color: '#64748b' }}>{r.email || '—'}</td>
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:30:01Z
+Completed At: 2026-07-29T16:30:01Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 800 to 1050
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+800: }
+801: 
+802: 
+803: function getModuleSubtitle(key, pluralName) {
+804:   const str = String(key || '').toLowerCase();
+805:   if (str.includes('contact')) return "Every person and company you're building a relationship with.";
+806:   if (str.includes('lead')) return 'Potential clients and prospects in your sales pipeline.';
+807:   if (str.includes('deal')) return 'Active business opportunities, contracts, and revenue.';
+808:   if (str.includes('compan') || str.includes('account')) return 'Accounts, organizations, and corporate partners.';
+809:   return `All records and data managed in ${pluralName}.`;
+810: }
+811: 
+812: function ObjectListContent({ objectTypeId }) {
+813:   const { objectTypes, permissions } = useWorkspace();
+814:   const navigate = useNavigate();
+815:   const [records, setRecords] = useState([]);
+816:   const [loading, setLoading] = useState(true);
+817:   const [error, setError] = useState(null);
+818:   const [query, setQuery] = useState('');
+819: 
+820:   // CSV Import/Export States
+821:   const [importModalOpen, setImportModalOpen] = useState(false);
+822:   const [selectedFile, setSelectedFile] = useState(null);
+823:   const [parsedRecords, setParsedRecords] = useState([]);
+824:   const [importing, setImporting] = useState(false);
+825:   const [isDragging, setIsDragging] = useState(false);
+826:   const fileInputRef = useRef(null);
+827: 
+828:   useEffect(() => {
+829:     let isMounted = true;
+830:     setLoading(true);
+831:     setError(null);
+832:     apiGet(`/objects/${objectTypeId}`)
+833:       .then((res)
+<truncated 6758 bytes>
+))) exportKeys.push('phone');
+1003: 
+1004:     const headers = exportKeys.map(k => humanize(k));
+1005:     const csvRows = [headers.join(',')];
+1006: 
+1007:     for (const rec of listToExport) {
+1008:       const rowVals = exportKeys.map(k => {
+1009:         let val = rec[k];
+1010:         if (val === undefined || val === null) {
+1011:           val = rec.data ? rec.data[k] : '';
+1012:         }
+1013:         val = String(val || '').replace(/"/g, '""');
+1014:         return `"${val}"`;
+1015:       });
+1016:       csvRows.push(rowVals.join(','));
+1017:     }
+1018: 
+1019:     const csvContent = csvRows.join('\n');
+1020:     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+1021:     const url = URL.createObjectURL(blob);
+1022:     const link = document.createElement('a');
+1023:     link.setAttribute('href', url);
+1024:     link.setAttribute('download', `${objectTypeId}_export_${new Date().toISOString().slice(0, 10)}.csv`);
+1025:     document.body.appendChild(link);
+1026:     link.click();
+1027:     document.body.removeChild(link);
+1028:   };
+1029: 
+1030:   // CSV File Upload Processor
+1031:   const handleFileProcess = (file) => {
+1032:     if (!file) return;
+1033:     if (!file.name.toLowerCase().endsWith('.csv')) {
+1034:       alert('Please select a valid .csv file.');
+1035:       return;
+1036:     }
+1037: 
+1038:     setSelectedFile(file);
+1039:     const reader = new FileReader();
+1040:     reader.onload = (e) => {
+1041:       const text = e.target.result;
+1042:       const lines = text.split(/\r\n|\n/).filter(line => line.trim());
+1043:       if (lines.length < 2) {
+1044:         setParsedRecords([]);
+1045:         return;
+1046:       }
+1047: 
+1048:       const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+1049:       
+1050:       const mapHeader = (h) => {
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:30:06Z
+Completed At: 2026-07-29T16:30:06Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1600 to 1655
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1600:                             <td style={{ padding: 4, color: '#64748b' }}>{r.email || '—'}</td>
+1601:                             <td style={{ padding: 4, color: '#64748b' }}>{r.company || '—'}</td>
+1602:                             <td style={{ padding: 4, color: '#10b981', fontWeight: 600 }}>{r.status}</td>
+1603:                           </tr>
+1604:                         ))}
+1605:                       </tbody>
+1606:                     </table>
+1607:                   </div>
+1608:                 )}
+1609:               </div>
+1610:             )}
+1611: 
+1612:             {/* Modal Footer Actions */}
+1613:             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+1614:               <button
+1615:                 onClick={() => { setImportModalOpen(false); setSelectedFile(null); setParsedRecords([]); }}
+1616:                 style={{
+1617:                   padding: '9px 18px', borderRadius: 10, border: '1px solid #cbd5e1',
+1618:                   background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+1619:                 }}
+1620:               >
+1621:                 Cancel
+1622:               </button>
+1623: 
+1624:               <button
+1625:                 onClick={handleImportSubmit}
+1626:                 disabled={!selectedFile || parsedRecords.length === 0 || importing}
+1627:                 style={{
+1628:                   padding: '9px 22px', borderRadius: 10, border: 'none',
+1629:                   background: (!selectedFile || parsedRecords.length === 0) ? '#94a3b8' : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+1630:                   color: '#ffffff', fontWeight: 700, fontSize: 13,
+1631:                   cursor: (!selectedFile || parsedRecords.length === 0 || importing) ? 'not-allowed' : 'pointer',
+1632:                   boxShadow: (!selectedFile || parsedRecords.length === 0) ? 'none' : '0 4px 14px rgba(99,102,241,0.4)',
+1633:                   display: 'flex', alignItems: 'center', gap: 6,
+1634:                 }}
+1635:               >
+1636:                 <Check size={16} />
+1637:                 {importing ? 'Importing…' : `Import ${parsedRecords.length} Leads`}
+1638:               </button>
+1639:             </div>
+1640:           </div>
+1641:         </div>
+1642:       )}
+1643:     </div>
+1644:   );
+1645: }
+1646: 
+1647: function OverviewPage() {
+1648:   const { objectTypeId } = useParams();
+1649:   if (objectTypeId) {
+1650:     return <ObjectListContent objectTypeId={objectTypeId} />;
+1651:   }
+1652:   return <DashboardContent />;
+1653: }
+1654: 
+1655: export default OverviewPage;
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:30:46Z
+Completed At: 2026-07-29T16:30:47Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1 to 40
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useEffect, useRef } from 'react';
+2: import { useNavigate, useParams } from 'react-router-dom';
+3: import { useWorkspace } from '../../context/WorkspaceContext';
+4: import { apiGet, apiPost } from '../../api/client';
+5: import {
+6:   Users,
+7:   Columns3,
+8:   Search,
+9:   TrendingUp,
+10:   TrendingDown,
+11:   MoreHorizontal,
+12:   Mail,
+13:   Phone,
+14:   ArrowUpRight,
+15:   SlidersHorizontal,
+16:   Plus,
+17:   Calendar,
+18:   Download,
+19:   UploadCloud,
+20:   Upload,
+21:   X,
+22:   Check,
+23:   FileSpreadsheet,
+24:   CheckCircle2,
+25: } from 'lucide-react';
+26: import {
+27:   AreaChart,
+28:   Area,
+29:   ResponsiveContainer,
+30:   XAxis,
+31:   YAxis,
+32:   Tooltip,
+33: } from 'recharts';
+34: 
+35: /* ---------------------------------- THEME & COLORS ---------------------------------- */
+36: 
+37: const COLOR = {
+38:   indigo: '#6366f1',
+39:   cyan: '#22d3ee',
+40:   violet: '#a78bfa',
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:30:56Z
+Completed At: 2026-07-29T16:30:56Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1640 to 1655
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1640:           </div>
+1641:         </div>
+1642:       )}
+1643:     </div>
+1644:   );
+1645: }
+1646: 
+1647: function OverviewPage() {
+1648:   const { objectTypeId } = useParams();
+1649:   if (objectTypeId) {
+1650:     return <ObjectListContent objectTypeId={objectTypeId} />;
+1651:   }
+1652:   return <DashboardContent />;
+1653: }
+1654: 
+1655: export default OverviewPage;
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:31:03Z
+Completed At: 2026-07-29T16:31:03Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+Total Lines: 1655
+Total Bytes: 72313
+Showing lines 1 to 35
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useEffect, useRef } from 'react';
+2: import { useNavigate, useParams } from 'react-router-dom';
+3: import { useWorkspace } from '../../context/WorkspaceContext';
+4: import { apiGet, apiPost } from '../../api/client';
+5: import {
+6:   Users,
+7:   Columns3,
+8:   Search,
+9:   TrendingUp,
+10:   TrendingDown,
+11:   MoreHorizontal,
+12:   Mail,
+13:   Phone,
+14:   ArrowUpRight,
+15:   SlidersHorizontal,
+16:   Plus,
+17:   Calendar,
+18:   Download,
+19:   UploadCloud,
+20:   Upload,
+21:   X,
+22:   Check,
+23:   FileSpreadsheet,
+24:   CheckCircle2,
+25: } from 'lucide-react';
+26: import {
+27:   AreaChart,
+28:   Area,
+29:   ResponsiveContainer,
+30:   XAxis,
+31:   YAxis,
+32:   Tooltip,
+33: } from 'recharts';
+34: 
+35: /* ---------------------------------- THEME & COLORS ---------------------------------- */
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-07-29T16:51:20Z
+Completed At: 2026-07-29T16:52:26Z
+
+				The command completed successfully.
+				Output:
+				Found matches: 3
+{"step_index":188,"source":"MODEL","type":"VIEW_FILE","status":"DONE","created_at":"2026-07-29T16:30:01Z","content":"Created At: 2026-07-29T16:30:01Z\nCompleted At: 2026-07-29T16:30:01Z\nFile Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`\nTotal Lines: 1655\nTotal Bytes: 72313\nShowing lines 800 to 1050\nThe following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.\n800: }\n801: \n802: \n803: function getModuleSubtitle(key, pluralName) {\n804:   const str = String(key || '').toLowerCase();\n805:   if (str.includes('contact')) return \"Every person and company you're building a relationship with.\";\n806:   if (str.includes('lead')) return 'Potential clients and prospects in your sales pipeline.';\n807:   if (str.includes('deal')) return 'Active business opportunities, contracts, and revenue.';\n808:   if (str.includes('compan') || str.includes('account')) return 'Accounts, organizations, and corporate partners.';\n809:   return `All records and data managed in ${pluralName}.`;\n810: }\n811: \n812: function ObjectListContent({ objectTypeId }) {\n813:   const { objectTypes, permissions } = useWorkspace();\n814:   const navigate = useNavigate();\n815:   const [records, setRecords] = useState([]);\n816:   const [loading, setLoading] = useState(true);\n817:   const [error, setError] = useState(null);\n818:   const [query, setQuery] = useState('');\n819: \n820:   // CSV Import/Export States\n821:   const [importModalOpen, setImportModalOpen] = useState(false);\n822:   const [selectedFile, setSelectedFile] = useState(null);\n823:   const [parsedRecords, setParsedRecords] = useState([]);\n824:   const [importing, setImporting] = useStat
+<truncated 392 bytes>
+exportKeys.map(k => humanize(k));\n1005:     const csvRows = [headers.join(',')];\n1006: \n1007:     for (const rec of listToExport) {\n1008:       const rowVals = exportKeys.map(k => {\n1009:         let val = rec[k];\n1010:         if (val === undefined || val === null) {\n1011:           val = rec.data ? rec.data[k] : '';\n1012:         }\n1013:         val = String(val || '').replace(/\"/g, '\"\"');\n1014:         return `\"${val}\"`;\n1015:       });\n1016:       csvRows.push(rowVals.join(','));\n1017:     }\n1018: \n1019:     const csvContent = csvRows.join('\\n');\n1020:     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });\n1021:     const url = URL.createObjectURL(blob);\n1022:     const link = document.createElement('a');\n1023:     link.setAttribute('href', url);\n1024:     link.setAttribute('download', `${objectTypeId}_export_${new Date().toISOString().slice(0, 10)}.csv`);\n1025:     document.body.appendChild(link);\n1026:     link.click();\n1027:     document.body.removeChild(link);\n1028:   };\n1029: \n1030:   // CSV File Upload Processor\n1031:   const handleFileProcess = (file) => {\n1032:     if (!file) return;\n1033:     if (!file.name.toLowerCase().endsWith('.csv')) {\n1034:       alert('Please select a valid .csv file.');\n1035:       return;\n1036:     }\n1037: \n1038:     setSelectedFile(file);\n1039:     const reader = new FileReader();\n1040:     reader.onload = (e) => {\n1041:       const text = e.target.result;\n1042:       const lines = text.split(/\\r\\n|\\n/).filter(line => line.trim());\n1043:       if (lines.length < 2) {\n1044:         setParsedRecords([]);\n1045:         return;\n1046:       }\n1047: \n1048:       const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^[\"']|[\"']$/g, '').toLowerCase());\n1049:       \n1050:       const mapHeader = (h) => {\nThe above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.\n"}
+
+
+undefined
+Created At: 2026-07-29T16:53:24Z
+Completed At: 2026-07-29T16:53:24Z
+File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/recovered_overview.txt`
+Total Lines: 115
+Total Bytes: 4121
+Showing lines 1 to 115
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: Created At: 2026-07-29T15:30:28Z
+2: Completed At: 2026-07-29T15:30:28Z
+3: File Path: `file:///d:/Downloads/LiteWeight-CRM--main%20%282%29/LiteWeight-CRM--main/src/pages/workspace/OverviewPage.js`
+4: Total Lines: 1655
+5: Total Bytes: 72313
+6: Showing lines 1 to 800
+7: The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+8: 1: import React, { useState, useEffect, useRef } from 'react';
+9: 2: import { useNavigate, useParams } from 'react-router-dom';
+10: 3: import { useWorkspace } from '../../context/WorkspaceContext';
+11: 4: import { apiGet, apiPost } from '../../api/client';
+12: 5: import {
+13: 6:   Users,
+14: 7:   Columns3,
+15: 8:   Search,
+16: 9:   TrendingUp,
+17: 10:   TrendingDown,
+18: 11:   MoreHorizontal,
+19: 12:   Mail,
+20: 13:   Phone,
+21: 14:   ArrowUpRight,
+22: 15:   SlidersHorizontal,
+23: 16:   Plus,
+24: 17:   Calendar,
+25: 18:   Download,
+26: 19:   UploadCloud,
+27: 20:   Upload,
+28: 21:   X,
+29: 22:   Check,
+30: 23:   FileSpreadsheet,
+31: 24:   CheckCircle2,
+32: 25: } from 'lucide-react';
+33: 26: import {
+34: 27:   AreaChart,
+35: 28:   Area,
+36: 29:   ResponsiveContainer,
+37: 30:   XAxis,
+38: 31:   YAxis,
+39: 32:   Tooltip,
+40: 33: } from 'recharts';
+41: 34: 
+42: 35: /* ---------------------------------- THEME & COLORS ---------------------------------- */
+43: 36: 
+44: 37: const COLOR = {
+45: 38:   indigo: '#6366f1',
+46: 39:  
+<truncated 1072 bytes>
+  transform: hov ? 'scale(1.1)' : 'scale(1)',
+80: 767:             }}>
+81: 768:               <Icon size={15} style={{ color: '#fff' }} />
+82: 769:             </div>
+83: 770:             <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+84: 771:           </div>
+85: 772:           <span style={{
+86: 773:             fontSize: '0.65rem', fontWeight: 700,
+87: 774:             color: up ? '#059669' : '#dc2626',
+88: 775:             background: up ? '#ecfdf5' : '#fef2f2',
+89: 776:             padding: '2px 7px', borderRadius: 6,
+90: 777:             border: `1px solid ${up ? '#a7f3d0' : '#fecaca'}`,
+91: 778:           }}>{delta}</span>
+92: 779:         </div>
+93: 780: 
+94: 781:         {/* Value */}
+95: 782:         <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#111827', lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
+96: 783:           {display}
+97: 784:         </div>
+98: 785:         <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem' }}>
+99: 786:           {up ? <TrendingUp size={10} style={{ color: '#059669' }} /> : <TrendingDown size={10} style={{ color: '#dc2626' }} />}
+100: 787:           <span style={{ color: '#8990ac' }}>vs last month</span>
+101: 788:         </div>
+102: 789:       </div>
+103: 790: 
+104: 791:       {/* Bottom accent glow on hover */}
+105: 792:       {hov && (
+106: 793:         <div style={{
+107: 794:           position: 'absolute', bottom: 0, left: '10%', right: '10%', height: 1,
+108: 795:           background: `linear-gradient(90deg, transparent, ${glow}60, transparent)`,
+109: 796:         }} />
+110: 797:       )}
+111: 798:     </div>
+112: 799:   );
+113: 800: }
+114: The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+115: 
+The above content shows the entire, complete file contents of the requested file.
+

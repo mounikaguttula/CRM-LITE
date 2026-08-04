@@ -1,0 +1,21 @@
+{
+    "name": "crm-mcp",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "crm-server.mjs",
+    "scripts": {
+        "start": "node crm-server.mjs"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.11.0",
+        "@supabase/supabase-js": "^2.99.0",
+        "cors": "^2.8.6",
+        "dotenv": "^16.6.1",
+        "express": "^5.2.1",
+        "jsonwebtoken": "^9.0.3",
+        "node-fetch": "^3.3.2",
+        "nodemailer": "^6.9.18",
+        "resend": "^4.1.2",
+        "zod": "^3.24.1"
+    }
+}

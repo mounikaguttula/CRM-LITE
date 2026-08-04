@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CRM Login</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #0f172a;
+            --muted: #64748b;
+            --brand: #0f766e;
+            --brand-2: #0ea5e9;
+            --ok: #166534;
+            --err: #991b1b;
+            --border: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, sans-serif;
+            color: var(--text);
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 0% 0%, #ccfbf1, transparent 40%),
+                radial-gradient(circle at 100% 100%, #e0f2fe, transparent 45%),
+                var(--bg);
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+
+        .card {
+            width: min(480px, 100%);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--card);
+            padding: 28px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 1.5rem;
+        }
+
+        p {
+            margin: 0 0 20px;
+            color: var(--muted);
+        }
+
+        label {
+            display: block;
+            margin: 14px 0 6px;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            font-size: 15px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: var(--brand-2);
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: 0;
+            border-radius: 10px;
+            background: linear-gradient(120deg, var(--brand), var(--brand-2));
+            color: #fff;
+            padding: 11px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        button:hover {
+            background: var(--brand);
+        }
+
+        button.secondary {
+            background: #fff;
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .otp-section {
+            margin-top: 14px;
+            display: none;
+        }
+
+        .otp-section.visible {
+            display: block;
+        }
+
+        .status {
+            margin-top: 14px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status.ok {
+            display: block;
+            color: var(--ok);
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+        }
+
+        .status.err {
+            display: block;
+            color: var(--err);
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+        }
+
+        .hint {
+            margin-top: 10px;
+            font-size: 13px;
+            color: var(--muted);
+            display: none;
+        }
+
+        .hint.visible {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>CRM Verification</h1>
+        <p>Sign in with your work email and OTP to activate CRM tools in Claude.</p>
+
+        <label for="email">Work email</label>
+        <input id="email" type="email" placeholder="name@company.com" />
+
+        <div id="emailHelp" class="hint" style="display:block; margin-top:8px;">Enter a valid work email to continue.
+        </div>
+
+        <div id="otpSection" class="otp-section">
+            <label for="otp">OTP code</label>
+            <input id="otp" type="text" placeholder="6-digit code" maxlength="6" />
+
+            <div class="row">
+                <button id="verifyBtn" type="button">Verify OTP</button>
+            </div>
+        </div>
+
+        <div id="status" class="status"></div>
+        <button id="openClaudeBtn" class="secondary" type="button" style="display:none; margin-top:10px;">Open Claude
+            Desktop</button>
+        <div id="hint" class="hint"></div>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const emailEl = document.getElementById('email');
+        const otpEl = document.getElementById('otp');
+        const otpSectionEl = document.getElementById('otpSection');
+        const emailHelpEl = document.getElementById('emailHelp');
+        const openClaudeBtn = document.getElementById('openClaudeBtn');
+        const hintEl = document.getElementById('hint');
+        let otpRequestInFlight = false;
+        let lastOtpRequestedEmail = '';
+
+        const CLAUDE_DEEP_LINK = 'claude://';
+
+        const show = (msg, type) => {
+            statusEl.textContent = msg;
+            statusEl.className = 'status ' + type;
+        };
+
+        const showHint = (msg) => {
+            hintEl.textContent = msg;
+            hintEl.className = 'hint visible';
+        };
+
+        const isValidEmail = (value) => /^(?!\.)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value);
+
+        const updateOtpVisibility = () => {
+            const email = emailEl.value.trim();
+            const valid = isValidEmail(email);
+            otpSectionEl.className = valid ? 'otp-section visible' : 'otp-section';
+            if (!valid) {
+                lastOtpRequestedEmail = '';
+                otpEl.value = '';
+            }
+            emailHelpEl.textContent = valid
+                ? 'Valid email detected. Sending OTP to your email...'
+                : 'Enter a valid work email to continue.';
+        };
+
+        const requestOtpForEmail = async (email) => {
+            if (!isValidEmail(email)) return;
+            if (otpRequestInFlight) return;
+            if (lastOtpRequestedEmail === email) return;
+
+            otpRequestInFlight = true;
+            try {
+                const res = await fetch('/api/request-otp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    show(data.error || 'Failed to send OTP.', 'err');
+                    emailHelpEl.textContent = 'Unable to send OTP. Check email and try again.';
+                    return;
+                }
+
+                lastOtpRequestedEmail = email;
+                show('OTP sent to your email. Enter OTP and click Verify.', 'ok');
+                emailHelpEl.textContent = 'OTP sent successfully. Check your inbox.';
+            } finally {
+                otpRequestInFlight = false;
+            }
+        };
+
+        const tryOpenClaudeDesktop = () => {
+            // Best-effort only. Some browsers may block app protocol navigation.
+            window.location.assign(CLAUDE_DEEP_LINK);
+        };
+
+        const maybeAutoSendOtp = () => {
+            const email = emailEl.value.trim();
+            if (isValidEmail(email)) {
+                requestOtpForEmail(email);
+            }
+        };
+
+        emailEl.addEventListener('input', () => {
+            updateOtpVisibility();
+            maybeAutoSendOtp();
+        });
+
+        emailEl.addEventListener('blur', maybeAutoSendOtp);
+        updateOtpVisibility();
+
+        document.getElementById('verifyBtn').addEventListener('click', async () => {
+            const email = emailEl.value.trim();
+            const otp = otpEl.value.trim();
+            if (!isValidEmail(email) || !otp) return show('Valid email and OTP are required.', 'err');
+            if (lastOtpRequestedEmail !== email) {
+                await requestOtpForEmail(email);
+                return show('OTP sent now. Please enter it and click Verify again.', 'ok');
+            }
+
+            const res = await fetch('/api/verify-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, otp })
+            });
+            const data = await res.json();
+            if (!res.ok) return show(data.error || 'OTP verification failed.', 'err');
+            show('Login successful. Redirecting to Claude Desktop...', 'ok');
+            openClaudeBtn.style.display = 'inline-block';
+            showHint('If Claude does not open automatically, click "Open Claude Desktop" and switch back manually.');
+
+            tryOpenClaudeDesktop();
+            setTimeout(tryOpenClaudeDesktop, 900);
+        });
+
+        openClaudeBtn.addEventListener('click', () => {
+            tryOpenClaudeDesktop();
+        });
+    </script>
+</body>
+
+</html>

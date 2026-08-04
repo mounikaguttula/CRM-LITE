@@ -1,0 +1,25 @@
+/* Global Responsive Layout Rules */
+
+@media (max-width: 991.98px) {
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    box-shadow: 0 24px 60px -20px rgba(15, 19, 48, 0.4);
+  }
+  .app-sidebar.open { transform: translateX(0); }
+}
+
+.extra-small { font-size: 0.75rem; }
+
+/* Ensure Bootstrap card + our glass play nice */
+.card { border-radius: 16px; }
+
+/* Elegant link */
+a { color: var(--brand-600); text-decoration: none; transition: color 140ms ease; }
+a:hover { color: var(--brand-700); }
+
+/* Selection */
+::selection { background: rgba(99, 102, 241, 0.28); color: var(--text-strong); }
