@@ -6,9 +6,18 @@ const authMiddleware = require('../middleware/auth');
 // Protect user routes
 router.use(authMiddleware);
 
-// Dedicated Users endpoints
+// Dedicated Users endpoints (supporting /users, /api/users, /objects/users, and direct /)
 router.get('/users', userController.getUsers);
+router.get('/api/users', userController.getUsers);
 router.get('/objects/users', userController.getUsers);
+router.get('/', userController.getUsers);
+
 router.post('/users/invite', userController.inviteUser);
+router.post('/api/users/invite', userController.inviteUser);
+router.post('/invite', userController.inviteUser);
+
+router.delete('/users/:id', userController.deleteUser);
+router.delete('/api/users/:id', userController.deleteUser);
+router.delete('/:id', userController.deleteUser);
 
 module.exports = router;
