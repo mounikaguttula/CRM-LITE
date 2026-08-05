@@ -1,16 +1,37 @@
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://eesopfvqoqikmlpwmlmp.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlc29wZnZxb3Fpa21scHdtbG1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwODg2MTAsImV4cCI6MjA5OTY2NDYxMH0.r6JJsxBM-H_lMrPbQv8et-p3uhvGjAno2Q26JukC0Ao';
 
-const supabase = createClient(supabaseUrl, supabaseKey, {
+const supabaseUrl = process.env.SUPABASE_URL || 'https://eesopfvqoqikmlpwmlmp.supabase.co';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+
+
+const clientOptions = {
   auth: {
     persistSession: false,
     autoRefreshToken: false,
   },
-});
+};
+
+
+// Default client (anon key) — used for auth/JWT operations
+const supabase = createClient(supabaseUrl, supabaseAnonKey, clientOptions);
+
+
+// Admin client (service role key) — bypasses Row Level Security for backend operations
+// IMPORTANT: Never expose this client or its key to the frontend.
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, clientOptions);
+
 
 console.log('⚡ Connected to Supabase Project:', supabaseUrl);
+if (supabaseServiceRoleKey === supabaseAnonKey) {
+  console.warn('⚠️  SUPABASE_SERVICE_ROLE_KEY is not set or equals the anon key. Backend DB operations may be blocked by RLS.');
+}
+
 
 module.exports = supabase;
+module.exports.supabaseAdmin = supabaseAdmin;
+
+
+
