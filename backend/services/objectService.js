@@ -16,12 +16,14 @@ const objectService = {
    */
   normalizeRecord: (row) => {
     if (!row) return null;
-    const { id, name, status, owner_id, parent_id, secondary_parent_id, data, created_at, updated_at } = row;
+    const { id, name, status, owner_id, created_by, updated_by, parent_id, secondary_parent_id, data, created_at, updated_at } = row;
     return {
       id,
       name,
       status,
       owner_id,
+      created_by: created_by || owner_id || null,
+      updated_by: updated_by || null,
       parent_id,
       secondary_parent_id,
       created_at,
