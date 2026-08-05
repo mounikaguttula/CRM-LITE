@@ -1,11 +1,15 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 const emailService = require('./emailService');
 
 
 // Helper to validate UUID format
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+
+// Table name must match what's actually in Supabase (lowercase, unquoted)
+const ORG_TABLE = 'organization';
 
 
 const accessRequestService = {
@@ -25,27 +29,29 @@ const accessRequestService = {
     // 1. Lookup target Organization by UUID or Name
     let org = null;
     if (isUuid(targetOrgInput)) {
-      const { data } = await supabase
-        .from('Organization')
+      const { data, error } = await supabaseAdmin
+        .from(ORG_TABLE)
         .select('id, organization_name')
         .eq('id', targetOrgInput)
         .maybeSingle();
+      if (error) console.error('Org UUID lookup error:', error.message);
       org = data;
     } else {
-      const { data } = await supabase
-        .from('Organization')
+      const { data, error } = await supabaseAdmin
+        .from(ORG_TABLE)
         .select('id, organization_name')
         .ilike('organization_name', `%${targetOrgInput}%`)
         .limit(1)
         .maybeSingle();
+      if (error) console.error('Org name lookup error:', error.message);
       org = data;
     }
 
 
     // If not found, list available organizations in error message
     if (!org) {
-      const { data: allOrgs } = await supabase
-        .from('Organization')
+      const { data: allOrgs } = await supabaseAdmin
+        .from(ORG_TABLE)
         .select('organization_name');
 
 
@@ -65,7 +71,7 @@ const accessRequestService = {
 
 
     // 2. Check if user with this email already exists in database users table
-    const { data: existingUser } = await supabase
+    const { data: existingUser } = await supabaseAdmin
       .from('users')
       .select('id, email, status, organization_id')
       .eq('email', cleanEmail)
@@ -82,7 +88,7 @@ const accessRequestService = {
 
 
     // 3. Check if an access request already exists in DB for this email + org (pending)
-    const { data: existingRequest } = await supabase
+    const { data: existingRequest } = await supabaseAdmin
       .from('access_requests')
       .select('id, status')
       .eq('email', cleanEmail)
@@ -124,7 +130,7 @@ const accessRequestService = {
     };
 
 
-    const { data: requestRow, error: insertErr } = await supabase
+    const { data: requestRow, error: insertErr } = await supabaseAdmin
       .from('access_requests')
       .insert([requestPayload])
       .select()
@@ -142,7 +148,7 @@ const accessRequestService = {
 
     // Notify ONLY organization administrators from database users & roles table
     let adminEmails = [];
-    const { data: orgAdmins } = await supabase
+    const { data: orgAdmins } = await supabaseAdmin
       .from('users')
       .select('email, roles!inner(role_name)')
       .eq('organization_id', resolvedOrgId)
@@ -154,7 +160,7 @@ const accessRequestService = {
       adminEmails = orgAdmins.map((a) => a.email);
     } else {
       // Fallback: Query active users in target organization with assigned role_id
-      const { data: fallbackAdmins } = await supabase
+      const { data: fallbackAdmins } = await supabaseAdmin
         .from('users')
         .select('email')
         .eq('organization_id', resolvedOrgId)
@@ -197,7 +203,7 @@ const accessRequestService = {
     }
 
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('access_requests')
       .select('*')
       .eq('organization_id', organizationId)
@@ -229,7 +235,7 @@ const accessRequestService = {
 
 
     // 1. Retrieve request from Supabase
-    const { data: requestObj, error: fetchErr } = await supabase
+    const { data: requestObj, error: fetchErr } = await supabaseAdmin
       .from('access_requests')
       .select('*')
       .eq('id', requestId)
@@ -247,15 +253,15 @@ const accessRequestService = {
 
 
     // 2. Fetch Organization details for notification
-    const { data: org } = await supabase
-      .from('Organization')
+    const { data: org } = await supabaseAdmin
+      .from(ORG_TABLE)
       .select('id, organization_name')
       .eq('id', requestObj.organization_id)
       .maybeSingle();
 
 
     // 3. Create or activate User in database 'users' table
-    const { data: existingUser } = await supabase
+    const { data: existingUser } = await supabaseAdmin
       .from('users')
       .select('id, status')
       .eq('organization_id', requestObj.organization_id)
@@ -281,7 +287,7 @@ const accessRequestService = {
       }
 
 
-      const { error: createUserErr } = await supabase
+      const { error: createUserErr } = await supabaseAdmin
         .from('users')
         .insert([userPayload]);
 
@@ -296,7 +302,7 @@ const accessRequestService = {
       }
 
 
-      const { error: updateStatusErr } = await supabase
+      const { error: updateStatusErr } = await supabaseAdmin
         .from('users')
         .update(updatePayload)
         .eq('id', existingUser.id);
@@ -310,7 +316,7 @@ const accessRequestService = {
 
     // 4. Update access request status in Supabase
     const now = new Date().toISOString();
-    const { data: updatedRequest, error: updateErr } = await supabase
+    const { data: updatedRequest, error: updateErr } = await supabaseAdmin
       .from('access_requests')
       .update({
         status: 'approved',
@@ -350,7 +356,7 @@ const accessRequestService = {
 
 
     // 1. Retrieve request from Supabase
-    const { data: requestObj, error: fetchErr } = await supabase
+    const { data: requestObj, error: fetchErr } = await supabaseAdmin
       .from('access_requests')
       .select('*')
       .eq('id', requestId)
@@ -363,8 +369,8 @@ const accessRequestService = {
 
 
     // 2. Fetch Organization details for notification
-    const { data: org } = await supabase
-      .from('Organization')
+    const { data: org } = await supabaseAdmin
+      .from(ORG_TABLE)
       .select('id, organization_name')
       .eq('id', requestObj.organization_id)
       .maybeSingle();
@@ -372,7 +378,7 @@ const accessRequestService = {
 
     // 3. Update access request status in Supabase
     const now = new Date().toISOString();
-    const { data: updatedRequest, error: updateErr } = await supabase
+    const { data: updatedRequest, error: updateErr } = await supabaseAdmin
       .from('access_requests')
       .update({
         status: 'rejected',
@@ -414,15 +420,26 @@ const accessRequestService = {
 
 
     // Lookup request by action_token in Supabase DB
-    const { data: targetRequest, error: lookupErr } = await supabase
+    const { data: targetRequest, error: lookupErr } = await supabaseAdmin
       .from('access_requests')
       .select('*')
       .eq('action_token', token)
       .maybeSingle();
 
 
-    if (lookupErr || !targetRequest) {
-      throw { statusCode: 404, message: 'Invalid or expired action token. The request may have already been processed or the server was restarted.' };
+    if (lookupErr) {
+      console.error('Token lookup error:', lookupErr.message);
+      throw { statusCode: 500, message: `Database error looking up token: ${lookupErr.message}` };
+    }
+
+
+    if (!targetRequest) {
+      throw { statusCode: 404, message: 'Invalid or expired action token. The request may have already been processed.' };
+    }
+
+
+    if (targetRequest.status !== 'pending') {
+      throw { statusCode: 400, message: `This access request has already been ${targetRequest.status}.` };
     }
 
 
