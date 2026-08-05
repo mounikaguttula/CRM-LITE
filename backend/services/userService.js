@@ -1,4 +1,7 @@
 const supabase = require('../config/supabase');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+
 
 /**
  * User Service
@@ -12,17 +15,20 @@ class UserService {
       throw error;
     }
 
+
     const { data: rows, error } = await supabase
       .from('users')
       .select('*, roles(role_name)')
       .eq('organization_id', organizationId)
       .order('created_at', { ascending: false });
 
+
     if (error) {
       const err = new Error(`Failed to fetch users: ${error.message}`);
       err.statusCode = 500;
       throw err;
     }
+
 
     return (rows || []).map((u) => ({
       id: u.id,
@@ -37,12 +43,14 @@ class UserService {
     }));
   }
 
-  async inviteUser(organizationId, { email, first_name, last_name }) {
+
+  async inviteUser(organizationId, { email, first_name, last_name, password }) {
     if (!organizationId) {
       const error = new Error('Organization ID is required.');
       error.statusCode = 400;
       throw error;
     }
+
 
     if (!email || !first_name) {
       const error = new Error('Email and first name are required.');
@@ -50,15 +58,25 @@ class UserService {
       throw error;
     }
 
+
+    let password_hash = null;
+    if (password) {
+      const salt = await bcrypt.genSalt(10);
+      password_hash = await bcrypt.hash(password, salt);
+    }
+
+
     const { data: newUser, error } = await supabase
       .from('users')
       .insert([
         {
+          id: crypto.randomUUID(),
           organization_id: organizationId,
           first_name,
           last_name: last_name || '',
           email,
-          status: 'invited',
+          password_hash,
+          status: password ? 'active' : 'invited',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },
@@ -66,11 +84,13 @@ class UserService {
       .select('*, roles(role_name)')
       .single();
 
+
     if (error) {
       const err = new Error(`Failed to invite user: ${error.message}`);
       err.statusCode = 400;
       throw err;
     }
+
 
     return {
       id: newUser.id,
@@ -86,4 +106,8 @@ class UserService {
   }
 }
 
+
 module.exports = new UserService();
+
+
+
