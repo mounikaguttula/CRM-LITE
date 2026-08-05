@@ -44,6 +44,11 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Static Assets – email icons and images (publicly accessible for email clients)
+const path = require('path');
+app.use('/email-assets', express.static(path.join(__dirname, 'public', 'email-assets')));
+
+
 
 // Health Check Endpoints
 app.get('/', (req, res) => {
