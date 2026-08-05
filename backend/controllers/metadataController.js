@@ -99,10 +99,22 @@ const deleteObjectField = async (req, res, next) => {
   try {
     const objectType = req.params.objectType || req.params.objectTypeId;
     const fieldId = req.params.fieldId;
-    await metadataService.deleteField(objectType, fieldId);
+    const organizationId = req.params.organizationId || req.user?.organization_id;
+    await metadataService.deleteField(objectType, fieldId, organizationId);
     return res.status(200).json({ success: true, message: 'Field deleted successfully.' });
   } catch (err) {
     return res.status(400).json({ error: err.message || 'Failed to delete field from database.' });
+  }
+};
+
+const deleteObjectDefinition = async (req, res, next) => {
+  try {
+    const objectType = req.params.objectType || req.params.objectTypeId;
+    const organizationId = req.params.organizationId || req.user?.organization_id;
+    await metadataService.deleteObjectDefinition(objectType, organizationId);
+    return res.status(200).json({ success: true, message: 'Custom module deleted successfully.' });
+  } catch (err) {
+    return res.status(400).json({ error: err.message || 'Failed to delete custom module from database.' });
   }
 };
 
@@ -120,6 +132,7 @@ module.exports = {
   getPlatformMetadata,
   getObjectDefinitions,
   createObjectDefinition,
+  deleteObjectDefinition,
   getObjectFields,
   getObjectViews,
   getNavigation,
