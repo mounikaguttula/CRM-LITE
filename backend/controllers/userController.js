@@ -1,6 +1,5 @@
 const userService = require('../services/userService');
 
-
 /**
  * User Controller
  * Handles user management HTTP requests.
@@ -15,7 +14,6 @@ const getUsers = async (req, res, next) => {
   }
 };
 
-
 const inviteUser = async (req, res, next) => {
   try {
     const organizationId = req.user?.organization_id;
@@ -27,11 +25,20 @@ const inviteUser = async (req, res, next) => {
   }
 };
 
+const deleteUser = async (req, res, next) => {
+  try {
+    const organizationId = req.user?.organization_id;
+    const userId = req.params.id;
+    const currentUserId = req.user?.id;
+    await userService.deleteUser(organizationId, userId, currentUserId);
+    return res.status(200).json({ success: true, message: 'User deleted successfully.' });
+  } catch (err) {
+    next(err);
+  }
+};
 
 module.exports = {
   getUsers,
   inviteUser,
+  deleteUser,
 };
-
-
-
