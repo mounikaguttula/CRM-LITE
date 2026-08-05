@@ -1029,32 +1029,103 @@ const metadataService = {
    * Delete custom field definition by ID or API Name.
    * Invalidates Redis metadata cache upon field deletion.
    */
-  deleteField: async (objectType, fieldId) => {
+  deleteField: async (objectType, fieldId, organizationId) => {
     if (!fieldId) throw new Error('Field ID or name is required for deletion.');
 
-
-    let query = supabase.from('field_definitions').delete();
-
-
-    if (fieldId.includes('-') || (!isNaN(fieldId) && fieldId.length > 5)) {
-      query = query.eq('id', fieldId);
+    let selectQuery = supabase.from('field_definitions').select('*');
+    if (isUuid(fieldId)) {
+      selectQuery = selectQuery.eq('id', fieldId);
     } else {
-      query = query.eq('api_name', fieldId);
+      selectQuery = selectQuery.eq('api_name', fieldId);
     }
 
+    const { data: fieldRows } = await selectQuery;
+    const fieldDef = fieldRows && fieldRows.length > 0 ? fieldRows[0] : null;
 
-    const { error } = await query;
+    if (!fieldDef) {
+      throw new Error(`Field '${fieldId}' not found.`);
+    }
 
+    const systemFieldNames = ['id', 'name', 'status', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by', 'is_deleted', 'organization_id', 'owner_id'];
+    const cleanApi = String(fieldDef.api_name || '').toLowerCase();
+    if (fieldDef.is_system || systemFieldNames.includes(cleanApi)) {
+      throw new Error('System fields cannot be deleted.');
+    }
+
+    if (organizationId && fieldDef.organization_id && fieldDef.organization_id !== organizationId) {
+      throw new Error('Unauthorized to delete field for another organization.');
+    }
+
+    // Clean up associated field_permissions by field_definition_id and field_id
+    await supabase.from('field_permissions').delete().eq('field_definition_id', fieldDef.id);
+    await supabase.from('field_permissions').delete().eq('field_id', fieldDef.id);
+
+    const { error } = await supabase.from('field_definitions').delete().eq('id', fieldDef.id);
 
     if (error) {
       console.error('Supabase field delete error:', error);
       throw new Error(error.message || 'Database delete failed for field.');
     }
 
+    await invalidateMetadataCache(organizationId || fieldDef.organization_id);
 
-    // Invalidate Redis Metadata Cache
-    await invalidateMetadataCache(null);
+    return { success: true };
+  },
 
+  /**
+   * Delete custom object definition (module) and execute cascading database cleanup.
+   * Invalidates Redis metadata and permissions cache.
+   */
+  deleteObjectDefinition: async (objectKey, organizationId) => {
+    if (!objectKey) throw new Error('Object Key or ID is required for deletion.');
+
+    const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId);
+    if (!objDef) {
+      throw new Error(`Module '${objectKey}' not found.`);
+    }
+
+    const cleanApi = String(objDef.api_name || '').toLowerCase();
+    const isStandard = ['lead', 'leads', 'company', 'companies', 'contact', 'contacts', 'deal', 'deals', 'user', 'users', 'organization', 'task', 'tasks', 'note', 'notes'].includes(cleanApi);
+    if (objDef.is_system || isStandard) {
+      throw new Error('System or standard modules cannot be deleted.');
+    }
+
+    if (organizationId && objDef.organization_id && objDef.organization_id !== organizationId) {
+      throw new Error('Unauthorized to delete module for another organization.');
+    }
+
+    const objId = objDef.id;
+
+    // 1. Delete records in universal_table associated with this object_type_id
+    await supabase.from('universal_table').delete().eq('object_type_id', objId);
+
+    // 2. Fetch field definitions to clean up field permissions
+    const { data: fieldRows } = await supabase.from('field_definitions').select('id').eq('object_type_id', objId);
+    if (fieldRows && fieldRows.length > 0) {
+      const fieldIds = fieldRows.map((f) => f.id);
+      await supabase.from('field_permissions').delete().in('field_id', fieldIds);
+    }
+
+    // 3. Delete field definitions
+    await supabase.from('field_definitions').delete().eq('object_type_id', objId);
+
+    // 4. Delete object permissions
+    await supabase.from('object_permissions').delete().eq('object_type_id', objId);
+
+    // 5. Delete validation rules matching object_name
+    if (organizationId) {
+      await supabase.from('validation_rules').delete().eq('object_name', objDef.api_name).eq('organization_id', organizationId);
+    }
+
+    // 6. Delete object type definition row
+    const { error } = await supabase.from('object_type_definitions').delete().eq('id', objId);
+    if (error) {
+      console.error('Supabase object_type_definitions delete error:', error);
+      throw new Error(error.message || 'Database delete failed for custom module.');
+    }
+
+    // 7. Invalidate Redis Metadata & Permissions Cache
+    await invalidateMetadataCache(organizationId || objDef.organization_id);
 
     return { success: true };
   },
