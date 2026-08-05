@@ -3,14 +3,11 @@ const bcrypt = require('bcryptjs');
 const { supabaseAdmin } = require('../config/supabase');
 const emailService = require('./emailService');
 
-
 // Helper to validate UUID format
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
-
 // Table name must match what's actually in Supabase (lowercase, unquoted)
 const ORG_TABLE = 'organization';
-
 
 const accessRequestService = {
   /**
@@ -22,9 +19,7 @@ const accessRequestService = {
       throw { statusCode: 400, message: 'Organization ID or Name, first name, and email are required fields.' };
     }
 
-
     const cleanEmail = email.toLowerCase().trim();
-
 
     // 1. Lookup target Organization by UUID or Name
     let org = null;
@@ -47,18 +42,15 @@ const accessRequestService = {
       org = data;
     }
 
-
     // If not found, list available organizations in error message
     if (!org) {
       const { data: allOrgs } = await supabaseAdmin
         .from(ORG_TABLE)
         .select('organization_name');
 
-
       const availList = allOrgs && allOrgs.length > 0
         ? allOrgs.map((o) => o.organization_name).join(', ')
         : 'None available';
-
 
       throw {
         statusCode: 404,
@@ -66,9 +58,7 @@ const accessRequestService = {
       };
     }
 
-
     const resolvedOrgId = org.id;
-
 
     // 2. Check if user with this email already exists in database users table
     const { data: existingUser } = await supabaseAdmin
@@ -76,7 +66,6 @@ const accessRequestService = {
       .select('id, email, status, organization_id')
       .eq('email', cleanEmail)
       .maybeSingle();
-
 
     if (existingUser) {
       if (existingUser.organization_id === resolvedOrgId) {
@@ -86,7 +75,6 @@ const accessRequestService = {
       }
     }
 
-
     // 3. Check if an access request already exists in DB for this email + org (pending)
     const { data: existingRequest } = await supabaseAdmin
       .from('access_requests')
@@ -94,7 +82,6 @@ const accessRequestService = {
       .eq('email', cleanEmail)
       .eq('organization_id', resolvedOrgId)
       .maybeSingle();
-
 
     if (existingRequest) {
       if (existingRequest.status === 'pending') {
@@ -104,7 +91,6 @@ const accessRequestService = {
       }
     }
 
-
     // Hash password if provided
     let passwordHash = null;
     if (password) {
@@ -112,10 +98,8 @@ const accessRequestService = {
       passwordHash = await bcrypt.hash(password, salt);
     }
 
-
     // 4. Generate action token and insert request into Supabase
     const actionToken = crypto.randomBytes(24).toString('hex');
-
 
     const requestPayload = {
       organization_id: resolvedOrgId,
@@ -129,22 +113,18 @@ const accessRequestService = {
       action_token: actionToken,
     };
 
-
     const { data: requestRow, error: insertErr } = await supabaseAdmin
       .from('access_requests')
       .insert([requestPayload])
       .select()
       .single();
 
-
     if (insertErr) {
       throw { statusCode: 500, message: `Failed to save access request: ${insertErr.message}` };
     }
 
-
     // 5. Dispatch Email Notifications asynchronously
     emailService.sendAccessRequestSubmittedEmail(requestRow.email, requestRow.first_name, org.organization_name);
-
 
     // Notify ONLY organization administrators from database users & roles table
     let adminEmails = [];
@@ -154,7 +134,6 @@ const accessRequestService = {
       .eq('organization_id', resolvedOrgId)
       .eq('status', 'active')
       .ilike('roles.role_name', '%admin%');
-
 
     if (orgAdmins && orgAdmins.length > 0) {
       adminEmails = orgAdmins.map((a) => a.email);
@@ -168,16 +147,13 @@ const accessRequestService = {
         .not('role_id', 'is', null)
         .limit(2);
 
-
       if (fallbackAdmins && fallbackAdmins.length > 0) {
         adminEmails = fallbackAdmins.map((a) => a.email);
       }
     }
 
-
     // Deduplicate emails
     adminEmails = Array.from(new Set(adminEmails));
-
 
     adminEmails.forEach((adminEmail) => {
       emailService.sendAdminNewRequestNotification(
@@ -189,10 +165,8 @@ const accessRequestService = {
       );
     });
 
-
     return requestRow;
   },
-
 
   /**
    * Get access requests for an organization from Supabase
@@ -202,28 +176,23 @@ const accessRequestService = {
       throw { statusCode: 400, message: 'Invalid Organization ID.' };
     }
 
-
     let query = supabaseAdmin
       .from('access_requests')
       .select('*')
       .eq('organization_id', organizationId)
       .order('created_at', { ascending: false });
 
-
     if (statusFilter) {
       query = query.eq('status', statusFilter);
     }
-
 
     const { data, error } = await query;
     if (error) {
       throw { statusCode: 500, message: `Failed to retrieve access requests: ${error.message}` };
     }
 
-
     return data || [];
   },
-
 
   /**
    * Approve an Access Request: Inserts new active record into 'users' table ONLY upon admin approval.
@@ -233,7 +202,6 @@ const accessRequestService = {
       throw { statusCode: 400, message: 'Access Request ID is required.' };
     }
 
-
     // 1. Retrieve request from Supabase
     const { data: requestObj, error: fetchErr } = await supabaseAdmin
       .from('access_requests')
@@ -241,16 +209,13 @@ const accessRequestService = {
       .eq('id', requestId)
       .maybeSingle();
 
-
     if (fetchErr || !requestObj) {
       throw { statusCode: 404, message: 'Access request not found or expired.' };
     }
 
-
     if (requestObj.status === 'approved') {
       throw { statusCode: 400, message: 'This access request has already been approved.' };
     }
-
 
     // 2. Fetch Organization details for notification
     const { data: org } = await supabaseAdmin
@@ -259,7 +224,6 @@ const accessRequestService = {
       .eq('id', requestObj.organization_id)
       .maybeSingle();
 
-
     // 3. Create or activate User in database 'users' table
     const { data: existingUser } = await supabaseAdmin
       .from('users')
@@ -267,7 +231,6 @@ const accessRequestService = {
       .eq('organization_id', requestObj.organization_id)
       .eq('email', requestObj.email)
       .maybeSingle();
-
 
     if (!existingUser) {
       const userPayload = {
@@ -281,16 +244,13 @@ const accessRequestService = {
         updated_at: new Date().toISOString(),
       };
 
-
       if (requestObj.password_hash) {
         userPayload.password_hash = requestObj.password_hash;
       }
 
-
       const { error: createUserErr } = await supabaseAdmin
         .from('users')
         .insert([userPayload]);
-
 
       if (createUserErr) {
         throw { statusCode: 400, message: `Failed to create active user record in database: ${createUserErr.message}` };
@@ -301,18 +261,15 @@ const accessRequestService = {
         updatePayload.password_hash = requestObj.password_hash;
       }
 
-
       const { error: updateStatusErr } = await supabaseAdmin
         .from('users')
         .update(updatePayload)
         .eq('id', existingUser.id);
 
-
       if (updateStatusErr) {
         throw { statusCode: 400, message: `Failed to update user status in database: ${updateStatusErr.message}` };
       }
     }
-
 
     // 4. Update access request status in Supabase
     const now = new Date().toISOString();
@@ -328,11 +285,9 @@ const accessRequestService = {
       .select()
       .single();
 
-
     if (updateErr) {
       throw { statusCode: 500, message: `Failed to update access request status: ${updateErr.message}` };
     }
-
 
     // 5. Send Approval Notification Email
     emailService.sendAccessRequestApprovedEmail(
@@ -341,10 +296,8 @@ const accessRequestService = {
       org?.organization_name || 'CRM Platform'
     );
 
-
     return updatedRequest;
   },
-
 
   /**
    * Reject an Access Request (Updates status in Supabase)
@@ -354,7 +307,6 @@ const accessRequestService = {
       throw { statusCode: 400, message: 'Access Request ID is required.' };
     }
 
-
     // 1. Retrieve request from Supabase
     const { data: requestObj, error: fetchErr } = await supabaseAdmin
       .from('access_requests')
@@ -362,11 +314,9 @@ const accessRequestService = {
       .eq('id', requestId)
       .maybeSingle();
 
-
     if (fetchErr || !requestObj) {
       throw { statusCode: 404, message: 'Access request not found or expired.' };
     }
-
 
     // 2. Fetch Organization details for notification
     const { data: org } = await supabaseAdmin
@@ -374,7 +324,6 @@ const accessRequestService = {
       .select('id, organization_name')
       .eq('id', requestObj.organization_id)
       .maybeSingle();
-
 
     // 3. Update access request status in Supabase
     const now = new Date().toISOString();
@@ -390,11 +339,9 @@ const accessRequestService = {
       .select()
       .single();
 
-
     if (updateErr) {
       throw { statusCode: 500, message: `Failed to update access request status: ${updateErr.message}` };
     }
-
 
     // 4. Send Rejection Notification Email
     emailService.sendAccessRequestRejectedEmail(
@@ -404,10 +351,8 @@ const accessRequestService = {
       reviewReason
     );
 
-
     return updatedRequest;
   },
-
 
   /**
    * Handle One-Click Email Approval/Rejection Token Action
@@ -418,7 +363,6 @@ const accessRequestService = {
       throw { statusCode: 400, message: 'Action token is required.' };
     }
 
-
     // Lookup request by action_token in Supabase DB
     const { data: targetRequest, error: lookupErr } = await supabaseAdmin
       .from('access_requests')
@@ -426,22 +370,18 @@ const accessRequestService = {
       .eq('action_token', token)
       .maybeSingle();
 
-
     if (lookupErr) {
       console.error('Token lookup error:', lookupErr.message);
       throw { statusCode: 500, message: `Database error looking up token: ${lookupErr.message}` };
     }
 
-
     if (!targetRequest) {
       throw { statusCode: 404, message: 'Invalid or expired action token. The request may have already been processed.' };
     }
 
-
     if (targetRequest.status !== 'pending') {
       throw { statusCode: 400, message: `This access request has already been ${targetRequest.status}.` };
     }
-
 
     if (action === 'approve') {
       return accessRequestService.approveAccessRequest(targetRequest.id, { id: 'EMAIL_ACTION_LINK', name: 'Email Action Token' });
@@ -453,8 +393,4 @@ const accessRequestService = {
   },
 };
 
-
 module.exports = accessRequestService;
-
-
-
