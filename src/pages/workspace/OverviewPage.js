@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import ReactDOM from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
-import { apiGet, apiPost } from '../../api/client';
+import { apiGet, apiPost, apiDelete } from '../../api/client';
 import {
   Users,
   Columns3,
@@ -34,6 +35,8 @@ import {
   Sparkles,
   ArrowRight,
   CheckSquare,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -1164,20 +1167,22 @@ const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-
 
 /* ─── Format Lookup & Owner IDs to Human Names ───────────────── */
 function formatLookupValue(fieldName, val, record, currentUser, organization, company) {
-  if (!val) return '—';
   const nameLower = String(fieldName || '').toLowerCase();
 
   if (nameLower.includes('owner') || nameLower.includes('created_by') || nameLower.includes('updated_by') || nameLower.includes('user')) {
-    if (isUuid(val)) {
+    if (val && isUuid(val)) {
       if (currentUser && (val === currentUser.id || val === currentUser.user_id)) {
-        return currentUser.name || currentUser.email || '—';
+        return currentUser.name || currentUser.email || 'Admin User';
       }
-      if (record?.owner_name) return record.owner_name;
-      if (record?.owner?.name) return record.owner.name;
-      return (currentUser && currentUser.name) ? currentUser.name : '—';
     }
-    return String(val);
+    if (val && typeof val === 'string' && !isUuid(val)) return val;
+    if (record?.created_by_name) return record.created_by_name;
+    if (record?.owner_name) return record.owner_name;
+    if (record?.owner?.name) return record.owner.name;
+    return currentUser?.name || currentUser?.email || 'Admin User';
   }
+
+  if (!val) return '—';
 
   if (nameLower.includes('company') || nameLower.includes('organization') || nameLower.includes('account')) {
     if (isUuid(val)) {
@@ -1249,6 +1254,39 @@ function ObjectListContent({ objectTypeId }) {
   const meta = {
     displayName: rawMeta?.displayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1) : 'Record'),
     pluralDisplayName: rawMeta?.pluralDisplayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1) : 'Records'),
+  };
+
+  const cleanObjKey = String(objectTypeId || '').toLowerCase();
+  const canDeleteRecord = permissions?.canDelete !== false && permissions?.[objectTypeId]?.canDelete !== false && permissions?.[cleanObjKey]?.canDelete !== false;
+
+  const [deleteModalRecord, setDeleteModalRecord] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  const handleDeleteRecordClick = (e, recordId, recordTitle) => {
+    e.stopPropagation();
+    setDeleteModalRecord({ id: recordId, title: recordTitle || 'this record' });
+    setDeleteError(null);
+  };
+
+  const confirmDeleteRecord = async () => {
+    if (!deleteModalRecord) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiDelete(`/objects/${objectTypeId}/${deleteModalRecord.id}`);
+      setRecords((prev) => prev.filter((r) => r.id !== deleteModalRecord.id));
+      const deletedTitle = deleteModalRecord.title;
+      setDeleteModalRecord(null);
+      setToastMessage(`"${deletedTitle}" deleted successfully!`);
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (err) {
+      console.error('Delete record error:', err);
+      setDeleteError(err?.message || 'Failed to delete record.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const humanize = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -1843,9 +1881,31 @@ function ObjectListContent({ objectTypeId }) {
                       })}
 
                       <td style={{ padding: '14px 18px' }}>
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                           <IconBtn icon={Mail} />
                           <IconBtn icon={Phone} />
+                          {canDeleteRecord && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteRecordClick(e, r.id, titleVal)}
+                              title="Delete Record"
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 8,
+                                border: '1px solid rgba(244,63,94,0.3)',
+                                background: 'rgba(244,63,94,0.08)',
+                                color: '#f43f5e',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                           <IconBtn icon={MoreHorizontal} />
                         </div>
                       </td>
@@ -1962,6 +2022,135 @@ function ObjectListContent({ objectTypeId }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Delete Record Confirmation Custom Modal */}
+      {deleteModalRecord && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 420,
+            padding: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', textAlign: 'center',
+            position: 'relative',
+          }}>
+            <button 
+              type="button" 
+              onClick={() => { setDeleteModalRecord(null); setDeleteError(null); }}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', background: '#ffe4e6',
+              color: '#e11d48', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 16, boxShadow: '0 0 0 8px rgba(225, 29, 72, 0.08)'
+            }}>
+              <AlertTriangle size={28} />
+            </div>
+
+            <h3 className="font-display" style={{ margin: '0 0 8px 0', fontSize: 19, fontWeight: 700, color: '#0f172a' }}>
+              Delete {meta.displayName}?
+            </h3>
+
+            <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: '#64748b', lineHeight: 1.5 }}>
+              Are you sure you want to delete <strong style={{ color: '#0f172a' }}>"{deleteModalRecord.title}"</strong>? This action cannot be undone.
+            </p>
+
+            {deleteError && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+                fontSize: '0.82rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => { setDeleteModalRecord(null); setDeleteError(null); }}
+                disabled={deleting}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: '1px solid #cbd5e1',
+                  background: '#ffffff', color: '#334155', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', transition: 'all 0.15s ease'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteRecord}
+                disabled={deleting}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: 'none',
+                  background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+                  color: '#ffffff', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  boxShadow: '0 4px 12px rgba(225, 29, 72, 0.25)', transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.filter = 'brightness(1)'}
+              >
+                {deleting ? (
+                  <span>Deleting…</span>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    <span>Delete Record</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Success Toast Pop Out Banner */}
+      {toastMessage && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28, zIndex: 999999,
+          background: '#ffffff',
+          color: '#065f46',
+          padding: '12px 20px',
+          borderRadius: 14,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          boxShadow: '0 20px 40px -10px rgba(16, 185, 129, 0.25), 0 8px 16px -4px rgba(0, 0, 0, 0.08)',
+          border: '1px solid #a7f3d0',
+          fontSize: '0.88rem',
+          fontWeight: 600,
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+        }}>
+          <div style={{
+            width: 26,
+            height: 26,
+            borderRadius: '50%',
+            background: '#d1fae5',
+            color: '#059669',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <CheckCircle2 size={16} />
+          </div>
+          <span>{toastMessage}</span>
+        </div>,
+        document.body
       )}
     </div>
   );
