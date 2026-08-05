@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { apiGet, apiPost } from '../../../api/client';
+import { apiGet, apiPost, apiDelete } from '../../../api/client';
 import {
   Box, Plus, X, Loader, Layers, CheckCircle, Search,
   Database, Layout, Shield, UserPlus, Users,
@@ -114,6 +114,7 @@ function ObjectManager({ onSelectObject }) {
   const [recordNameType, setRecordNameType] = useState('text');
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [toastMessage, setToastMessage] = useState(null);
 
 
   // Close dropdown on outside click
@@ -777,11 +778,18 @@ function ObjectManager({ onSelectObject }) {
               <button
                 type="button"
                 onClick={async () => {
+                  if (!deleteConfirmModule?.key) return;
                   try {
+                    const modKey = deleteConfirmModule.key;
+                    const modName = deleteConfirmModule.displayName;
                     setDeleteConfirmModule(null);
+                    await apiDelete(`/metadata/objects/${modKey}`);
                     await loadMeta(true);
+                    setToastMessage(`Custom Module "${modName}" deleted successfully!`);
+                    setTimeout(() => setToastMessage(null), 3500);
                   } catch (err) {
                     console.error('Delete module error:', err);
+                    alert(err?.message || err?.error || 'Failed to delete custom module.');
                   }
                 }}
                 style={{
@@ -1145,6 +1153,43 @@ function ObjectManager({ onSelectObject }) {
               </div>
             </form>
           </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Success Toast Pop Out Banner */}
+      {toastMessage && createPortal(
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28, zIndex: 999999,
+          background: '#ffffff',
+          color: '#065f46',
+          padding: '12px 20px',
+          borderRadius: 14,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          boxShadow: '0 20px 40px -10px rgba(16, 185, 129, 0.25), 0 8px 16px -4px rgba(0, 0, 0, 0.08)',
+          border: '1px solid #a7f3d0',
+          fontSize: '0.88rem',
+          fontWeight: 600,
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          animation: 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}>
+          <div style={{
+            width: 26,
+            height: 26,
+            borderRadius: '50%',
+            background: '#d1fae5',
+            color: '#059669',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <CheckCircle size={16} />
+          </div>
+          <span>{toastMessage}</span>
         </div>,
         document.body
       )}
