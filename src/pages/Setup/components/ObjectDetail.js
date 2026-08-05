@@ -32,7 +32,8 @@ import {
   Building2,
   Megaphone,
   UserCheck,
-  Pencil
+  Pencil,
+  AlertTriangle
 } from 'lucide-react';
 
 
@@ -200,17 +201,30 @@ function ObjectDetail({ objectKey, onBack }) {
 
 
   /* ── Delete field ── */
-  const handleDeleteField = async (fieldId, fieldLabel) => {
-    if (!window.confirm(`Delete field "${fieldLabel}"? This action cannot be undone.`)) return;
-    setDeleteLoading(fieldId);
+  const [deleteModalField, setDeleteModalField] = useState(null);
+  const [deletingField, setDeletingField] = useState(false);
+  const [deleteFieldError, setDeleteFieldError] = useState(null);
+
+  const handleDeleteFieldClick = (fieldId, fieldLabel) => {
+    setDeleteModalField({ id: fieldId, label: fieldLabel });
+    setDeleteFieldError(null);
+  };
+
+  const confirmDeleteField = async () => {
+    if (!deleteModalField) return;
+    setDeletingField(true);
+    setDeleteFieldError(null);
     try {
-      await apiDelete(`/metadata/objects/${objectKey}/fields/${fieldId}`);
-      showToast('success', `Field "${fieldLabel}" deleted successfully.`);
+      await apiDelete(`/metadata/objects/${objectKey}/fields/${deleteModalField.id}`);
+      const deletedLabel = deleteModalField.label;
+      setDeleteModalField(null);
+      showToast('success', `Field "${deletedLabel}" deleted successfully.`);
       loadFields();
     } catch (err) {
-      showToast('error', err?.message || 'Failed to delete field.');
+      console.error('Delete field error:', err);
+      setDeleteFieldError(err?.message || 'Failed to delete field.');
     } finally {
-      setDeleteLoading(null);
+      setDeletingField(false);
     }
   };
 
@@ -249,21 +263,35 @@ function ObjectDetail({ objectKey, onBack }) {
     <div className="fade-in" style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
       {/* ── Toast notification ── */}
-      {toast && (
+      {toast && createPortal(
         <div
           style={{
-            position: 'fixed', top: 24, right: 24, zIndex: 100000,
+            position: 'fixed', bottom: 28, right: 28, zIndex: 999999,
             display: 'flex', alignItems: 'center', gap: 10,
-            padding: '12px 20px', borderRadius: 12,
-            background: toast.type === 'success' ? '#10b981' : '#f43f5e',
-            color: '#fff', fontWeight: 600, fontSize: '0.85rem',
-            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)',
-            animation: 'slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            padding: '12px 20px', borderRadius: 14,
+            background: '#ffffff',
+            color: toast.type === 'success' ? '#065f46' : '#991b1b',
+            border: `1px solid ${toast.type === 'success' ? '#a7f3d0' : '#fca5a5'}`,
+            boxShadow: toast.type === 'success'
+              ? '0 20px 40px -10px rgba(16, 185, 129, 0.25), 0 8px 16px -4px rgba(0, 0, 0, 0.08)'
+              : '0 20px 40px -10px rgba(239, 68, 68, 0.25), 0 8px 16px -4px rgba(0, 0, 0, 0.08)',
+            fontSize: '0.88rem', fontWeight: 600,
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            animation: 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
-          {toast.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-          {toast.message}
-        </div>
+          <div style={{
+            width: 26, height: 26, borderRadius: '50%',
+            background: toast.type === 'success' ? '#d1fae5' : '#fee2e2',
+            color: toast.type === 'success' ? '#059669' : '#dc2626',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+          }}>
+            {toast.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+          </div>
+          <span>{toast.message}</span>
+        </div>,
+        document.body
       )}
 
 
@@ -498,7 +526,7 @@ function ObjectDetail({ objectKey, onBack }) {
           fields={fields}
           loading={fieldsLoading}
           deleteLoading={deleteLoading}
-          onDelete={handleDeleteField}
+          onDelete={handleDeleteFieldClick}
           onAddField={() => setShowAddField(true)}
           onRefresh={loadFields}
         />
@@ -632,6 +660,99 @@ function ObjectDetail({ objectKey, onBack }) {
           }}
           onError={(msg) => showToast('error', msg)}
         />
+      )}
+
+      {/* ── Custom Delete Field Confirmation Modal ── */}
+      {deleteModalField && createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 420,
+            padding: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', textAlign: 'center',
+            position: 'relative',
+          }}>
+            <button 
+              type="button" 
+              onClick={() => { setDeleteModalField(null); setDeleteFieldError(null); }}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', background: '#ffe4e6',
+              color: '#e11d48', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 16, boxShadow: '0 0 0 8px rgba(225, 29, 72, 0.08)'
+            }}>
+              <AlertTriangle size={28} />
+            </div>
+
+            <h3 className="font-display" style={{ margin: '0 0 8px 0', fontSize: 19, fontWeight: 700, color: '#0f172a' }}>
+              Delete Field?
+            </h3>
+
+            <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: '#64748b', lineHeight: 1.5 }}>
+              Are you sure you want to delete field <strong style={{ color: '#0f172a' }}>"{deleteModalField.label}"</strong>? This action cannot be undone and will permanently remove data stored in this field.
+            </p>
+
+            {deleteFieldError && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+                fontSize: '0.82rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{deleteFieldError}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => { setDeleteModalField(null); setDeleteFieldError(null); }}
+                disabled={deletingField}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: '1px solid #cbd5e1',
+                  background: '#ffffff', color: '#334155', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', transition: 'all 0.15s ease'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteField}
+                disabled={deletingField}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: 'none',
+                  background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+                  color: '#ffffff', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  boxShadow: '0 4px 12px rgba(225, 29, 72, 0.25)', transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.filter = 'brightness(1)'}
+              >
+                {deletingField ? (
+                  <span>Deleting…</span>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    <span>Delete Field</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
 
