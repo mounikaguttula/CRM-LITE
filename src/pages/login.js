@@ -152,6 +152,17 @@ function Login() {
   // Focus tracking for input styling
   const [focusedField, setFocusedField] = useState(null);
 
+  const switchToRegister = () => {
+    setRegFullName('');
+    setRegEmail('');
+    setRegOrgId('');
+    setRegPassword('');
+    setRegConfirmPassword('');
+    setRegError('');
+    setRegSuccess('');
+    setMode('register');
+  };
+
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password) {
@@ -522,7 +533,7 @@ function Login() {
                   <span>Don't have an account?</span>
                   <button
                     type="button"
-                    onClick={() => setMode('register')}
+                    onClick={switchToRegister}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -889,7 +900,11 @@ function Login() {
                 </div>
               )}
 
-              <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <form onSubmit={handleRegisterSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Hidden dummy fields to prevent browser password manager from autofilling Organization ID */}
+                <input type="text" style={{ display: 'none' }} tabIndex={-1} aria-hidden="true" />
+                <input type="password" style={{ display: 'none' }} tabIndex={-1} aria-hidden="true" />
+
                 {/* 1. Full Name */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
@@ -902,6 +917,8 @@ function Login() {
                     <input
                       type="text"
                       required
+                      autoComplete="off"
+                      name="req_user_name"
                       placeholder="John Doe"
                       value={regFullName}
                       onChange={(e) => setRegFullName(e.target.value)}
@@ -933,6 +950,8 @@ function Login() {
                     <input
                       type="email"
                       required
+                      autoComplete="off"
+                      name="req_user_email"
                       placeholder="name@company.com"
                       value={regEmail}
                       onChange={(e) => setRegEmail(e.target.value)}
@@ -952,7 +971,7 @@ function Login() {
                   </div>
                 </div>
 
-                {/* 3. Organization ID (Requested by user) */}
+                {/* 3. Organization ID */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
                     Organization ID
@@ -964,6 +983,8 @@ function Login() {
                     <input
                       type="text"
                       required
+                      autoComplete="off"
+                      name="req_org_code"
                       placeholder="e.g. ORG-1001 or AcmeCorp"
                       value={regOrgId}
                       onChange={(e) => setRegOrgId(e.target.value)}
@@ -995,6 +1016,8 @@ function Login() {
                     <input
                       type="password"
                       required
+                      autoComplete="new-password"
+                      name="req_new_password"
                       placeholder="Minimum 8 characters"
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
@@ -1026,6 +1049,8 @@ function Login() {
                     <input
                       type="password"
                       required
+                      autoComplete="new-password"
+                      name="req_confirm_password"
                       placeholder="Re-enter your password"
                       value={regConfirmPassword}
                       onChange={(e) => setRegConfirmPassword(e.target.value)}
