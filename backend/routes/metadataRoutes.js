@@ -12,6 +12,7 @@ router.get('/metadata/objects', metadataController.getObjectDefinitions);
 router.get('/metadata/fields', metadataController.getSetupFields);
 router.get('/setup/fields', metadataController.getSetupFields);
 router.post('/metadata/objects', metadataController.createObjectDefinition);
+router.delete('/metadata/objects/:objectType', metadataController.deleteObjectDefinition);
 router.post('/metadata/fields', metadataController.createObjectField);
 router.get('/metadata/objects/:objectType/fields', metadataController.getObjectFields);
 router.post('/metadata/objects/:objectType/fields', metadataController.createObjectField);
@@ -23,6 +24,7 @@ router.get('/metadata/permissions', metadataController.getPermissions);
 // Backwards compatibility & organization-based aliases
 router.get('/workspace/metadata', metadataController.getPlatformMetadata);
 router.post('/objects', metadataController.createObjectDefinition);
+router.delete('/objects/:objectTypeId', metadataController.deleteObjectDefinition);
 router.get('/objects/:objectTypeId/fields', metadataController.getObjectFields);
 router.post('/objects/:objectTypeId/fields', metadataController.createObjectField);
 router.delete('/objects/:objectTypeId/fields/:fieldId', metadataController.deleteObjectField);
@@ -32,6 +34,7 @@ router.get('/objects/:objectTypeId/layouts', metadataController.getObjectViews);
 // Organization tenant routes
 router.get('/organizations/:organizationId/objects', metadataController.getObjectDefinitions);
 router.post('/organizations/:organizationId/objects', metadataController.createObjectDefinition);
+router.delete('/organizations/:organizationId/objects/:objectType', metadataController.deleteObjectDefinition);
 router.get('/organizations/:organizationId/objects/:objectType/fields', metadataController.getObjectFields);
 router.post('/organizations/:organizationId/objects/:objectType/fields', metadataController.createObjectField);
 router.delete('/organizations/:organizationId/objects/:objectType/fields/:fieldId', metadataController.deleteObjectField);
