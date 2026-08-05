@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
+import ReactDOM from 'react-dom';
 import { apiGet, apiPost } from '../../../api/client';
-import { Search, UserPlus, Users } from 'lucide-react';
+import { Search, UserPlus, Users, User, Mail, Building2, Lock, CheckCircle2, X } from 'lucide-react';
+import WorkspaceContext from '../../../context/WorkspaceContext';
+
 
 const Avatar = ({ initials, size = 32 }) => (
   <div
@@ -22,13 +25,19 @@ const Avatar = ({ initials, size = 32 }) => (
   </div>
 );
 
+
 function UserManagement() {
+  const { company } = useContext(WorkspaceContext) || {};
+  const orgId = company?.organization_code || company?.code || company?.id || '';
+
+
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', role_id: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [submitting, setSubmitting] = useState(false);
+
 
   useEffect(() => {
     let isMounted = true;
@@ -49,25 +58,52 @@ function UserManagement() {
     return () => { isMounted = false; };
   }, []);
 
+
   const filteredUsers = users.filter((u) =>
     (u.name || u.email || '').toLowerCase().includes(search.toLowerCase())
   );
 
+
   const handleAddUser = async (e) => {
     e.preventDefault();
-    if (!newUser.email) return;
+    if (!newUser.email || !newUser.name) return;
+    if (newUser.password !== newUser.confirmPassword) {
+      alert("Passwords do not match!");
+      return;
+    }
     setSubmitting(true);
+
+
+    const nameParts = newUser.name.trim().split(/\s+/);
+    const first_name = nameParts[0] || '';
+    const last_name = nameParts.slice(1).join(' ') || '';
+
+
     try {
-      const created = await apiPost('/users/invite', newUser).catch(() => ({ ...newUser, id: Date.now(), status: 'Active' }));
-      setUsers((prev) => [...prev, created]);
+      const created = await apiPost('/users/invite', {
+        email: newUser.email,
+        first_name,
+        last_name,
+        password: newUser.password,
+      });
+
+
+      const normalizedCreated = {
+        ...created,
+        name: created.name || `${created.first_name || ''} ${created.last_name || ''}`.trim() || created.email
+      };
+
+
+      setUsers((prev) => [...prev, normalizedCreated]);
       setShowModal(false);
-      setNewUser({ name: '', email: '', role_id: '' });
+      setNewUser({ name: '', email: '', password: '', confirmPassword: '' });
     } catch (err) {
       alert(err.message || 'Failed to invite user');
     } finally {
       setSubmitting(false);
     }
   };
+
 
   const getInitials = (str) => {
     if (!str) return 'U';
@@ -76,6 +112,7 @@ function UserManagement() {
       ? (parts[0][0] + parts[1][0]).toUpperCase()
       : String(str).slice(0, 2).toUpperCase();
   };
+
 
   return (
     <div className="fade-in">
@@ -94,6 +131,7 @@ function UserManagement() {
         </button>
       </div>
 
+
       <div className="glass" style={{ padding: '8px', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--panel-border)' }}>
           <div style={{ position: 'relative', width: '280px' }}>
@@ -109,6 +147,7 @@ function UserManagement() {
           </div>
           <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{filteredUsers.length} total users</span>
         </div>
+
 
         {loading ? (
           <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-faint)' }}>
@@ -167,46 +206,168 @@ function UserManagement() {
         )}
       </div>
 
-      {showModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
-          <div className="glass" style={{ width: '100%', maxWidth: 420, padding: 24, borderRadius: 16, background: '#ffffff' }}>
-            <h3 className="font-display" style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700, color: '#1c2033' }}>Invite New User</h3>
+
+      {showModal && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div className="orbit-scrollbar" style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 440,
+            maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', padding: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', position: 'relative',
+          }}>
+           
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <h3 className="font-display" style={{ margin: 0, fontSize: 19, fontWeight: 700, color: '#1e293b' }}>Invite New User</h3>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+
             <form onSubmit={handleAddUser}>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>Full Name</label>
-                <input
-                  type="text"
-                  className="orbit-input"
-                  placeholder="Jane Doe"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}
-                />
+              {/* Full Name */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Full Name</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
+                    <User size={18} />
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="John Doe"
+                    value={newUser.name}
+                    onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
+                  />
+                </div>
               </div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>Work Email</label>
-                <input
-                  type="email"
-                  required
-                  className="orbit-input"
-                  placeholder="jane@company.com"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}
-                />
+
+
+              {/* Email Address */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Email Address</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
+                    <Mail size={17} />
+                  </div>
+                  <input
+                    type="email"
+                    required
+                    placeholder="name@company.com"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
+                  />
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button type="button" className="glass" style={{ padding: '8px 14px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer' }} onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" disabled={submitting} className="orbit-btn-primary" style={{ padding: '8px 16px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer' }}>
-                  {submitting ? 'Sending...' : 'Send Invitation'}
-                </button>
+
+
+              {/* Organization ID */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Organization ID</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f1f5f9' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#94a3b8', flexShrink: 0, background: '#f8fafc' }}>
+                    <Building2 size={17} />
+                  </div>
+                  <input
+                    type="text"
+                    readOnly
+                    value={orgId}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#64748b', outline: 'none', cursor: 'not-allowed' }}
+                  />
+                </div>
               </div>
+
+
+              {/* Create Password */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Create Password</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
+                    <Lock size={17} />
+                  </div>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Minimum 8 characters"
+                    value={newUser.password || ''}
+                    onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+
+              {/* Confirm Password */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Confirm Password</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
+                    <Lock size={17} />
+                  </div>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Re-enter your password"
+                    value={newUser.confirmPassword || ''}
+                    onChange={(e) => setNewUser((p) => ({ ...p, confirmPassword: e.target.value }))}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={submitting}
+                style={{
+                  width: '100%',
+                  height: 48,
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                  color: '#ffffff',
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.filter = 'brightness(1)'}
+              >
+                <CheckCircle2 size={18} />
+                <span>{submitting ? 'Creating User...' : 'Create User'}</span>
+              </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 }
 
+
 export default UserManagement;
+
+
+

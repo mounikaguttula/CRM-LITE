@@ -98,6 +98,7 @@ const handleActionToken = async (req, res, next) => {
 
     // Render HTML response for browser clicks
     const isApprove = action === 'approve';
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const statusColor = isApprove ? '#16a34a' : '#dc2626';
     const title = isApprove ? 'Access Request Approved' : 'Access Request Rejected';
     const description = isApprove
@@ -124,7 +125,7 @@ const handleActionToken = async (req, res, next) => {
           <div class="icon">${isApprove ? '✓' : '✕'}</div>
           <h1>${title}</h1>
           <p>${description}</p>
-          <a href="http://localhost:3000/login">Return to CRM Lite</a>
+          <a href="${clientUrl}/login">Return to CRM Lite</a>
         </div>
       </body>
       </html>
