@@ -167,7 +167,7 @@ const emailService = {
    * Send New Access Request Alert to Organization Admins with One-Click Action Links
    */
   sendAdminNewRequestNotification: async (adminEmail, requesterName, requesterEmail, orgName, actionToken) => {
-    const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+    const baseUrl = (process.env.BACKEND_URL || 'http://localhost:5000').replace(/\/$/, '');
     const approveUrl = `${baseUrl}/auth/access-requests/action?token=${actionToken}&action=approve`;
     const rejectUrl = `${baseUrl}/auth/access-requests/action?token=${actionToken}&action=reject`;
 
@@ -209,21 +209,30 @@ const emailService = {
    * Send Access Request Approval Email to Requester
    */
   sendAccessRequestApprovedEmail: async (toEmail, firstName, orgName) => {
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const loginUrl = `${clientUrl}/login`;
+
     console.log('\n==================================================');
     console.log(`📧 [APPROVAL EMAIL] Sent to Applicant (${toEmail}) — Status: APPROVED`);
     console.log(`Subject: Access Request Approved — ${orgName}`);
-    console.log(`Message: Hello ${firstName}, your account has been approved and activated! You can now log in.`);
+    console.log(`🟢 LOGIN LINK: ${loginUrl}`);
     console.log('==================================================\n');
 
     return emailService.sendEmail({
       to: toEmail,
       subject: `Access Request Approved — ${orgName}`,
       html: `
-        <div style="font-family: sans-serif; padding: 20px; color: #333;">
-          <h2 style="color: #16a34a;">Access Request Approved!</h2>
-          <p>Hello ${firstName},</p>
+        <div style="font-family: sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <h2 style="color: #16a34a; margin-top: 0;">🎉 Access Request Approved!</h2>
+          <p>Hello <strong>${firstName}</strong>,</p>
           <p>Great news! Your access request to join <strong>${orgName}</strong> has been approved by an administrator.</p>
-          <p>You can now log into your account using your registered email address.</p>
+          <p>Your account is now active. Click the button below to log in:</p>
+          <div style="margin: 24px 0;">
+            <a href="${loginUrl}" style="background-color: #16a34a; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; font-size: 0.95rem;">
+              Login to ${orgName} →
+            </a>
+          </div>
+          <p style="font-size: 0.825rem; color: #64748b;">Or copy this link: <a href="${loginUrl}" style="color: #2563eb;">${loginUrl}</a></p>
           <br/>
           <p>Best regards,<br/>The ${orgName} Team</p>
         </div>
