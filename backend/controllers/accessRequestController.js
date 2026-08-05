@@ -98,13 +98,13 @@ const handleActionToken = async (req, res, next) => {
 
     // Render HTML response for browser clicks
     const isApprove = action === 'approve';
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const statusColor = isApprove ? '#16a34a' : '#dc2626';
     const title = isApprove ? 'Access Request Approved' : 'Access Request Rejected';
     const description = isApprove
       ? `Access request for <strong>${result.first_name} ${result.last_name || ''}</strong> (${result.email}) has been approved and activated.`
       : `Access request for <strong>${result.first_name} ${result.last_name || ''}</strong> (${result.email}) has been rejected.`;
 
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const html = `
       <!DOCTYPE html>
       <html>
