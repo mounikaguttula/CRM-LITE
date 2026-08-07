@@ -2234,7 +2234,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       {/* ═══════════════════════════════════════════════════════════════
          STEP 1 MODAL: ADD PRODUCTS (Enhanced Premium UI)
          ═══════════════════════════════════════════════════════════════ */}
-      {isAddModalOpen && (
+      {isAddModalOpen && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(8px)',
@@ -2467,13 +2467,14 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ═══════════════════════════════════════════════════════════════
          STEP 2 MODAL: EDIT SELECTED PRODUCTS (Enhanced Premium UI)
          ═══════════════════════════════════════════════════════════════ */}
-      {isEditModalOpen && (
+      {isEditModalOpen && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(8px)',
@@ -2666,7 +2667,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Custom Delete Record Modal Portal for Detail Page */}
