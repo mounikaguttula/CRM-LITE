@@ -71,13 +71,22 @@ const saveScannedLead = async (req, res, next) => {
     const verifyRes = await verifyCaptchaWithGoogle(captchaToken);
     console.log('[LeadScanner] 📊 Google siteverify result:', JSON.stringify(verifyRes));
 
-    // 2. Strict validation: Reject if Google verification fails or returns false
+    // 2. Strict validation: Reject with HTTP 400 (NOT 401) if Google verification fails or returns false
     if (!verifyRes || !verifyRes.success) {
       console.error('[LeadScanner] ❌ reCAPTCHA verification failed with Google:', verifyRes);
-      return res.status(401).json({
+      const errorCodes = verifyRes?.['error-codes'] || [];
+      
+      let userFriendlyMsg = 'reCAPTCHA verification failed. Please check the reCAPTCHA box again.';
+      if (errorCodes.includes('hostname-mismatch')) {
+        userFriendlyMsg = 'reCAPTCHA verification failed: Domain hostname mismatch. Please ensure crm-lite-eight.vercel.app is allowed in your Google reCAPTCHA Admin Console.';
+      } else if (errorCodes.includes('timeout-or-duplicate')) {
+        userFriendlyMsg = 'reCAPTCHA verification expired. Please check the reCAPTCHA box again.';
+      }
+
+      return res.status(400).json({
         success: false,
-        error: 'reCAPTCHA verification failed. Please check the reCAPTCHA box again.',
-        details: verifyRes?.['error-codes'] || [],
+        error: userFriendlyMsg,
+        details: errorCodes,
       });
     }
 
