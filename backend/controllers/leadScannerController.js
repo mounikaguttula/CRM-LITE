@@ -1,7 +1,6 @@
 const objectService = require('../services/objectService');
 
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET || '6LdcTZ8sAAAAAPSRxmKLXkzRzRn6KnLeIfvVG-fs';
-const hasValidRecaptchaSecret = Boolean(RECAPTCHA_SECRET && RECAPTCHA_SECRET !== 'your_google_recaptcha_v2_secret_key_here');
 
 /**
  * Verify Google reCAPTCHA Token via Google's API
@@ -20,6 +19,7 @@ const verifyCaptchaWithGoogle = async (token) => {
 
 /**
  * POST /api/verify-captcha
+ * Single verification endpoint for Google reCAPTCHA tokens.
  */
 const verifyCaptcha = async (req, res, next) => {
   try {
@@ -30,23 +30,12 @@ const verifyCaptcha = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Missing captcha token' });
     }
 
-    if (!hasValidRecaptchaSecret) {
-      return res.status(500).json({
-        success: false,
-        error: 'RECAPTCHA_SECRET is not configured on the server.',
-      });
-    }
-
-    console.log('[reCAPTCHA Backend] 📡 Sending token to Google https://www.google.com/recaptcha/api/siteverify ...');
+    console.log('[reCAPTCHA Backend] 📡 Sending token to Google siteverify...');
     const verifyData = await verifyCaptchaWithGoogle(token);
     console.log('[reCAPTCHA Backend] 📊 Google siteverify response:', JSON.stringify(verifyData));
 
-    if (!verifyData.success) {
-      console.warn('[reCAPTCHA Backend] ⚠️ Captcha verify note:', verifyData['error-codes']);
-      if (Array.isArray(verifyData['error-codes']) && verifyData['error-codes'].includes('invalid-keys')) {
-        console.log('[reCAPTCHA Backend] ℹ️ Test key pair or key mismatch on localhost. Test token accepted successfully!');
-        return res.status(200).json({ success: true, is_test: true, challenge_ts: new Date().toISOString() });
-      }
+    if (!verifyData || !verifyData.success) {
+      console.warn('[reCAPTCHA Backend] ❌ Captcha verify failed:', verifyData);
       return res.status(400).json({ success: false, ...verifyData, error: 'Captcha verification failed' });
     }
 
@@ -60,7 +49,8 @@ const verifyCaptcha = async (req, res, next) => {
 
 /**
  * POST /api/lead-scanner/save
- * Saves a scanned QR lead into universal_table bound to user's Organization and Lead object_type_id
+ * Saves a scanned QR lead into universal_table bound to user's Organization and Lead object_type_id.
+ * Verifies reCAPTCHA token with Google exactly once per submission.
  */
 const saveScannedLead = async (req, res, next) => {
   try {
@@ -72,13 +62,26 @@ const saveScannedLead = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Lead full name is required.' });
     }
 
-    // Optional reCAPTCHA check if token was supplied
-    if (captchaToken && hasValidRecaptchaSecret) {
-      const verifyRes = await verifyCaptchaWithGoogle(captchaToken);
-      if (!verifyRes.success) {
-        return res.status(401).json({ success: false, error: 'reCAPTCHA verification failed.' });
-      }
+    // 1. Strict reCAPTCHA verification: token MUST be provided and verified with Google exactly once
+    if (!captchaToken) {
+      return res.status(400).json({ success: false, error: 'Please complete the Google reCAPTCHA check before saving.' });
     }
+
+    console.log('[LeadScanner] 📡 Verifying reCAPTCHA token with Google API for submission...');
+    const verifyRes = await verifyCaptchaWithGoogle(captchaToken);
+    console.log('[LeadScanner] 📊 Google siteverify result:', JSON.stringify(verifyRes));
+
+    // 2. Strict validation: Reject if Google verification fails or returns false
+    if (!verifyRes || !verifyRes.success) {
+      console.error('[LeadScanner] ❌ reCAPTCHA verification failed with Google:', verifyRes);
+      return res.status(401).json({
+        success: false,
+        error: 'reCAPTCHA verification failed. Please check the reCAPTCHA box again.',
+        details: verifyRes?.['error-codes'] || [],
+      });
+    }
+
+    console.log(`[LeadScanner] ✅ reCAPTCHA token verified successfully (hostname: ${verifyRes.hostname}). Proceeding to insert lead...`);
 
     const fullNameClean = (name || req.body.first_name || '').trim();
     const nameParts = fullNameClean.split(' ');
@@ -100,7 +103,7 @@ const saveScannedLead = async (req, res, next) => {
 
     console.log(`[LeadScanner] Creating scanned lead for orgId=${organizationId}, userId=${userId}`);
 
-    // objectService resolves object_type_id for 'lead', executes validation rules, and saves to universal_table
+    // 3. Insert lead into universal_table via objectService ONLY after successful CAPTCHA verification
     const record = await objectService.createRecord('lead', leadPayload, organizationId, userId);
 
     return res.status(201).json({

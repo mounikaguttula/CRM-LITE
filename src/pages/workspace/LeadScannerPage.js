@@ -107,20 +107,10 @@ function LeadScannerPage() {
           if (container && container.innerHTML === '') {
             window.grecaptcha.render('recaptcha-widget-container', {
               sitekey: RECAPTCHA_SITE_KEY,
-              callback: async (token) => {
-                console.log('[Frontend reCAPTCHA] Token received from Google:', token);
+              callback: (token) => {
+                console.log('[Frontend reCAPTCHA] Token received from Google widget:', token);
                 setCaptchaToken(token);
-                setCaptchaVerifying(true);
-                try {
-                  const res = await apiPost('/api/verify-captcha', { token });
-                  console.log('[Frontend reCAPTCHA] Backend verify response:', res);
-                  setCaptchaVerified(true);
-                } catch (e) {
-                  console.warn('[Frontend reCAPTCHA] Verification note:', e);
-                  setCaptchaVerified(true);
-                } finally {
-                  setCaptchaVerifying(false);
-                }
+                setCaptchaVerified(true);
               },
               'expired-callback': () => {
                 console.log('[reCAPTCHA] Token expired. Auto-resetting...');
