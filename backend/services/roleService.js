@@ -70,7 +70,7 @@ const DEFAULT_ROLES = [
  */
 class RoleService {
   async getRolesByOrganization(organizationId) {
-    let roles = [];
+    let orgRoles = [];
 
     if (organizationId && isUuid(organizationId)) {
       const { data, error } = await supabase
@@ -78,78 +78,36 @@ class RoleService {
         .select('*')
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: true });
-      if (!error && data && data.length > 0) {
-        roles = data;
-      } else {
-        // Automatically seed standard roles for this new organization to ensure isolated permissions per org
-        const crypto = require('crypto');
-        const defaultTemplates = [
-          {
-            id: crypto.randomUUID(),
-            organization_id: organizationId,
-            role_name: 'Administrator',
-            description: 'Full administrative access to all CRM features.',
-            is_system: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: crypto.randomUUID(),
-            organization_id: organizationId,
-            role_name: 'CRM Manager',
-            description: 'Full management access to sales and customer operations.',
-            is_system: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: crypto.randomUUID(),
-            organization_id: organizationId,
-            role_name: 'Relationship Manager',
-            description: 'Access to manage client relationships, deals, and communication.',
-            is_system: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: crypto.randomUUID(),
-            organization_id: organizationId,
-            role_name: 'CRM Executive',
-            description: 'Standard operational access to leads, accounts, and tasks.',
-            is_system: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: crypto.randomUUID(),
-            organization_id: organizationId,
-            role_name: 'Read Only User',
-            description: 'Read-only access across all standard CRM objects and reports.',
-            is_system: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-        ];
-
-        const { data: seeded, error: seedError } = await supabase
-          .from('roles')
-          .insert(defaultTemplates)
-          .select();
-
-        if (!seedError && seeded && seeded.length > 0) {
-          roles = seeded;
-        }
+      if (!error && data) {
+        orgRoles = data;
       }
     }
 
-    if (!roles || roles.length === 0) {
-      const { data } = await supabase.from('roles').select('*').order('created_at', { ascending: true });
-      if (data && data.length > 0) {
-        roles = data;
-      } else {
-        roles = DEFAULT_ROLES;
-      }
+    // Fetch system template roles (organization_id is null or is_system = true)
+    let sysRoles = [];
+    const { data: systemData } = await supabase
+      .from('roles')
+      .select('*')
+      .or('organization_id.is.null,is_system.eq.true')
+      .order('created_at', { ascending: true });
+
+    if (systemData && systemData.length > 0) {
+      sysRoles = systemData;
+    } else {
+      sysRoles = DEFAULT_ROLES;
     }
+
+    // Merge custom org roles with standard system template roles so all standard roles are always available
+    const combined = [...orgRoles];
+    const existingNames = new Set(orgRoles.map(r => (r.role_name || r.name || '').toLowerCase()));
+
+    sysRoles.forEach((sr) => {
+      const srName = (sr.role_name || sr.name || '').toLowerCase();
+      if (!existingNames.has(srName)) {
+        combined.push(sr);
+        existingNames.add(srName);
+      }
+    });
 
     // Fetch Object definitions count for calculating objects metrics
     let totalObjects = 18;
@@ -183,7 +141,7 @@ class RoleService {
       console.warn('Could not fetch user counts:', e.message);
     }
 
-    return roles.map(r => {
+    return combined.map(r => {
       const uCount = userCountsByRole[r.id] !== undefined ? userCountsByRole[r.id] : (r.user_count || (r.role_name === 'Administrator' ? 12 : r.role_name === 'CRM Manager' ? 28 : 10));
       const formattedDate = r.updated_at
         ? new Date(r.updated_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -199,6 +157,8 @@ class RoleService {
         custom_objects_count: customObjects,
         updated_at: formattedDate,
         status: r.status || 'active',
+        is_system: Boolean(r.is_system),
+        organization_id: r.organization_id || null,
       };
     });
   }
