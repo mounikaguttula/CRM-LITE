@@ -80,6 +80,65 @@ class RoleService {
         .order('created_at', { ascending: true });
       if (!error && data && data.length > 0) {
         roles = data;
+      } else {
+        // Automatically seed standard roles for this new organization to ensure isolated permissions per org
+        const crypto = require('crypto');
+        const defaultTemplates = [
+          {
+            id: crypto.randomUUID(),
+            organization_id: organizationId,
+            role_name: 'Administrator',
+            description: 'Full administrative access to all CRM features.',
+            is_system: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: crypto.randomUUID(),
+            organization_id: organizationId,
+            role_name: 'CRM Manager',
+            description: 'Full management access to sales and customer operations.',
+            is_system: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: crypto.randomUUID(),
+            organization_id: organizationId,
+            role_name: 'Relationship Manager',
+            description: 'Access to manage client relationships, deals, and communication.',
+            is_system: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: crypto.randomUUID(),
+            organization_id: organizationId,
+            role_name: 'CRM Executive',
+            description: 'Standard operational access to leads, accounts, and tasks.',
+            is_system: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: crypto.randomUUID(),
+            organization_id: organizationId,
+            role_name: 'Read Only User',
+            description: 'Read-only access across all standard CRM objects and reports.',
+            is_system: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ];
+
+        const { data: seeded, error: seedError } = await supabase
+          .from('roles')
+          .insert(defaultTemplates)
+          .select();
+
+        if (!seedError && seeded && seeded.length > 0) {
+          roles = seeded;
+        }
       }
     }
 
@@ -90,17 +149,6 @@ class RoleService {
       } else {
         roles = DEFAULT_ROLES;
       }
-    }
-
-    // Always merge DEFAULT_ROLES with real DB roles so built-in roles are
-    // always visible even when the DB only contains a few custom roles.
-    const dbIds = new Set(roles.map(r => r.id));
-    const dbNames = new Set(roles.map(r => (r.role_name || r.name || '').toLowerCase()));
-    const missingDefaults = DEFAULT_ROLES.filter(
-      dr => !dbIds.has(dr.id) && !dbNames.has((dr.role_name || '').toLowerCase())
-    );
-    if (missingDefaults.length > 0) {
-      roles = [...roles, ...missingDefaults];
     }
 
     // Fetch Object definitions count for calculating objects metrics

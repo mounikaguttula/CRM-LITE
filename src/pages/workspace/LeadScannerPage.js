@@ -214,9 +214,14 @@ function LeadScannerPage() {
         startScanningLoop();
       } catch (err) {
         console.error('Camera access error:', err);
-        setCameraError(err.message || 'Camera permission denied or no camera device found on this computer.');
+        const isDenied = err.name === 'NotAllowedError' || String(err.message).toLowerCase().includes('denied');
+        setCameraError(
+          isDenied
+            ? 'Camera access denied. Please click the lock 🔒 icon in your browser address bar to allow camera permissions.'
+            : (err.message || 'Camera permission denied or no camera device found on this computer.')
+        );
         setCameraActive(false);
-        setScannerStatus('Error');
+        setScannerStatus('Permission Denied');
       }
     }
   };
@@ -616,9 +621,19 @@ function LeadScannerPage() {
 
             {/* Error Alert Box */}
             {cameraError && (
-              <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 12, background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <AlertTriangle size={16} flexShrink={0} />
-                <span>{cameraError}</span>
+              <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 12, background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <AlertTriangle size={16} flexShrink={0} />
+                  <span>{cameraError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCameraError(null)}
+                  style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
+                  title="Dismiss"
+                >
+                  <X size={15} />
+                </button>
               </div>
             )}
 

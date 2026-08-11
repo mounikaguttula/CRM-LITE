@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPut } from '../../api/client';
 import { ChevronRight, ArrowLeft, Save, X, AlertTriangle } from 'lucide-react';
+import CustomPicklist from '../../components/CustomPicklist';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
 const C = {
@@ -466,23 +467,14 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       }
 
       fieldEl = (
-        <select
+        <CustomPicklist
           disabled={isReadOnly}
-          style={{ ...selectStyle(hasError), ...disabledInputStyle }}
+          options={optionsList}
           value={formData[f.name] || ''}
-          onChange={(e) => handleChange(f.name, e.target.value)}
-          onFocus={focusOn}
-          onBlur={focusOff(hasError)}
-        >
-          <option value="">Select {f.label.toLowerCase()}…</option>
-          {optionsList.map((opt) => {
-            const optVal = typeof opt === 'object' ? (opt.value || opt.label) : String(opt);
-            const optLabel = typeof opt === 'object' ? (opt.label || opt.value) : String(opt);
-            return (
-              <option key={optVal} value={optVal}>{optLabel}</option>
-            );
-          })}
-        </select>
+          onChange={(val) => handleChange(f.name, val)}
+          placeholder={`Select ${f.label.toLowerCase()}…`}
+          hasError={hasError}
+        />
       );
     } else if (f.type === 'lookup' || isOwner || isCompany || isContact) {
       const options = isOwner
@@ -543,30 +535,23 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       }
 
       fieldEl = (
-        <select
+        <CustomPicklist
           disabled={isReadOnly}
-          style={{ ...selectStyle(hasError), ...disabledInputStyle }}
-          value={currentSelectedVal || ''}
-          onChange={(e) => handleChange(f.name, e.target.value)}
-          onFocus={focusOn}
-          onBlur={focusOff(hasError)}
-        >
-          <option value="">Select {f.label.toLowerCase()}…</option>
-          {options.map((opt, idx) => {
+          options={options.map((opt, idx) => {
             const optVal = opt && typeof opt === 'object'
               ? opt.id || opt._id || opt.user_id || opt.company_name || opt.organization_name || opt.account_name || opt.company || opt.organization || opt.display_name || opt.displayName || `${opt.first_name || ''} ${opt.last_name || ''}`.trim() || opt.email || opt.title
               : String(opt || '');
             const safeOptVal = optVal || `option-${idx}`;
             const optLabel = opt && typeof opt === 'object'
-              ? opt.name || opt.company_name || opt.organization_name || opt.account_name || opt.company || opt.organization || opt.displayName || opt.display_name || `${opt.first_name || ''} ${opt.last_name || ''}`.trim() || opt.email || opt.title || safeOptVal
-              : String(opt || safeOptVal);
-            return (
-              <option key={safeOptVal} value={safeOptVal}>
-                {optLabel}
-              </option>
-            );
+              ? opt.name || opt.displayName || opt.display_name || opt.company_name || opt.organization_name || opt.account_name || opt.email || `${opt.first_name || ''} ${opt.last_name || ''}`.trim() || opt.title || safeOptVal
+              : String(opt || '');
+            return { value: String(safeOptVal), label: String(optLabel) };
           })}
-        </select>
+          value={currentSelectedVal || ''}
+          onChange={(val) => handleChange(f.name, val)}
+          placeholder={`Select ${f.label.toLowerCase()}…`}
+          hasError={hasError}
+        />
       );
     } else if (isNotes) {
       fieldEl = (

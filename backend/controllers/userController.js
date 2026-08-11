@@ -17,9 +17,21 @@ const getUsers = async (req, res, next) => {
 const inviteUser = async (req, res, next) => {
   try {
     const organizationId = req.user?.organization_id;
-    const { email, first_name, last_name, password } = req.body;
-    const newUser = await userService.inviteUser(organizationId, { email, first_name, last_name, password });
+    const { email, first_name, last_name, password, role_id } = req.body;
+    const newUser = await userService.inviteUser(organizationId, { email, first_name, last_name, password, role_id });
     return res.status(201).json(newUser);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const updateUser = async (req, res, next) => {
+  try {
+    const organizationId = req.user?.organization_id;
+    const userId = req.params.id;
+    const { first_name, last_name, email, role_id, status } = req.body;
+    const updatedUser = await userService.updateUser(organizationId, userId, { first_name, last_name, email, role_id, status });
+    return res.status(200).json(updatedUser);
   } catch (err) {
     next(err);
   }
@@ -40,5 +52,6 @@ const deleteUser = async (req, res, next) => {
 module.exports = {
   getUsers,
   inviteUser,
+  updateUser,
   deleteUser,
 };

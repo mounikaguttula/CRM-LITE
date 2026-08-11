@@ -91,17 +91,37 @@ function evaluateConditionRow(condition, recordData) {
       return !strVal.toLowerCase().includes(targetVal.toLowerCase());
 
     case 'greater_than': {
+      if (strVal === '') return false;
       const numVal = parseFloat(strVal);
       const numTarget = parseFloat(targetVal);
       if (!isNaN(numVal) && !isNaN(numTarget)) return numVal > numTarget;
       return strVal > targetVal;
     }
 
+    case 'greater_than_or_equal':
+    case 'greater_than_or_equals': {
+      if (strVal === '') return false;
+      const numVal = parseFloat(strVal);
+      const numTarget = parseFloat(targetVal);
+      if (!isNaN(numVal) && !isNaN(numTarget)) return numVal >= numTarget;
+      return strVal >= targetVal;
+    }
+
     case 'less_than': {
+      if (strVal === '') return false;
       const numVal = parseFloat(strVal);
       const numTarget = parseFloat(targetVal);
       if (!isNaN(numVal) && !isNaN(numTarget)) return numVal < numTarget;
       return strVal < targetVal;
+    }
+
+    case 'less_than_or_equal':
+    case 'less_than_or_equals': {
+      if (strVal === '') return false;
+      const numVal = parseFloat(strVal);
+      const numTarget = parseFloat(targetVal);
+      if (!isNaN(numVal) && !isNaN(numTarget)) return numVal <= numTarget;
+      return strVal <= targetVal;
     }
 
     case 'not_regex':
