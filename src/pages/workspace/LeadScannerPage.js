@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { apiPost } from '../../api/client';
 import {
   QrCode, Camera, Users, Check, AlertTriangle,
-  Upload, CheckCircle2, VideoOff
+  Upload, CheckCircle2, VideoOff, ShieldCheck, Sparkles, X
 } from 'lucide-react';
 
 /* Presentation Helper Styles */
@@ -35,28 +36,6 @@ const inputStyle = {
 
 const RECAPTCHA_SITE_KEY = '6LdcTZ8sAAAAAFSa0nodDG0cRSYVSagjkhcL5Lzh';
 
-const DEMO_PAYLOADS = [
-  {
-    label: 'Sarah Connor (Executive JSON)',
-    data: JSON.stringify({
-      name: 'Sarah Connor',
-      email: 'sarah.connor@cyberdyne.io',
-      phone: '+1 (555) 234-5678',
-      company: 'Cyberdyne Systems',
-      title: 'VP of Technology',
-      description: 'Met at Tech Summit. Interested in CRM deployment.',
-    }, null, 2),
-  },
-  {
-    label: 'Michael Scott (vCard Standard)',
-    data: `BEGIN:VCARD\nVERSION:3.0\nN:Scott;Michael;;;\nFN:Michael Scott\nORG:Dunder Mifflin Paper Co\nTITLE:Regional Manager\nTEL;TYPE=CELL:+1 (555) 867-5309\nEMAIL;TYPE=WORK:m.scott@dundermifflin.com\nNOTE:Wants bulk pricing for paper & CRM.\nEND:VCARD`,
-  },
-  {
-    label: 'Elena Rostova (Key-Value Format)',
-    data: `Name: Elena Rostova\nEmail: elena@globalreach.de\nPhone: +49 30 123456\nCompany: Global Reach GmbH\nTitle: Head of Global Sales\nNotes: Requires multi-currency CRM setup.`,
-  },
-];
-
 function LeadScannerPage() {
   const navigate = useNavigate();
   const [cameraActive, setCameraActive] = useState(false);
@@ -67,6 +46,7 @@ function LeadScannerPage() {
   const [manualPayload, setManualPayload] = useState('');
   const [saving, setSaving] = useState(false);
   const [scannerStatus, setScannerStatus] = useState('Idle');
+  const [notification, setNotification] = useState(null);
 
   /* reCAPTCHA State */
   const [captchaVerifying, setCaptchaVerifying] = useState(false);
@@ -90,7 +70,7 @@ function LeadScannerPage() {
     description: '',
   });
 
-  /* Dynamically load jsQR script & Google reCAPTCHA v2 Script */
+  /* Dynamically load jsQR script & Google reCAPTCHA v2 Engine with Auto-Polling */
   useEffect(() => {
     if (!window.jsQR) {
       const script = document.createElement('script');
@@ -99,49 +79,74 @@ function LeadScannerPage() {
       document.body.appendChild(script);
     }
 
-    // Google reCAPTCHA v2 Integration
-    window.onGoogleReCaptchaLoad = () => {
-      if (window.grecaptcha && document.getElementById('recaptcha-widget-container')) {
+    let attempts = 0;
+    let renderInterval = null;
+
+    const tryRenderRecaptcha = () => {
+      const container = document.getElementById('recaptcha-widget-container');
+      if (!container) return false;
+
+      // If already rendered inside container, return true
+      if (container.children.length > 0 || container.innerHTML.trim() !== '') {
+        return true;
+      }
+
+      if (window.grecaptcha && typeof window.grecaptcha.render === 'function') {
         try {
-          const container = document.getElementById('recaptcha-widget-container');
-          if (container && container.innerHTML === '') {
-            window.grecaptcha.render('recaptcha-widget-container', {
-              sitekey: RECAPTCHA_SITE_KEY,
-              callback: (token) => {
-                console.log('[Frontend reCAPTCHA] Token received from Google widget:', token);
-                setCaptchaToken(token);
-                setCaptchaVerified(true);
-              },
-              'expired-callback': () => {
-                console.log('[reCAPTCHA] Token expired. Auto-resetting...');
-                setCaptchaVerified(false);
-                setCaptchaToken('');
-                try { if (window.grecaptcha) window.grecaptcha.reset(); } catch (e) {}
-              },
-              'error-callback': (err) => {
-                console.warn('[reCAPTCHA] Network timeout or script error caught gracefully:', err);
-                setCaptchaVerified(false);
-                setCaptchaToken('');
-                try { if (window.grecaptcha) window.grecaptcha.reset(); } catch (e) {}
-              },
-            });
-          }
+          console.log('[reCAPTCHA] Rendering Google reCAPTCHA widget...');
+          window.grecaptcha.render('recaptcha-widget-container', {
+            sitekey: RECAPTCHA_SITE_KEY,
+            callback: (token) => {
+              console.log('[reCAPTCHA] Token received from Google widget:', token);
+              setCaptchaToken(token);
+              setCaptchaVerified(true);
+            },
+            'expired-callback': () => {
+              console.log('[reCAPTCHA] Token expired. Auto-resetting...');
+              setCaptchaVerified(false);
+              setCaptchaToken('');
+              try { if (window.grecaptcha) window.grecaptcha.reset(); } catch (e) {}
+            },
+            'error-callback': (err) => {
+              console.warn('[reCAPTCHA] Script error caught gracefully:', err);
+              setCaptchaVerified(false);
+              setCaptchaToken('');
+            },
+          });
+          return true;
         } catch (e) {
-          console.warn('reCAPTCHA render error:', e);
+          console.warn('[reCAPTCHA] Render error:', e);
         }
       }
+      return false;
     };
 
-    if (!window.grecaptcha) {
+    window.onGoogleReCaptchaLoad = () => {
+      tryRenderRecaptcha();
+    };
+
+    // 1. Ensure Google reCAPTCHA API script tag exists
+    if (!document.getElementById('recaptcha-script-tag')) {
       const script = document.createElement('script');
+      script.id = 'recaptcha-script-tag';
       script.src = 'https://www.google.com/recaptcha/api.js?onload=onGoogleReCaptchaLoad&render=explicit';
       script.async = true;
       script.defer = true;
       document.body.appendChild(script);
-      setTimeout(() => {
-        window.onGoogleReCaptchaLoad();
-      }, 300);
     }
+
+    // 2. Poll every 250ms to ensure render occurs even if window.grecaptcha was already loaded
+    renderInterval = setInterval(() => {
+      attempts++;
+      const success = tryRenderRecaptcha();
+      if (success || attempts > 20) {
+        clearInterval(renderInterval);
+      }
+    }, 250);
+
+    return () => {
+      if (renderInterval) clearInterval(renderInterval);
+    };
   }, []);
 
   /* Proactive reCAPTCHA Reset Timer (Resets at 1m 50s before Google 2m timeout) */
@@ -463,13 +468,23 @@ function LeadScannerPage() {
   /* Verify & Save Lead to Database */
   const handleSaveLead = async (e) => {
     e.preventDefault();
+    const savedLeadName = leadForm.name;
+
     if (!leadForm.name || !leadForm.name.trim()) {
-      alert('Please enter Full Name for the lead.');
+      setNotification({
+        type: 'warning',
+        title: 'Missing Full Name',
+        message: 'Please enter Full Name for the lead before saving.',
+      });
       return;
     }
 
     if (!captchaVerified && !captchaToken) {
-      alert('Please complete the Google reCAPTCHA check before saving.');
+      setNotification({
+        type: 'warning',
+        title: 'reCAPTCHA Verification Needed',
+        message: 'Please complete the Google reCAPTCHA check before saving.',
+      });
       return;
     }
 
@@ -479,7 +494,13 @@ function LeadScannerPage() {
         ...leadForm,
         captchaToken: captchaToken || 'verified_recaptcha_token',
       });
-      alert(`🎉 Lead "${leadForm.name}" created successfully! (Verified by Google reCAPTCHA)`);
+      setNotification({
+        type: 'success',
+        title: 'Lead Created Successfully!',
+        leadName: savedLeadName,
+        message: `Lead "${savedLeadName}" has been verified and saved to your CRM.`,
+        detail: 'Verified by Google reCAPTCHA v2',
+      });
       setLeadForm({
         name: '',
         first_name: '',
@@ -499,7 +520,11 @@ function LeadScannerPage() {
       if (window.grecaptcha) window.grecaptcha.reset();
     } catch (err) {
       console.error('Error saving lead from scanner:', err);
-      alert(`⚠️ Failed to save lead: ${err.message || 'An unexpected error occurred.'}`);
+      setNotification({
+        type: 'error',
+        title: 'Failed to Save Lead',
+        message: err.message || 'An unexpected error occurred while saving the lead.',
+      });
     } finally {
       setSaving(false);
     }
@@ -925,6 +950,282 @@ function LeadScannerPage() {
           </div>
         </form>
       </div>
+
+      {/* ── Beautiful Premium Custom Notification Modal Pop-up (React Portal) ── */}
+      {notification && ReactDOM.createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            zIndex: 999999,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            boxSizing: 'border-box',
+            margin: 0,
+            animation: 'modalFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+          }}
+          onClick={() => setNotification(null)}
+        >
+          <style>{`
+            @keyframes modalFadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes modalPop {
+              from { opacity: 0; transform: scale(0.92) translateY(14px); }
+              to { opacity: 1; transform: scale(1) translateY(0); }
+            }
+          `}</style>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              width: '100%',
+              maxWidth: '460px',
+              backgroundColor: '#ffffff',
+              borderRadius: '24px',
+              padding: '32px 28px',
+              boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.8) inset',
+              border: '1px solid #e2e8f0',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              animation: 'modalPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+            }}
+          >
+            {/* Top Close Icon */}
+            <button
+              type="button"
+              onClick={() => setNotification(null)}
+              style={{
+                position: 'absolute',
+                top: '18px',
+                right: '18px',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                backgroundColor: '#f1f5f9',
+                border: 'none',
+                color: '#64748b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <X size={16} />
+            </button>
+
+            {/* Glowing Icon Badge */}
+            {notification.type === 'success' && (
+              <div
+                style={{
+                  width: '68px',
+                  height: '68px',
+                  borderRadius: '22px',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  boxShadow: '0 12px 28px -6px rgba(16, 185, 129, 0.45)',
+                  marginBottom: '20px',
+                }}
+              >
+                <CheckCircle2 size={36} />
+              </div>
+            )}
+
+            {notification.type === 'warning' && (
+              <div
+                style={{
+                  width: '68px',
+                  height: '68px',
+                  borderRadius: '22px',
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  boxShadow: '0 12px 28px -6px rgba(245, 158, 11, 0.45)',
+                  marginBottom: '20px',
+                }}
+              >
+                <AlertTriangle size={36} />
+              </div>
+            )}
+
+            {notification.type === 'error' && (
+              <div
+                style={{
+                  width: '68px',
+                  height: '68px',
+                  borderRadius: '22px',
+                  background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  boxShadow: '0 12px 28px -6px rgba(239, 68, 68, 0.45)',
+                  marginBottom: '20px',
+                }}
+              >
+                <AlertTriangle size={36} />
+              </div>
+            )}
+
+            {/* Title */}
+            <h3 style={{ margin: '0 0 8px', fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+              {notification.title}
+            </h3>
+
+            {/* Sub-badge / Lead Name Highlight */}
+            {notification.leadName && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 14px',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                  color: '#047857',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  marginBottom: '12px',
+                }}
+              >
+                <Sparkles size={14} /> Lead: "{notification.leadName}"
+              </div>
+            )}
+
+            {/* Message Body */}
+            <p style={{ margin: '0 0 16px', fontSize: '0.9rem', color: '#475569', lineHeight: 1.5, fontWeight: 500 }}>
+              {notification.message}
+            </p>
+
+            {/* Verification Detail Badge */}
+            {notification.detail && (
+              <div
+                style={{
+                  fontSize: '0.84rem',
+                  fontWeight: 500,
+                  color: '#64748b',
+                  marginBottom: '22px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  justifyContent: 'center',
+                }}
+              >
+                {notification.detail}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%' }}>
+              {notification.type === 'success' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setNotification(null)}
+                    style={{
+                      flex: 1,
+                      height: '46px',
+                      borderRadius: '14px',
+                      fontSize: '0.875rem',
+                      fontWeight: 700,
+                      color: '#ffffff',
+                      background: 'linear-gradient(135deg, #06b6d4 0%, #10b981 100%)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: '0 10px 22px -6px rgba(6, 182, 212, 0.45)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                    }}
+                    onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 14px 26px -6px rgba(6, 182, 212, 0.55)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 10px 22px -6px rgba(6, 182, 212, 0.45)'; }}
+                  >
+                    <QrCode size={18} />
+                    Scan Next Lead
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNotification(null);
+                      navigate('/workspace/object/lead');
+                    }}
+                    style={{
+                      flex: 1,
+                      height: '46px',
+                      borderRadius: '14px',
+                      fontSize: '0.875rem',
+                      fontWeight: 700,
+                      color: '#ffffff',
+                      background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: '0 10px 22px -6px rgba(139, 92, 246, 0.45)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                    }}
+                    onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 14px 26px -6px rgba(139, 92, 246, 0.55)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 10px 22px -6px rgba(139, 92, 246, 0.45)'; }}
+                  >
+                    <Users size={18} />
+                    View All Leads
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setNotification(null)}
+                  style={{
+                    width: '100%',
+                    height: '46px',
+                    borderRadius: '14px',
+                    fontSize: '0.875rem',
+                    fontWeight: 700,
+                    color: '#ffffff',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #3b82f6 100%)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 10px 22px -6px rgba(99, 102, 241, 0.45)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  Got It
+                </button>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

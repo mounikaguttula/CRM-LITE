@@ -1052,8 +1052,17 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     throw new Error(errMsg);
   };
 
+  const currentLeadStatus = String(record?.status || record?.data?.status || record?.stage || record?.data?.stage || '').toLowerCase();
+  const isAlreadyConverted = currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted);
+
   const handleConvertLead = async () => {
     if (!record || converting) return;
+
+    if (isAlreadyConverted) {
+      alert('This Lead has already been converted into a Company, Contact, and Deal.');
+      return;
+    }
+
     if (!window.confirm('Convert this lead into Company, Contact and Deal?')) return;
 
     setConverting(true);
@@ -1215,13 +1224,50 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   }
 
   /* Derive titles & subtitles */
-  const titleField = meta.fields?.find((f) => f.isTitle) || meta.fields?.[0];
-  const recordTitle = record[titleField?.name] || record.name || record.title || `Record #${recordId}`;
+  const titleField = meta.fields?.find((f) => f.isTitle || f.name === 'name' || f.name === 'title' || f.name === 'company_name' || f.name === 'subject');
+  const titleCandidate = (titleField && titleField.name !== 'id' && record[titleField.name])
+    ? record[titleField.name]
+    : (record.name || record.company_name || record.company || record.title || record.subject || record.display_name || record.account_name);
+  const recordTitle = (titleCandidate && !isUuid(titleCandidate))
+    ? titleCandidate
+    : (record.name || record.company_name || record.title || record.subject || `Record #${recordId}`);
+
+  /* ── Fully Dynamic Field Value Lookup from Universal Table Record ── */
+  const getRecordValue = (fName, rec) => {
+    if (!rec || !fName) return undefined;
+
+    // 1. Direct top-level check on universal_table record object
+    if (rec[fName] !== undefined && rec[fName] !== null && rec[fName] !== '') {
+      return rec[fName];
+    }
+
+    // 2. Direct check on universal_table record.data JSON column
+    if (rec.data && typeof rec.data === 'object' && rec.data[fName] !== undefined && rec.data[fName] !== null && rec.data[fName] !== '') {
+      return rec.data[fName];
+    }
+
+    // 3. Dynamic Case-Insensitive & Formatted Key Match across all keys in universal_table record
+    const targetClean = String(fName).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sources = [rec, rec.data || {}];
+
+    for (const src of sources) {
+      if (!src || typeof src !== 'object') continue;
+      for (const [k, v] of Object.entries(src)) {
+        if (k === 'data') continue;
+        const kClean = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (kClean === targetClean && v !== undefined && v !== null && v !== '') {
+          return v;
+        }
+      }
+    }
+
+    return undefined;
+  };
 
   const subtitleField = meta.fields?.find((f) => f.name === 'email' || f.name === 'company' || f.name === 'company_name' || f.name === 'account');
   let rawSubtitleVal = subtitleField
-    ? (record[subtitleField.name] !== undefined ? record[subtitleField.name] : (record.data && record.data[subtitleField.name]))
-    : (record.email || record.company_name || '');
+    ? getRecordValue(subtitleField.name, record)
+    : (record.email || record.company_name || getRecordValue('email', record) || getRecordValue('company', record) || '');
   if (rawSubtitleVal && typeof rawSubtitleVal === 'object') {
     rawSubtitleVal = rawSubtitleVal.name || rawSubtitleVal.company_name || rawSubtitleVal.display_name || '';
   }
@@ -1231,11 +1277,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   if (subtitleVal === '—' || isUuid(subtitleVal)) subtitleVal = '';
 
   const emailField = meta.fields?.find((f) => f.type === 'email');
-  const emailVal = emailField ? record[emailField.name] : record.email;
+  const emailVal = emailField ? getRecordValue(emailField.name, record) : (record.email || getRecordValue('email', record));
 
   /* ── Render Field Value ── */
   const renderFieldValue = (f) => {
-    const val = record[f.name] !== undefined ? record[f.name] : (record.data && record.data[f.name]);
+    const val = getRecordValue(f.name, record);
     const fNameLower = (f.name || '').toLowerCase();
 
     if (f.type === 'picklist' || fNameLower === 'status' || fNameLower === 'stage') {
@@ -1652,20 +1698,33 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               {String(objectTypeId || '').toLowerCase().includes('lead') && (
-                <button
-                  onClick={handleConvertLead}
-                  disabled={converting}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 7,
-                    padding: '10px 18px', borderRadius: 12,
-                    fontSize: 13, fontWeight: 700, color: '#fff',
-                    background: converting ? '#94a3b8' : 'linear-gradient(135deg, #f97316, #ef4444)',
-                    border: 'none', cursor: converting ? 'not-allowed' : 'pointer',
-                    boxShadow: converting ? 'none' : '0 8px 20px -10px rgba(249,115,22,0.55)',
-                  }}
-                >
-                  {converting ? 'Converting…' : 'Convert'}
-                </button>
+                isAlreadyConverted ? (
+                  <span
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '8px 16px', borderRadius: 12,
+                      fontSize: 13, fontWeight: 700, color: '#059669',
+                      background: '#ecfdf5', border: '1.5px solid #a7f3d0',
+                    }}
+                  >
+                    <CheckCircle2 size={15} /> Lead Converted
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleConvertLead}
+                    disabled={converting}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 7,
+                      padding: '10px 18px', borderRadius: 12,
+                      fontSize: 13, fontWeight: 700, color: '#fff',
+                      background: converting ? '#94a3b8' : 'linear-gradient(135deg, #f97316, #ef4444)',
+                      border: 'none', cursor: converting ? 'not-allowed' : 'pointer',
+                      boxShadow: converting ? 'none' : '0 8px 20px -10px rgba(249,115,22,0.55)',
+                    }}
+                  >
+                    {converting ? 'Converting…' : 'Convert'}
+                  </button>
+                )
               )}
               <button
                 onClick={handleEditClick}

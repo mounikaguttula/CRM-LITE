@@ -1,7 +1,17 @@
 import React, { useState, useEffect, useContext } from 'react';
 import WorkspaceContext from '../../context/WorkspaceContext';
 import api from '../../api';
-import { Plus, Trash2, Edit3, ShieldAlert, Check, X, Filter, ChevronDown, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, Edit3, ShieldAlert, Check, X, Filter, ChevronDown, ArrowLeft, Lock, RotateCcw, Sliders } from 'lucide-react';
+
+/* ── Canonical System Rule Keys (for detecting tenant overrides) ── */
+const CANONICAL_SYSTEM_RULE_KEYS = new Set([
+  'lead_company_required_for_qualified_lead',
+  'lead_valid_email_format',
+  'deal_positive_amount_required',
+  'deal_discount_percentage_range',
+  'deal_loss_reason_required_on_closed_lost',
+  'contact_birth_date_past_only',
+]);
 
 /* ── Operator Options ── */
 const OPERATORS = [
@@ -37,6 +47,7 @@ function ValidationRulesPage({ initialObject }) {
 
   /* ── Rule Builder Form State ── */
   const [editingRuleId, setEditingRuleId] = useState(null);
+  const [overrideRuleKey, setOverrideRuleKey] = useState(null);
   const [ruleName, setRuleName] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isActive, setIsActive] = useState(true);
@@ -91,22 +102,23 @@ function ValidationRulesPage({ initialObject }) {
   const currentObjMeta = availableObjects.find((o) => o.key === selectedObject) || availableObjects[0] || { displayName: selectedObject };
 
   /* ── Fetch Rules for Selected Object ── */
-  useEffect(() => {
-    let isMounted = true;
+  const fetchRulesForObject = React.useCallback(() => {
     setLoadingRules(true);
     api.get(`/validation-rules?object_name=${selectedObject}`)
       .then((res) => {
-        if (!isMounted) return;
         setRules(Array.isArray(res) ? res : res?.data || []);
       })
       .catch(() => {
-        if (isMounted) setRules([]);
+        setRules([]);
       })
       .finally(() => {
-        if (isMounted) setLoadingRules(false);
+        setLoadingRules(false);
       });
-    return () => { isMounted = false; };
   }, [selectedObject]);
+
+  useEffect(() => {
+    fetchRulesForObject();
+  }, [fetchRulesForObject]);
 
   /* ── Fetch Object Fields Metadata for Condition Dropdown ── */
   useEffect(() => {
@@ -130,6 +142,7 @@ function ValidationRulesPage({ initialObject }) {
   /* ── Open Builder for New Rule ── */
   const handleOpenNewRule = () => {
     setEditingRuleId(null);
+    setOverrideRuleKey(null);
     setRuleName('');
     setErrorMessage('');
     setIsActive(true);
@@ -141,6 +154,19 @@ function ValidationRulesPage({ initialObject }) {
   /* ── Open Builder for Edit Rule ── */
   const handleOpenEditRule = (rule) => {
     setEditingRuleId(rule.id);
+    setOverrideRuleKey(null);
+    setRuleName(rule.rule_name || '');
+    setErrorMessage(rule.error_message || '');
+    setIsActive(rule.is_active !== undefined ? rule.is_active : true);
+    setConditionGroups(rule.condition_groups || []);
+    setSubmitError(null);
+    setViewMode('builder');
+  };
+
+  /* ── Open Builder for Customizing System Rule ── */
+  const handleOpenCustomizeRule = (rule) => {
+    setEditingRuleId(null);
+    setOverrideRuleKey(rule.rule_key);
     setRuleName(rule.rule_name || '');
     setErrorMessage(rule.error_message || '');
     setIsActive(rule.is_active !== undefined ? rule.is_active : true);
@@ -160,17 +186,33 @@ function ValidationRulesPage({ initialObject }) {
       );
     } catch (err) {
       console.error('Failed to toggle rule active state:', err);
+      // Revert local state on error
+      setRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, is_active: currentStatus } : r)));
     }
   };
 
-  /* ── Delete Rule ── */
+  /* ── Delete Rule (Only updates state on successful API response) ── */
   const handleDeleteRule = async (ruleId) => {
     if (!window.confirm('Are you sure you want to delete this validation rule?')) return;
-    setRules((prev) => prev.filter((r) => r.id !== ruleId));
     try {
       await api.delete(`/validation-rules/${ruleId}`);
+      setRules((prev) => prev.filter((r) => r.id !== ruleId));
     } catch (err) {
       console.error('Failed to delete validation rule:', err);
+      alert(err.response?.data?.message || err.message || 'Failed to delete validation rule.');
+    }
+  };
+
+  /* ── Reset Override to Default (Deletes override & re-fetches system rule) ── */
+  const handleResetToDefault = async (overrideRuleId) => {
+    if (!window.confirm('Reset this rule to system default? Your customizations will be removed.')) return;
+    try {
+      await api.delete(`/validation-rules/${overrideRuleId}`);
+      // Re-fetch from backend so system default rule resurfaces naturally
+      fetchRulesForObject();
+    } catch (err) {
+      console.error('Failed to reset validation rule to default:', err);
+      alert(err.response?.data?.message || err.message || 'Failed to reset rule to default.');
     }
   };
 
@@ -315,6 +357,10 @@ function ValidationRulesPage({ initialObject }) {
       is_active: isActive,
       condition_groups: conditionGroups,
     };
+
+    if (overrideRuleKey && !editingRuleId) {
+      payload.rule_key = overrideRuleKey;
+    }
 
     try {
       if (editingRuleId) {
@@ -471,88 +517,159 @@ function ValidationRulesPage({ initialObject }) {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {rules.map((rule) => (
-                <div
-                  key={rule.id}
-                  style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.65)',
-                    backdropFilter: 'blur(12px)',
-                    border: '1px solid rgba(255, 255, 255, 0.8)',
-                    borderRadius: '14px',
-                    padding: '20px 24px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {/* Top Row: Indicator + Name + Actions */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{
-                        width: '8px', height: '8px', borderRadius: '50%',
-                        backgroundColor: rule.is_active ? '#06b6d4' : '#94A3B8',
-                        boxShadow: rule.is_active ? '0 0 8px #06b6d4' : 'none',
-                      }} />
-                      <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.01em' }}>
-                        {rule.rule_name}
-                      </span>
-                    </div>
+              {rules.map((rule) => {
+                const isSystemRule = rule.organization_id === null;
+                const isOverrideRule =
+                  rule.organization_id !== null &&
+                  CANONICAL_SYSTEM_RULE_KEYS.has(rule.rule_key);
+                const isCustomRule =
+                  rule.organization_id !== null &&
+                  !CANONICAL_SYSTEM_RULE_KEYS.has(rule.rule_key);
 
-                    {/* Actions */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleRule(rule.id, rule.is_active)}
-                        style={{
-                          width: '40px', height: '22px', borderRadius: '12px',
-                          backgroundColor: rule.is_active ? '#06b6d4' : '#CBD5E1',
-                          border: 'none', padding: '2px', cursor: 'pointer',
-                          transition: 'background-color 0.2s', position: 'relative',
-                        }}
-                      >
-                        <div style={{
-                          width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#ffffff',
-                          transform: rule.is_active ? 'translateX(18px)' : 'translateX(0)',
-                          transition: 'transform 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                return (
+                  <div
+                    key={rule.id}
+                    style={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.65)',
+                      backdropFilter: 'blur(12px)',
+                      border: '1px solid rgba(255, 255, 255, 0.8)',
+                      borderRadius: '14px',
+                      padding: '20px 24px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {/* Top Row: Indicator + Name + Badges + Actions */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <span style={{
+                          width: '8px', height: '8px', borderRadius: '50%',
+                          backgroundColor: rule.is_active ? (isSystemRule ? '#06b6d4' : isOverrideRule ? '#6366f1' : '#10b981') : '#94A3B8',
+                          boxShadow: rule.is_active ? (isSystemRule ? '0 0 8px #06b6d4' : isOverrideRule ? '0 0 8px #6366f1' : '0 0 8px #10b981') : 'none',
                         }} />
-                      </button>
+                        <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.01em' }}>
+                          {rule.rule_name}
+                        </span>
 
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditRule(rule)}
-                        style={{
-                          width: '32px', height: '32px', borderRadius: '8px',
-                          border: '1px solid #E2E8F0', backgroundColor: '#ffffff',
-                          color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                        }}
-                      >
-                        <Edit3 style={{ width: 14, height: 14 }} />
-                      </button>
+                        {isSystemRule && (
+                          <span style={{
+                            fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '6px',
+                            backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0',
+                            display: 'inline-flex', alignItems: 'center', gap: '4px',
+                          }}>
+                            <Lock style={{ width: 10, height: 10 }} /> System Default
+                          </span>
+                        )}
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteRule(rule.id)}
-                        style={{
-                          width: '32px', height: '32px', borderRadius: '8px',
-                          border: '1px solid #FECACA', backgroundColor: '#FEF2F2',
-                          color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                        }}
-                      >
-                        <Trash2 style={{ width: 14, height: 14 }} />
-                      </button>
+                        {isOverrideRule && (
+                          <span style={{
+                            fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '6px',
+                            backgroundColor: '#EEF2FF', color: '#4F46E5', border: '1px solid #C7D2FE',
+                          }}>
+                            Customized Override
+                          </span>
+                        )}
+
+                        {isCustomRule && (
+                          <span style={{
+                            fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '6px',
+                            backgroundColor: '#F8FAFC', color: '#64748B', border: '1px solid #E2E8F0',
+                          }}>
+                            Custom Rule
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {isSystemRule ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCustomizeRule(rule)}
+                            style={{
+                              padding: '6px 14px', fontSize: '0.78rem', fontWeight: 700, color: '#0891b2',
+                              backgroundColor: 'rgba(6, 182, 212, 0.08)', border: '1px solid rgba(6, 182, 212, 0.25)',
+                              borderRadius: '8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px',
+                            }}
+                          >
+                            <Sliders style={{ width: 13, height: 13 }} /> Customize
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleRule(rule.id, rule.is_active)}
+                              style={{
+                                width: '40px', height: '22px', borderRadius: '12px',
+                                backgroundColor: rule.is_active ? '#06b6d4' : '#CBD5E1',
+                                border: 'none', padding: '2px', cursor: 'pointer',
+                                transition: 'background-color 0.2s', position: 'relative',
+                              }}
+                            >
+                              <div style={{
+                                width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#ffffff',
+                                transform: rule.is_active ? 'translateX(18px)' : 'translateX(0)',
+                                transition: 'transform 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                              }} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditRule(rule)}
+                              title="Edit Validation Rule"
+                              style={{
+                                width: '32px', height: '32px', borderRadius: '8px',
+                                border: '1px solid #E2E8F0', backgroundColor: '#ffffff',
+                                color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                              }}
+                            >
+                              <Edit3 style={{ width: 14, height: 14 }} />
+                            </button>
+
+                            {isOverrideRule ? (
+                              <button
+                                type="button"
+                                onClick={() => handleResetToDefault(rule.id)}
+                                title="Reset to System Default"
+                                style={{
+                                  padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, color: '#4F46E5',
+                                  backgroundColor: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: '8px',
+                                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                }}
+                              >
+                                <RotateCcw style={{ width: 13, height: 13 }} /> Reset to Default
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRule(rule.id)}
+                                title="Delete Validation Rule"
+                                style={{
+                                  width: '32px', height: '32px', borderRadius: '8px',
+                                  border: '1px solid #FECACA', backgroundColor: '#FEF2F2',
+                                  color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                }}
+                              >
+                                <Trash2 style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Error Message */}
+                    <div style={{ fontSize: '0.84rem', color: '#DC2626', fontWeight: 500, marginBottom: '8px', paddingLeft: '18px' }}>
+                      "{rule.error_message}"
+                    </div>
+
+                    {/* Fires When Summary Badge */}
+                    <div style={{ paddingLeft: '18px' }}>
+                      {renderFiresWhenSummary(rule)}
                     </div>
                   </div>
-
-                  {/* Error Message */}
-                  <div style={{ fontSize: '0.84rem', color: '#DC2626', fontWeight: 500, marginBottom: '8px', paddingLeft: '18px' }}>
-                    "{rule.error_message}"
-                  </div>
-
-                  {/* Fires When Summary Badge */}
-                  <div style={{ paddingLeft: '18px' }}>
-                    {renderFiresWhenSummary(rule)}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -577,10 +694,12 @@ function ValidationRulesPage({ initialObject }) {
 
           <div>
             <h2 style={{ margin: '0 0 4px', fontSize: '1.25rem', fontWeight: 800, color: '#0F172A' }}>
-              {editingRuleId ? 'Edit Validation Rule' : 'New Validation Rule'}
+              {editingRuleId ? 'Edit Validation Rule' : overrideRuleKey ? 'Customize System Rule' : 'New Validation Rule'}
             </h2>
             <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748B' }}>
-              Define when this rule fires and what error to show. Add condition groups to make it conditional.
+              {overrideRuleKey
+                ? `Creating an organization override for system rule [${overrideRuleKey}]. Your changes will replace the default system behavior for your organization.`
+                : 'Define when this rule fires and what error to show. Add condition groups to make it conditional.'}
             </p>
           </div>
 

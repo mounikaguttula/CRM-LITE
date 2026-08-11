@@ -94,11 +94,26 @@ app.use('/', objectRoutes);
 app.use(errorHandler);
 
 
-// Start Express Server
-app.listen(PORT, () => {
-  console.log(`🚀 CRM Lite Metadata Platform Engine running on http://localhost:${PORT}`);
-  console.log(`📡 Health Check: http://localhost:${PORT}/health`);
-});
+const validationRuleService = require('./services/validationRuleService');
+
+// Start Server: verify platform system rules BEFORE opening HTTP listener
+const startServer = async () => {
+  try {
+    // Idempotent self-healing check for platform system validation rules
+    await validationRuleService.ensureSystemRules();
+
+    app.listen(PORT, () => {
+      console.log(`🚀 CRM Lite Metadata Platform Engine running on http://localhost:${PORT}`);
+      console.log(`📡 Health Check: http://localhost:${PORT}/health`);
+    });
+  } catch (err) {
+    console.error('❌ Critical Startup Failure: System validation rules initialization failed.');
+    console.error(err.message || err);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 
 
