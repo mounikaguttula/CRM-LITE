@@ -275,7 +275,7 @@ const metadataService = {
     if (objDef.id) {
       let fQuery = supabase
         .from('field_definitions')
-        .select('id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system')
+        .select('id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values')
         .eq('object_type_id', objDef.id)
         .order('display_order', { ascending: true });
 
@@ -297,6 +297,8 @@ const metadataService = {
           description: f.description || '',
           required: f.required || false,
           is_system: f.is_system || false,
+          picklist_values: f.picklist_values || null,
+          options: f.picklist_values || null,
           isTitle: f.api_name === 'name' || f.api_name === 'title' || f.api_name === 'deal_name' || f.api_name === 'first_name',
         }));
       }
@@ -338,7 +340,16 @@ const metadataService = {
     // Unified collection: Platform Fields + Business Fields
     const allFields = [...PLATFORM_FIELDS];
     businessFields.forEach((bf) => {
-      if (!allFields.some((pf) => pf.name === bf.name)) {
+      const existingIndex = allFields.findIndex((pf) => pf.name.toLowerCase() === (bf.name || '').toLowerCase());
+      if (existingIndex >= 0) {
+        if (bf.picklist_values || bf.options) {
+          allFields[existingIndex] = {
+            ...allFields[existingIndex],
+            picklist_values: bf.picklist_values || bf.options,
+            options: bf.options || bf.picklist_values,
+          };
+        }
+      } else {
         allFields.push(bf);
       }
     });
@@ -589,7 +600,7 @@ const metadataService = {
     // Prepare Relational Metadata Query Promise (object_type_definitions + field_definitions)
     let metaQuery = supabase
       .from('object_type_definitions')
-      .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at, field_definitions!object_type_id(id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system)');
+      .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at, field_definitions!object_type_id(id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values)');
 
 
     if (isUuid(user?.organization_id)) {
@@ -622,6 +633,24 @@ const metadataService = {
       console.error('Failed to fetch platform metadata:', metaRes.error.message);
     }
     const availableObjects = metaRes?.data || [];
+
+    // Ensure core System Object Definitions (User) are included if not present in DB table
+    if (!availableObjects.some(o => o.api_name === 'user')) {
+      availableObjects.push({
+        id: 'sys_user_obj_def',
+        organization_id: null,
+        api_name: 'user',
+        display_name: 'User',
+        description: 'System user accounts, security roles, and access management.',
+        is_system: true,
+        field_definitions: [
+          { id: 'uf_name', api_name: 'name', display_name: 'Full Name', field_type: 'text', required: true, is_system: true },
+          { id: 'uf_email', api_name: 'email', display_name: 'Email Address', field_type: 'email', required: true, is_system: true },
+          { id: 'uf_role', api_name: 'role', display_name: 'Security Role', field_type: 'text', required: false, is_system: true },
+          { id: 'uf_status', api_name: 'status', display_name: 'User Status', field_type: 'picklist', required: false, is_system: true, picklist_values: ['Active', 'Inactive', 'Suspended'] },
+        ]
+      });
+    }
 
     // Measure Navigation query execution time
     const tNavStart = Date.now();
@@ -754,6 +783,8 @@ const metadataService = {
           description: f.description || '',
           required: f.required || false,
           is_system: f.is_system || false,
+          picklist_values: f.picklist_values || null,
+          options: f.picklist_values || null,
           isTitle: f.api_name === 'name' || f.api_name === 'title' || f.api_name === 'deal_name' || f.api_name === 'first_name',
         }));
       } else {
@@ -808,8 +839,16 @@ const metadataService = {
 
 
       objectTypes[obj.api_name] = {
+        id: obj.id,
+        api_name: obj.api_name,
         displayName: obj.display_name,
         pluralDisplayName: obj.display_name,
+        description: obj.description || '',
+        is_custom: !obj.is_system && (obj.api_name.endsWith('__c') || obj.organization_id !== null),
+        is_system: obj.is_system || false,
+        organization_id: obj.organization_id || null,
+        created_at: obj.created_at || null,
+        updated_at: obj.updated_at || null,
         icon: obj.icon || '📁',
         fields: cleanFields,
         views: {

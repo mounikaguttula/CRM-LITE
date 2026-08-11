@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS public.universal_table (
 -- ---------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.validation_rules (
   id uuid NOT NULL DEFAULT gen_random_uuid (),
-  organization_id uuid NOT NULL,
+  organization_id uuid NULL,
   object_name text NOT NULL,
   rule_name text NOT NULL,
   error_message text NOT NULL,

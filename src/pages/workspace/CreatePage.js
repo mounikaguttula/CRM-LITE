@@ -226,6 +226,35 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     let fieldEl;
 
     if (f.type === 'picklist' || f.type === 'dropdown') {
+      const rawOptions = (Array.isArray(f.options) && f.options.length > 0)
+        ? f.options
+        : (Array.isArray(f.picklist_values) && f.picklist_values.length > 0)
+        ? f.picklist_values
+        : (Array.isArray(f.picklistValues) && f.picklistValues.length > 0)
+        ? f.picklistValues
+        : null;
+
+      let optionsList = rawOptions;
+      if (!optionsList || optionsList.length === 0) {
+        const name = (f.name || '').toLowerCase();
+        const label = (f.label || '').toLowerCase();
+        if (name.includes('industry') || label.includes('industry')) {
+          optionsList = ['Manufacturing', 'Retail', 'Healthcare', 'Education', 'Financial Services', 'IT / Software', 'Telecommunications', 'Construction', 'Real Estate', 'Transportation', 'Energy / Utilities', 'Government', 'Agriculture', 'Hospitality', 'Professional Services'];
+        } else if (name.includes('score') || label.includes('score')) {
+          optionsList = ['1', '2', '3', '4', '5'];
+        } else if (name.includes('contact') || label.includes('preferred contact')) {
+          optionsList = ['Email', 'Mobile'];
+        } else if (name === 'source' || label.includes('source')) {
+          optionsList = ['Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Other'];
+        } else if (name === 'status' || label.includes('status')) {
+          optionsList = ['New', 'Qualified', 'Not Qualified', 'Converted'];
+        } else if (name === 'stage' || label.includes('stage')) {
+          optionsList = ['Qualification', 'Needs Analysis', 'Proposal/Quote', 'Negotiation/Review', 'Closed Won', 'Closed Lost'];
+        } else {
+          optionsList = ['Active', 'Inactive'];
+        }
+      }
+
       fieldEl = (
         <select
           style={selectStyle(hasError)}
@@ -235,9 +264,13 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
           onBlur={focusOff(hasError)}
         >
           <option value="">Select {f.label.toLowerCase()}…</option>
-          {(f.options || ['Qualification', 'Needs Analysis', 'Proposal/Quote', 'Negotiation/Review', 'Closed Won', 'Closed Lost']).map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
+          {optionsList.map((opt) => {
+            const optVal = typeof opt === 'object' ? (opt.value || opt.label) : String(opt);
+            const optLabel = typeof opt === 'object' ? (opt.label || opt.value) : String(opt);
+            return (
+              <option key={optVal} value={optVal}>{optLabel}</option>
+            );
+          })}
         </select>
       );
     } else if (f.type === 'lookup' || isOwner || isCompany || isContact) {
