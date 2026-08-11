@@ -195,17 +195,28 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
 
   if (nameLower.includes('owner') || nameLower.includes('created_by') || nameLower.includes('updated_by') || nameLower.includes('user')) {
     if (val && isUuid(val)) {
-      if (currentUser && (val === currentUser.id || val === currentUser.user_id)) {
-        return currentUser.name || currentUser.email || 'Admin User';
+      if (lookupMap && lookupMap[val]) {
+        const u = lookupMap[val];
+        const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
+        if (uName) return uName;
       }
-      if (lookupMap.users?.[val]) return lookupMap.users[val].name || lookupMap.users[val].email;
+      if (lookupMap.users?.[val]) {
+        const u = lookupMap.users[val];
+        const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
+        if (uName) return uName;
+      }
+      if (currentUser && (val === currentUser.id || val === currentUser.user_id)) {
+        const cName = currentUser.name || (`${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim()) || currentUser.email || 'Admin User';
+        return cName;
+      }
     }
     if (val && typeof val === 'string' && !isUuid(val)) return val;
     if (record?.created_by_name) return record.created_by_name;
     if (record?.created_by_user?.name) return record.created_by_user.name;
     if (record?.owner_name) return record.owner_name;
     if (record?.owner?.name) return record.owner.name;
-    return currentUser?.name || currentUser?.email || 'Admin User';
+    const cName = currentUser?.name || (`${currentUser?.first_name || ''} ${currentUser?.last_name || ''}`.trim()) || currentUser?.email || 'Admin User';
+    return cName;
   }
 
   if (!val) return '—';
@@ -314,7 +325,7 @@ function objectIcon(objectTypeId) {
 }
 
 /* ─── Derive Rich Left-side Header Sub-metadata ─── */
-function deriveHeaderMetadata(objectTypeId, record, currentUser) {
+function deriveHeaderMetadata(objectTypeId, record, currentUser, organization, company, lookupMap) {
   if (!record) return [];
   const items = [];
 
@@ -323,9 +334,9 @@ function deriveHeaderMetadata(objectTypeId, record, currentUser) {
     items.push({ icon: 'email', label: email });
   }
 
-  const owner = record.owner_name || (record.owner && record.owner.name) || currentUser?.name;
-  if (owner) {
-    items.push({ icon: 'user', label: `Owner: ${owner}` });
+  const ownerVal = formatLookupValue('owner', record.owner_id || record.owner, record, currentUser, organization, company, lookupMap);
+  if (ownerVal && ownerVal !== '—') {
+    items.push({ icon: 'user', label: `Owner: ${ownerVal}` });
   }
 
   const createdDate = record.created_at || record.created_date;
@@ -348,7 +359,7 @@ function formatKPIValue(val, isCurrency = false) {
 }
 
 /* ─── Derive 3 dynamic KPI glassmorphism stat tiles for Header Banner (Strict Empirical Data) ─── */
-function deriveHeaderTiles(objectTypeId, record, currentUser) {
+function deriveHeaderTiles(objectTypeId, record, currentUser, organization, company, lookupMap) {
   if (!record) return [];
   const type = String(objectTypeId || '').toLowerCase();
 
@@ -387,8 +398,8 @@ function deriveHeaderTiles(objectTypeId, record, currentUser) {
     const phone = getRealVal(['phone', 'mobile']);
     if (phone) tiles.push({ label: 'Contact', value: phone, color: '#4facfe' });
 
-    const owner = record.owner_name || (record.owner && record.owner.name);
-    if (owner) tiles.push({ label: 'Owner', value: owner, color: '#00b09b' });
+    const ownerVal = formatLookupValue('owner', record.owner_id || record.owner, record, currentUser, organization, company, lookupMap);
+    if (ownerVal && ownerVal !== '—') tiles.push({ label: 'Owner', value: ownerVal, color: '#00b09b' });
   } else if (type.includes('company') || type.includes('account')) {
     const industry = getRealVal(['industry', 'sector']);
     if (industry) tiles.push({ label: 'Industry', value: industry, color: '#4facfe' });
@@ -412,9 +423,9 @@ function deriveHeaderTiles(objectTypeId, record, currentUser) {
       tiles.push({ label: 'Created', value: formatDateValue(created), color: '#4facfe' });
     }
 
-    const owner = record.owner_name || (record.owner && record.owner.name) || currentUser?.name;
-    if (owner && !tiles.some((t) => t.label === 'Owner')) {
-      tiles.push({ label: 'Owner', value: owner, color: '#a18cd1' });
+    const ownerVal = formatLookupValue('owner', record.owner_id || record.owner, record, currentUser, organization, company, lookupMap);
+    if (ownerVal && ownerVal !== '—' && !tiles.some((t) => t.label === 'Owner')) {
+      tiles.push({ label: 'Owner', value: ownerVal, color: '#a18cd1' });
     }
   }
 
@@ -900,6 +911,21 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           }
 
           setLineItems(loadedItems);
+
+          if (currentObjKey.includes('deal') && loadedItems && loadedItems.length > 0) {
+            const calcTotal = loadedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+            if (calcTotal > 0) {
+              setRecord((prev) => (prev ? { ...prev, amount: calcTotal } : prev));
+              const payloadToSync = {
+                ...(recData || {}),
+                amount: calcTotal,
+                line_items: loadedItems,
+              };
+              apiPut(`/objects/${objectTypeId}/${curId}`, payloadToSync)
+                .catch(() => apiPut(`/deals/${curId}`, payloadToSync))
+                .catch((err) => console.warn('Auto-syncing deal amount failed soft:', err));
+            }
+          }
         }
       })
       .catch((err) => {
@@ -1288,9 +1314,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return statusBadge(val);
     }
 
-    if (fNameLower.includes('amount') || f.type === 'currency') {
-      const numVal = Number(val);
-      if (!isNaN(numVal) && val !== null && val !== '') {
+    if (fNameLower.includes('amount') || f.type === 'currency' || fNameLower.includes('revenue') || fNameLower.includes('value')) {
+      const targetVal = val !== undefined && val !== null && val !== '' ? val : (record?.amount ?? (grandTotalAmount > 0 ? grandTotalAmount : undefined));
+      const numVal = Number(targetVal);
+      if (!isNaN(numVal) && targetVal !== null && targetVal !== undefined && targetVal !== '') {
         return <span style={{ fontWeight: 800, color: '#0f172a', fontSize: '1.05rem' }}>${numVal.toLocaleString()}</span>;
       }
     }
@@ -1635,7 +1662,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
               {/* Right: Stat Tiles */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', animation: 'dp-fadeSlideIn 0.5s 0.4s both', justifyContent: 'flex-end' }}>
-                {deriveHeaderTiles(objectTypeId, record, currentUser).map((tile, i) => (
+                {deriveHeaderTiles(objectTypeId, record, currentUser, organization, company, lookupMap).map((tile, i) => (
                   <div
                     key={i}
                     style={{

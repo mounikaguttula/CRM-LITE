@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { apiGet, apiPost, apiDelete } from '../../../api/client';
-import { Search, UserPlus, Users, User, Mail, Building2, Lock, CheckCircle2, X, Trash2, AlertTriangle } from 'lucide-react';
+import { apiGet, apiPost, apiPut, apiDelete } from '../../../api/client';
+import { Search, UserPlus, Users, User, Mail, Building2, Lock, CheckCircle2, X, Trash2, AlertTriangle, Shield, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import WorkspaceContext from '../../../context/WorkspaceContext';
 
 const Avatar = ({ initials, size = 32 }) => (
@@ -24,29 +24,227 @@ const Avatar = ({ initials, size = 32 }) => (
   </div>
 );
 
+const RolePicklist = ({ roles = [], value = '', onChange, placeholder = 'Select Role...' }) => {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const buttonRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const selectedRole = roles.find((r) => String(r.id) === String(value));
+
+  const updateCoords = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const dropdownHeight = 240;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUp = spaceBelow < dropdownHeight && rect.top > dropdownHeight;
+
+      setCoords({
+        top: openUp ? Math.max(10, rect.top - dropdownHeight - 6) : rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+        maxHeight: openUp ? Math.min(200, rect.top - 30) : Math.min(200, window.innerHeight - rect.bottom - 20),
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      updateCoords();
+      window.addEventListener('resize', updateCoords);
+      window.addEventListener('scroll', updateCoords, true);
+    }
+    return () => {
+      window.removeEventListener('resize', updateCoords);
+      window.removeEventListener('scroll', updateCoords, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        buttonRef.current && !buttonRef.current.contains(e.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredRoles = roles.filter((r) => {
+    const name = (r.role_name || r.name || '').toLowerCase();
+    const desc = (r.description || '').toLowerCase();
+    return name.includes(search.toLowerCase()) || desc.includes(search.toLowerCase());
+  });
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => {
+          updateCoords();
+          setOpen((prev) => !prev);
+        }}
+        style={{
+          width: '100%',
+          height: 46,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 14px',
+          borderRadius: 12,
+          border: open ? '1.5px solid #6366f1' : '1px solid #cbd5e1',
+          background: '#f8fafc',
+          color: selectedRole ? '#0f172a' : '#94a3b8',
+          fontSize: '0.88rem',
+          fontWeight: selectedRole ? 600 : 400,
+          cursor: 'pointer',
+          boxShadow: open ? '0 0 0 3px rgba(99,102,241,0.15)' : 'none',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+          <Shield size={17} style={{ color: selectedRole ? '#6366f1' : '#94a3b8', flexShrink: 0 }} />
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {selectedRole ? (selectedRole.role_name || selectedRole.name) : placeholder}
+          </span>
+        </div>
+        {open ? <ChevronUp size={16} style={{ color: '#6366f1' }} /> : <ChevronDown size={16} style={{ color: '#94a3b8' }} />}
+      </button>
+
+      {open && ReactDOM.createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            top: coords.top,
+            left: coords.left,
+            width: coords.width,
+            zIndex: 9999999,
+            background: '#ffffff',
+            borderRadius: 14,
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 20px 45px -8px rgba(0, 0, 0, 0.25), 0 8px 16px rgba(0,0,0,0.08)',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Top Search Box */}
+          <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, color: '#94a3b8' }} />
+              <input
+                type="text"
+                placeholder="Search role..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '6px 10px 6px 30px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  fontSize: 12.5,
+                  color: '#1e293b',
+                  outline: 'none',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Options List */}
+          <div className="orbit-scrollbar" style={{ maxHeight: coords.maxHeight || 200, overflowY: 'auto', padding: '6px 0' }}>
+            {filteredRoles.length === 0 ? (
+              <div style={{ padding: '14px', textAlign: 'center', fontSize: 12.5, color: '#94a3b8' }}>
+                No roles found matching "{search}"
+              </div>
+            ) : (
+              filteredRoles.map((r) => {
+                const isSelected = String(r.id) === String(value);
+                const roleName = r.role_name || r.name;
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => {
+                      onChange(r.id);
+                      setOpen(false);
+                      setSearch('');
+                    }}
+                    style={{
+                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      cursor: 'pointer',
+                      background: isSelected ? 'rgba(99,102,241,0.08)' : 'transparent',
+                      transition: 'background 0.12s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <div style={{ paddingRight: 10 }}>
+                      <div style={{ fontSize: 13, fontWeight: isSelected ? 700 : 600, color: isSelected ? '#4338ca' : '#1e293b' }}>
+                        {roleName}
+                      </div>
+                      {r.description && (
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {r.description}
+                        </div>
+                      )}
+                    </div>
+                    {isSelected && <Check size={16} style={{ color: '#4338ca', flexShrink: 0 }} />}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+};
+
 function UserManagement() {
   const { company } = useContext(WorkspaceContext) || {};
   const orgId = company?.organization_code || company?.code || company?.id || '';
 
   const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [editModalUser, setEditModalUser] = useState(null);
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', confirmPassword: '', role_id: '' });
   const [submitting, setSubmitting] = useState(false);
+  const [updatingUser, setUpdatingUser] = useState(false);
   const [deleteModalUser, setDeleteModalUser] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [inviteError, setInviteError] = useState(null);
+  const [editError, setEditError] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
     async function loadData() {
       try {
         setLoading(true);
-        const uData = await apiGet('/users').catch(() => []);
+        const [uData, rData] = await Promise.all([
+          apiGet('/users').catch(() => []),
+          apiGet('/roles').catch(() => apiGet('/api/roles')).catch(() => []),
+        ]);
         if (isMounted) {
           setUsers(Array.isArray(uData) ? uData : uData?.data || []);
+          setRoles(Array.isArray(rData) ? rData : rData?.data || []);
         }
       } catch (err) {
         console.error(err);
@@ -66,8 +264,6 @@ function UserManagement() {
     setDeleteModalUser(userObj);
     setDeleteError(null);
   };
-
-  const [toastMessage, setToastMessage] = useState(null);
 
   const confirmDeleteUser = async () => {
     if (!deleteModalUser) return;
@@ -93,6 +289,67 @@ function UserManagement() {
     }
   };
 
+  const handleEditClick = (u) => {
+    setEditModalUser({
+      id: u.id,
+      name: u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email,
+      email: u.email || '',
+      role_id: u.role_id || '',
+    });
+    setEditError(null);
+  };
+
+  const confirmUpdateUser = async (e) => {
+    e.preventDefault();
+    if (!editModalUser) return;
+    setUpdatingUser(true);
+    setEditError(null);
+
+    const nameParts = editModalUser.name.trim().split(/\s+/);
+    const first_name = nameParts[0] || '';
+    const last_name = nameParts.slice(1).join(' ') || '';
+
+    try {
+      const updated = await apiPut(`/users/${editModalUser.id}`, {
+        first_name,
+        last_name,
+        email: editModalUser.email,
+        role_id: editModalUser.role_id,
+      });
+
+      const selectedRole = roles.find((r) => String(r.id) === String(editModalUser.role_id));
+      const roleName = updated?.role_name || updated?.role || (selectedRole ? selectedRole.role_name || selectedRole.name : 'Member');
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === editModalUser.id
+            ? {
+              ...u,
+              ...updated,
+              name: editModalUser.name,
+              first_name,
+              last_name,
+              email: editModalUser.email,
+              role_id: editModalUser.role_id,
+              role: roleName,
+              role_name: roleName,
+            }
+            : u
+        )
+      );
+
+      const targetName = editModalUser.name || 'User';
+      setEditModalUser(null);
+      setToastMessage(`User "${targetName}" updated successfully!`);
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (err) {
+      console.error('Update user error:', err);
+      setEditError(err?.message || 'Failed to update user profile.');
+    } finally {
+      setUpdatingUser(false);
+    }
+  };
+
   const handleAddUser = async (e) => {
     e.preventDefault();
     setInviteError(null);
@@ -108,21 +365,29 @@ function UserManagement() {
     const last_name = nameParts.slice(1).join(' ') || '';
 
     try {
+      const selectedRole = roles.find((r) => String(r.id) === String(newUser.role_id));
       const created = await apiPost('/users/invite', {
         email: newUser.email,
         first_name,
         last_name,
         password: newUser.password,
+        role_id: newUser.role_id,
       });
+
+      const roleName = created.role_name || created.role || (selectedRole ? selectedRole.role_name || selectedRole.name : 'Member');
 
       const normalizedCreated = {
         ...created,
-        name: created.name || `${created.first_name || ''} ${created.last_name || ''}`.trim() || created.email
+        name: created.name || `${created.first_name || ''} ${created.last_name || ''}`.trim() || created.email,
+        role: roleName,
+        role_name: roleName,
       };
 
       setUsers((prev) => [...prev, normalizedCreated]);
       setShowModal(false);
-      setNewUser({ name: '', email: '', password: '', confirmPassword: '' });
+      setNewUser({ name: '', email: '', password: '', confirmPassword: '', role_id: '' });
+      setToastMessage(`User "${normalizedCreated.name}" invited successfully!`);
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       setInviteError(err.message || 'Failed to invite user');
     } finally {
@@ -194,8 +459,9 @@ function UserManagement() {
               </thead>
               <tbody>
                 {filteredUsers.map((u) => {
-                  const userName = u.name || u.email || 'User';
-                  const roleTitle = u.role_name || u.role || 'Member';
+                  const userName = u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || 'User';
+                  const matchedRole = roles.find((r) => String(r.id) === String(u.role_id));
+                  const roleTitle = u.role_name || u.role || (matchedRole ? (matchedRole.role_name || matchedRole.name) : 'Member');
                   const isAdmin = String(roleTitle).toLowerCase().includes('admin');
                   return (
                     <tr key={u.id || u.email} style={{ borderBottom: '1px solid rgba(99,102,241,0.08)' }} className="glass-hover">
@@ -220,7 +486,12 @@ function UserManagement() {
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-                          <button style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Edit</button>
+                          <button
+                            onClick={() => handleEditClick(u)}
+                            style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                          >
+                            Edit
+                          </button>
                           {!isAdmin && (
                             <button
                               onClick={() => handleDeleteClick(u)}
@@ -251,6 +522,7 @@ function UserManagement() {
         )}
       </div>
 
+      {/* Invite User Modal */}
       {showModal && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
@@ -325,6 +597,17 @@ function UserManagement() {
                     style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
                   />
                 </div>
+              </div>
+
+              {/* Role Picklist */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Assign Role</label>
+                <RolePicklist
+                  roles={roles}
+                  value={newUser.role_id || ''}
+                  onChange={(roleId) => setNewUser((p) => ({ ...p, role_id: roleId }))}
+                  placeholder="Select Role..."
+                />
               </div>
 
               {/* Organization ID */}
@@ -406,6 +689,127 @@ function UserManagement() {
                 <CheckCircle2 size={18} />
                 <span>{submitting ? 'Creating User...' : 'Create User'}</span>
               </button>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Edit User Modal */}
+      {editModalUser && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div className="orbit-scrollbar" style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 440,
+            maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', padding: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', position: 'relative',
+          }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <h3 className="font-display" style={{ margin: 0, fontSize: 19, fontWeight: 700, color: '#1e293b' }}>Edit User & Role</h3>
+              <button 
+                type="button" 
+                onClick={() => setEditModalUser(null)}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {editError && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+                fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            <form onSubmit={confirmUpdateUser}>
+              {/* Full Name */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Full Name</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
+                    <User size={18} />
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Full Name"
+                    value={editModalUser.name || ''}
+                    onChange={(e) => setEditModalUser((p) => ({ ...p, name: e.target.value }))}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+              {/* Email Address */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Email Address</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
+                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
+                    <Mail size={17} />
+                  </div>
+                  <input
+                    type="email"
+                    required
+                    placeholder="name@company.com"
+                    value={editModalUser.email || ''}
+                    onChange={(e) => setEditModalUser((p) => ({ ...p, email: e.target.value }))}
+                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+              {/* Role Picklist */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Assigned Role</label>
+                <RolePicklist
+                  roles={roles}
+                  value={editModalUser.role_id || ''}
+                  onChange={(roleId) => setEditModalUser((p) => ({ ...p, role_id: roleId }))}
+                  placeholder="Select Role..."
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setEditModalUser(null)}
+                  disabled={updatingUser}
+                  style={{
+                    flex: 1, height: 44, borderRadius: 12, border: '1px solid #cbd5e1',
+                    background: '#ffffff', color: '#334155', fontWeight: 600, fontSize: '0.88rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingUser}
+                  style={{
+                    flex: 1, height: 44, borderRadius: 12, border: 'none',
+                    background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                    color: '#ffffff', fontWeight: 600, fontSize: '0.88rem',
+                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)'
+                  }}
+                >
+                  {updatingUser ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
             </form>
           </div>
         </div>,

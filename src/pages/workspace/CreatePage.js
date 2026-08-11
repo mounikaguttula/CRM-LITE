@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost } from '../../api/client';
 import { ChevronRight, ArrowLeft, Save, Plus, X, AlertTriangle } from 'lucide-react';
+import CustomPicklist from '../../components/CustomPicklist';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
 const C = {
@@ -256,22 +257,13 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       }
 
       fieldEl = (
-        <select
-          style={selectStyle(hasError)}
+        <CustomPicklist
+          options={optionsList}
           value={formData[f.name] || ''}
-          onChange={(e) => handleChange(f.name, e.target.value)}
-          onFocus={focusOn}
-          onBlur={focusOff(hasError)}
-        >
-          <option value="">Select {f.label.toLowerCase()}…</option>
-          {optionsList.map((opt) => {
-            const optVal = typeof opt === 'object' ? (opt.value || opt.label) : String(opt);
-            const optLabel = typeof opt === 'object' ? (opt.label || opt.value) : String(opt);
-            return (
-              <option key={optVal} value={optVal}>{optLabel}</option>
-            );
-          })}
-        </select>
+          onChange={(val) => handleChange(f.name, val)}
+          placeholder={`Select ${f.label.toLowerCase()}…`}
+          hasError={hasError}
+        />
       );
     } else if (f.type === 'lookup' || isOwner || isCompany || isContact) {
       const options = isOwner
@@ -283,24 +275,13 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
         : [];
 
       fieldEl = (
-        <select
-          style={selectStyle(hasError)}
+        <CustomPicklist
+          options={options}
           value={formData[f.name] || ''}
-          onChange={(e) => handleChange(f.name, e.target.value)}
-          onFocus={focusOn}
-          onBlur={focusOff(hasError)}
-        >
-          <option value="">-- Select {f.label} --</option>
-          {options.map((opt) => {
-            const optVal = opt.id || opt.user_id || opt.name;
-            const optLabel = opt.name || opt.displayName || opt.email || opt.title || optVal;
-            return (
-              <option key={optVal} value={optVal}>
-                {optLabel}
-              </option>
-            );
-          })}
-        </select>
+          onChange={(val) => handleChange(f.name, val)}
+          placeholder={`-- Select ${f.label} --`}
+          hasError={hasError}
+        />
       );
     } else if (isNotes) {
       fieldEl = (

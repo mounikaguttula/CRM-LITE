@@ -16,6 +16,10 @@ router.post('/users/invite', userController.inviteUser);
 router.post('/api/users/invite', userController.inviteUser);
 router.post('/invite', userController.inviteUser);
 
+router.put('/users/:id', userController.updateUser);
+router.put('/api/users/:id', userController.updateUser);
+router.put('/:id', userController.updateUser);
+
 router.delete('/users/:id', userController.deleteUser);
 router.delete('/api/users/:id', userController.deleteUser);
 router.delete('/:id', userController.deleteUser);

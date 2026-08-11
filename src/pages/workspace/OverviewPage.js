@@ -614,6 +614,8 @@ function KpiStatCard({ label, raw, prefix, suffix, delta, up, color, glow, icon:
 function LeadQRScannerContent() {
   const navigate = useNavigate();
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraDenied, setCameraDenied] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
   const [rawPayload, setRawPayload] = useState('');
   const [manualPayload, setManualPayload] = useState('');
   const [scannedResult, setScannedResult] = useState('');
@@ -640,6 +642,8 @@ function LeadQRScannerContent() {
       }
       setCameraActive(false);
     } else {
+      setCameraError(null);
+      setCameraDenied(false);
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         streamRef.current = stream;
@@ -649,7 +653,9 @@ function LeadQRScannerContent() {
         setCameraActive(true);
       } catch (err) {
         console.warn('Camera stream error:', err);
-        setCameraActive(true);
+        setCameraActive(false);
+        setCameraDenied(true);
+        setCameraError('Camera access denied or unavailable. Please enable camera permissions in your browser settings.');
       }
     }
   };
@@ -839,10 +845,28 @@ function LeadQRScannerContent() {
               <div style={{ fontSize: 15, fontWeight: 800, color: '#1c2033', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Camera size={18} style={{ color: '#6366f1' }} /> Camera Scanner
               </div>
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: cameraActive ? '#047857' : 'var(--text-faint)', background: cameraActive ? 'rgba(52,211,153,0.12)' : 'rgba(0,0,0,0.04)', padding: '3px 10px', borderRadius: 20, border: `1px solid ${cameraActive ? 'rgba(52,211,153,0.3)' : 'transparent'}` }}>
-                {cameraActive ? 'Camera Active' : 'Camera Idle'}
+              <span style={{
+                fontSize: 11.5, fontWeight: 600,
+                color: cameraActive ? '#047857' : (cameraDenied ? '#be123c' : 'var(--text-faint)'),
+                background: cameraActive ? 'rgba(52,211,153,0.12)' : (cameraDenied ? '#fef2f2' : 'rgba(0,0,0,0.04)'),
+                padding: '3px 10px', borderRadius: 20,
+                border: `1px solid ${cameraActive ? 'rgba(52,211,153,0.3)' : (cameraDenied ? '#fecaca' : 'transparent')}`
+              }}>
+                {cameraActive ? 'Camera Active' : (cameraDenied ? 'Permission Denied' : 'Camera Idle')}
               </span>
             </div>
+
+            {cameraError && (
+              <div style={{
+                padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca',
+                color: '#be123c', fontSize: 12, fontWeight: 600,
+                marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={15} flexShrink={0} />
+                <span>{cameraError}</span>
+              </div>
+            )}
 
             {/* Video Viewport Box */}
             <div
@@ -889,8 +913,12 @@ function LeadQRScannerContent() {
                   <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                     <Camera size={28} color="rgba(255,255,255,0.6)" />
                   </div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#ffffff' }}>Camera Preview</div>
-                  <div style={{ fontSize: 12, marginTop: 4, color: 'rgba(255,255,255,0.4)' }}>Click Start Camera to begin QR code scan</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#ffffff' }}>
+                    {cameraDenied ? 'Camera Blocked' : 'Camera Preview'}
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 4, color: 'rgba(255,255,255,0.4)' }}>
+                    {cameraDenied ? 'Please unblock camera in browser settings to scan' : 'Click Start Camera to begin QR code scan'}
+                  </div>
                 </div>
               )}
             </div>
@@ -900,10 +928,16 @@ function LeadQRScannerContent() {
               <button
                 type="button"
                 onClick={toggleCamera}
+                disabled={cameraDenied}
                 className="orbit-btn-primary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 20px', borderRadius: 10, fontSize: 13, fontWeight: 700 }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '9px 20px', borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  opacity: cameraDenied ? 0.5 : 1,
+                  cursor: cameraDenied ? 'not-allowed' : 'pointer'
+                }}
               >
-                <Camera size={15} /> {cameraActive ? 'Stop Camera' : 'Start Camera'}
+                <Camera size={15} /> {cameraActive ? 'Stop Camera' : (cameraDenied ? 'Camera Blocked' : 'Start Camera')}
               </button>
 
               <button
@@ -1166,20 +1200,32 @@ function getModuleSubtitle(key, pluralName) {
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
 /* ─── Format Lookup & Owner IDs to Human Names ───────────────── */
-function formatLookupValue(fieldName, val, record, currentUser, organization, company) {
+function formatLookupValue(fieldName, val, record, currentUser, organization, company, lookupMap) {
   const nameLower = String(fieldName || '').toLowerCase();
 
   if (nameLower.includes('owner') || nameLower.includes('created_by') || nameLower.includes('updated_by') || nameLower.includes('user')) {
     if (val && isUuid(val)) {
+      if (lookupMap && lookupMap[val]) {
+        const u = lookupMap[val];
+        const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
+        if (uName) return uName;
+      }
+      if (lookupMap && lookupMap.users && lookupMap.users[val]) {
+        const u = lookupMap.users[val];
+        const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
+        if (uName) return uName;
+      }
       if (currentUser && (val === currentUser.id || val === currentUser.user_id)) {
-        return currentUser.name || currentUser.email || 'Admin User';
+        const cName = currentUser.name || (`${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim()) || currentUser.email || 'Admin User';
+        return cName;
       }
     }
     if (val && typeof val === 'string' && !isUuid(val)) return val;
     if (record?.created_by_name) return record.created_by_name;
     if (record?.owner_name) return record.owner_name;
     if (record?.owner?.name) return record.owner.name;
-    return currentUser?.name || currentUser?.email || 'Admin User';
+    const cName = currentUser?.name || (`${currentUser?.first_name || ''} ${currentUser?.last_name || ''}`.trim()) || currentUser?.email || 'Admin User';
+    return cName;
   }
 
   if (!val) return '—';
@@ -1217,6 +1263,7 @@ function ObjectListContent({ objectTypeId }) {
   const fileInputRef = useRef(null);
 
   const [backendFields, setBackendFields] = useState([]);
+  const [lookupMap, setLookupMap] = useState({});
 
   useEffect(() => {
     let isMounted = true;
@@ -1226,8 +1273,11 @@ function ObjectListContent({ objectTypeId }) {
     Promise.all([
       apiGet(`/objects/${objectTypeId}`),
       apiGet(`/metadata/objects/${objectTypeId}/fields`).catch(() => apiGet(`/objects/${objectTypeId}/fields`)).catch(() => null),
+      apiGet('/objects/users').catch(() => apiGet('/users')).catch(() => ({ data: [] })),
+      apiGet('/objects/companies').catch(() => apiGet('/companies')).catch(() => ({ data: [] })),
+      apiGet('/objects/contacts').catch(() => apiGet('/contacts')).catch(() => ({ data: [] })),
     ])
-      .then(([recRes, fieldRes]) => {
+      .then(([recRes, fieldRes, userRes, compRes, contRes]) => {
         if (!isMounted) return;
         const dataList = Array.isArray(recRes) ? recRes : recRes?.data || [];
         setRecords(dataList);
@@ -1236,6 +1286,19 @@ function ObjectListContent({ objectTypeId }) {
         if (fieldsData && fieldsData.length > 0) {
           setBackendFields(fieldsData);
         }
+
+        const map = {};
+        const uList = Array.isArray(userRes) ? userRes : userRes?.data || [];
+        const cList = Array.isArray(compRes) ? compRes : compRes?.data || [];
+        const ctList = Array.isArray(contRes) ? contRes : contRes?.data || [];
+
+        [...uList, ...cList, ...ctList].forEach((item) => {
+          const itemId = item.id || item._id || item.user_id || item.company_id || item.contact_id;
+          if (itemId) {
+            map[itemId] = item;
+          }
+        });
+        setLookupMap(map);
       })
       .catch((err) => {
         console.error(`Error loading records for ${objectTypeId}:`, err);
@@ -1410,6 +1473,32 @@ function ObjectListContent({ objectTypeId }) {
   };
 
   const formatValue = (key, val, record) => {
+    const keyLower = String(key || '').toLowerCase();
+
+    /* Currency & Amount Formatting with Line Items Fallback */
+    if (keyLower.includes('amount') || keyLower.includes('revenue') || keyLower.includes('price') || keyLower.includes('value') || keyLower.includes('profit') || keyLower.includes('total')) {
+      let numVal = val;
+      if (numVal === undefined || numVal === null || numVal === '') {
+        numVal = record?.amount ?? record?.deal_value ?? record?.value ?? (record?.data && (record.data.amount ?? record.data.deal_value ?? record.data.value));
+        if ((numVal === undefined || numVal === null || numVal === '') && record?.id) {
+          try {
+            const saved = localStorage.getItem(`crm_line_items_${record.id}`);
+            if (saved) {
+              const items = JSON.parse(saved);
+              if (Array.isArray(items) && items.length > 0) {
+                numVal = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+              }
+            }
+          } catch (e) { }
+        }
+      }
+      const n = Number(numVal);
+      if (!isNaN(n) && numVal !== null && numVal !== '') {
+        return `$${n.toLocaleString()}`;
+      }
+      return '—';
+    }
+
     if (val === undefined || val === null || val === '') {
       if (key === 'first_name') return record.first_name || (record.name ? record.name.split(' ')[0] : '—');
       if (key === 'last_name') return record.last_name || (record.name && record.name.split(' ').length > 1 ? record.name.split(' ').slice(1).join(' ') : '—');
@@ -1788,7 +1877,7 @@ function ObjectListContent({ objectTypeId }) {
 
                         const keyLower = String(col.key).toLowerCase();
                         if (keyLower.includes('owner')) {
-                          const ownerDisplay = formatLookupValue(col.key, raw || r.owner_id || r.owner, r, currentUser, organization, company);
+                          const ownerDisplay = formatLookupValue(col.key, raw || r.owner_id || r.owner, r, currentUser, organization, company, lookupMap);
                           return (
                             <td key={col.key} style={{ padding: '14px 18px', fontSize: 13, color: 'var(--text-dim)' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
