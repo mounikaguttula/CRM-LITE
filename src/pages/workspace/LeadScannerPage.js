@@ -402,7 +402,10 @@ function LeadScannerPage() {
       email: parsed.email || prev.email,
       phone: parsed.phone || prev.phone,
       company: parsed.company || prev.company,
-      title: parsed.title || prev.title,
+      title: parsed.title || prev.title || '',
+      job_title: parsed.title || prev.title || '',
+      lead_source: parsed.lead_source || prev.lead_source || 'QR Scan',
+      source: parsed.lead_source || prev.lead_source || 'QR Scan',
       description: parsed.description || prev.description,
     }));
   };
@@ -497,6 +500,8 @@ function LeadScannerPage() {
     try {
       await apiPost('/lead-scanner/save', {
         ...leadForm,
+        job_title: leadForm.title || leadForm.job_title || '',
+        source: leadForm.lead_source || leadForm.source || 'QR Scan',
         captchaToken: captchaToken || 'verified_recaptcha_token',
       });
       setNotification({

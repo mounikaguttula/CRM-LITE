@@ -76,6 +76,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   const [submitError, setSubmitError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [lineItemsCount, setLineItemsCount] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -110,6 +111,36 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         const finalCompanies = compList;
 
         const initialForm = recData ? { ...recData } : {};
+
+        // Inspect product line items for Deal / Opportunity objects
+        let dealItems = [];
+        if (recData?.line_items && Array.isArray(recData.line_items) && recData.line_items.length > 0) {
+          dealItems = recData.line_items;
+        } else if (recData?.data?.line_items && Array.isArray(recData.data.line_items) && recData.data.line_items.length > 0) {
+          dealItems = recData.data.line_items;
+        } else {
+          const keysToTry = [recordId, recData?.id, recData?._id].filter(Boolean);
+          for (const k of keysToTry) {
+            try {
+              const saved = localStorage.getItem(`crm_line_items_${k}`);
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  dealItems = parsed;
+                  break;
+                }
+              }
+            } catch (e) { }
+          }
+        }
+
+        if (dealItems.length > 0) {
+          setLineItemsCount(dealItems.length);
+          const lineTotal = dealItems.reduce((s, it) => s + (Number(it.total) || 0), 0);
+          initialForm.amount = lineTotal;
+        } else {
+          setLineItemsCount(0);
+        }
 
         // Resolve company field value to match an existing option value in finalCompanies
         if (initialForm) {
@@ -414,25 +445,17 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     const canUpdate = f.canUpdate !== undefined ? f.canUpdate : (fp ? fp.canUpdate !== false : true);
     const isReadOnly = canUpdate === false;
 
-    const disabledInputStyle = isReadOnly
-      ? { backgroundColor: '#f1f5f9', color: '#64748b', cursor: 'not-allowed', borderColor: '#cbd5e1', opacity: 0.85 }
-      : {};
-
-    const rawVal = formData[f.name];
-    let valToDisplay = '';
-
-    if (isUuid(rawVal) || f.type === 'lookup' || f.name?.toLowerCase().includes('owner') || f.name?.toLowerCase().includes('company')) {
-      valToDisplay = formatLookupValue(f.name, rawVal, formData, currentUser, organization, company);
-    } else if (rawVal !== undefined && rawVal !== null) {
-      valToDisplay = rawVal;
-    } else if (f.name?.toLowerCase() === 'owner' || f.name?.toLowerCase() === 'owner_id') {
-      valToDisplay = currentUser?.name || currentUser?.email || '';
-    }
-
     const fieldName = f.name?.toLowerCase() || '';
     const isOwner = fieldName.includes('owner') || fieldName.includes('created_by') || fieldName.includes('updated_by') || fieldName.includes('user');
     const isCompany = fieldName.includes('company') || fieldName.includes('account') || fieldName.includes('organization');
     const isContact = fieldName.includes('contact');
+
+    const isAmountField = fieldName === 'amount' || fieldName === 'deal_amount' || fieldName === 'value' || fieldName === 'deal_value';
+    const isAmountLocked = isAmountField && lineItemsCount > 0;
+    const effectiveReadOnly = isReadOnly || isAmountLocked;
+    const effectiveDisabledStyle = effectiveReadOnly
+      ? { backgroundColor: '#f1f5f9', color: '#64748b', cursor: 'not-allowed', borderColor: '#cbd5e1', opacity: 0.85 }
+      : {};
 
     let fieldEl;
 
@@ -468,7 +491,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
       fieldEl = (
         <CustomPicklist
-          disabled={isReadOnly}
+          disabled={effectiveReadOnly}
           options={optionsList}
           value={formData[f.name] || ''}
           onChange={(val) => handleChange(f.name, val)}
@@ -536,7 +559,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
       fieldEl = (
         <CustomPicklist
-          disabled={isReadOnly}
+          disabled={effectiveReadOnly}
           options={options.map((opt, idx) => {
             const optVal = opt && typeof opt === 'object'
               ? opt.id || opt._id || opt.user_id || opt.company_name || opt.organization_name || opt.account_name || opt.company || opt.organization || opt.display_name || opt.displayName || `${opt.first_name || ''} ${opt.last_name || ''}`.trim() || opt.email || opt.title
@@ -556,12 +579,15 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     } else if (isNotes) {
       fieldEl = (
         <textarea
-          disabled={isReadOnly}
+          disabled={effectiveReadOnly}
+          readOnly={effectiveReadOnly}
           rows={3}
-          style={{ ...textareaStyle(hasError), ...disabledInputStyle }}
+          style={{ ...textareaStyle(hasError), ...effectiveDisabledStyle }}
           placeholder={`Enter ${f.label.toLowerCase()}…`}
           value={formData[f.name] !== undefined && formData[f.name] !== null ? formData[f.name] : ''}
-          onChange={(e) => handleChange(f.name, e.target.value)}
+          onChange={(e) => {
+            if (!effectiveReadOnly) handleChange(f.name, e.target.value);
+          }}
           onFocus={focusOn}
           onBlur={focusOff(hasError)}
         />
@@ -574,16 +600,30 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       else if (f.type === 'date') typeAttr = 'date';
 
       fieldEl = (
-        <input
-          disabled={isReadOnly}
-          type={typeAttr}
-          style={{ ...inputStyle(hasError), ...disabledInputStyle }}
-          placeholder={`Enter ${f.label.toLowerCase()}`}
-          value={formData[f.name] !== undefined && formData[f.name] !== null ? formData[f.name] : ''}
-          onChange={(e) => handleChange(f.name, e.target.value)}
-          onFocus={focusOn}
-          onBlur={focusOff(hasError)}
-        />
+        <div>
+          <input
+            disabled={effectiveReadOnly}
+            readOnly={effectiveReadOnly}
+            type={typeAttr}
+            style={{
+              ...inputStyle(hasError),
+              ...effectiveDisabledStyle,
+              ...(effectiveReadOnly ? { cursor: 'not-allowed', backgroundColor: '#f1f5f9', color: '#64748b' } : {}),
+            }}
+            placeholder={`Enter ${f.label.toLowerCase()}`}
+            value={formData[f.name] !== undefined && formData[f.name] !== null ? formData[f.name] : ''}
+            onChange={(e) => {
+              if (!effectiveReadOnly) handleChange(f.name, e.target.value);
+            }}
+            onFocus={focusOn}
+            onBlur={focusOff(hasError)}
+          />
+          {isAmountLocked && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.74rem', color: '#4f46e5', marginTop: '6px', fontWeight: 600 }}>
+              <span>🔒 Read-only: Calculated from Product Line Items (${Number(formData[f.name] || 0).toLocaleString()})</span>
+            </div>
+          )}
+        </div>
       );
     }
 

@@ -317,8 +317,12 @@ const metadataService = {
         ];
       } else if (lowerKey.includes('lead')) {
         businessFields = [
+          { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
           { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+          { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
           { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
+          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+          { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
         ];
       } else if (lowerKey.includes('deal')) {
         businessFields = [
@@ -334,6 +338,30 @@ const metadataService = {
           { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
         ];
       }
+    }
+
+    // Ensure standard lead fields (Job Title, Lead Source, etc.) are always present for lead objects even if field_definitions has partial rows
+    const stdLowerKey = String(objectKey).toLowerCase();
+    if (stdLowerKey.includes('lead')) {
+      const stdLeadFields = [
+        { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
+        { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+        { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
+        { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
+        { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+        { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
+      ];
+      stdLeadFields.forEach((slf) => {
+        const hasField = businessFields.some((f) => {
+          const fn = (f.name || f.api_name || '').toLowerCase();
+          if (slf.name === 'title') return fn === 'title' || fn === 'job_title';
+          if (slf.name === 'lead_source') return fn === 'lead_source' || fn === 'source';
+          return fn === slf.name;
+        });
+        if (!hasField) {
+          businessFields.push(slf);
+        }
+      });
     }
 
 
@@ -634,24 +662,6 @@ const metadataService = {
     }
     const availableObjects = metaRes?.data || [];
 
-    // Ensure core System Object Definitions (User) are included if not present in DB table
-    if (!availableObjects.some(o => o.api_name === 'user')) {
-      availableObjects.push({
-        id: 'sys_user_obj_def',
-        organization_id: null,
-        api_name: 'user',
-        display_name: 'User',
-        description: 'System user accounts, security roles, and access management.',
-        is_system: true,
-        field_definitions: [
-          { id: 'uf_name', api_name: 'name', display_name: 'Full Name', field_type: 'text', required: true, is_system: true },
-          { id: 'uf_email', api_name: 'email', display_name: 'Email Address', field_type: 'email', required: true, is_system: true },
-          { id: 'uf_role', api_name: 'role', display_name: 'Security Role', field_type: 'text', required: false, is_system: true },
-          { id: 'uf_status', api_name: 'status', display_name: 'User Status', field_type: 'picklist', required: false, is_system: true, picklist_values: ['Active', 'Inactive', 'Suspended'] },
-        ]
-      });
-    }
-
     // Measure Navigation query execution time
     const tNavStart = Date.now();
     const navigation = await metadataService.getNavigation(user?.organization_id, availableObjects);
@@ -798,8 +808,12 @@ const metadataService = {
           ];
         } else if (lowerKey.includes('lead')) {
           businessFields = [
+            { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
             { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+            { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
             { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
+            { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+            { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
           ];
         } else if (lowerKey.includes('deal')) {
           businessFields = [
@@ -815,6 +829,30 @@ const metadataService = {
             { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
           ];
         }
+      }
+
+      // Ensure standard lead fields (Job Title, Lead Source, etc.) are always present for lead objects even if field_definitions has partial rows
+      const stdLowerObjKey = String(obj.api_name).toLowerCase();
+      if (stdLowerObjKey.includes('lead')) {
+        const stdLeadFields = [
+          { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
+          { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+          { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
+          { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
+          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+          { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
+        ];
+        stdLeadFields.forEach((slf) => {
+          const hasField = businessFields.some((f) => {
+            const fn = (f.name || f.api_name || '').toLowerCase();
+            if (slf.name === 'title') return fn === 'title' || fn === 'job_title';
+            if (slf.name === 'lead_source') return fn === 'lead_source' || fn === 'source';
+            return fn === slf.name;
+          });
+          if (!hasField) {
+            businessFields.push(slf);
+          }
+        });
       }
 
 

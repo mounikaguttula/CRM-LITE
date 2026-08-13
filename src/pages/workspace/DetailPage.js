@@ -865,48 +865,19 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           if (compId && compMap[compId]) setParentCompany(compMap[compId]);
           if (contactId && contMap[contactId]) setPrimaryContact(contMap[contactId]);
 
-          // Load Line Items for Deal
+          // Load Line Items for Deal (DB state as primary source of truth)
           let loadedItems = [];
-          try {
-            const saved = localStorage.getItem(`crm_line_items_${curId}`);
-            if (saved) {
-              loadedItems = JSON.parse(saved);
-            }
-          } catch (e) { }
-
-          if ((!loadedItems || loadedItems.length === 0) && recData?.line_items && Array.isArray(recData.line_items)) {
+          if (recData?.line_items && Array.isArray(recData.line_items)) {
             loadedItems = recData.line_items;
-          }
-
-          // Initial sample line items matching screenshot #3 if first load
-          if ((!loadedItems || loadedItems.length === 0) && (!localStorage.getItem(`crm_line_items_visited_${curId}`))) {
-            loadedItems = [
-              {
-                productId: 'prod-1',
-                name: 'CRM Starter',
-                code: 'CRM-001',
-                quantity: 1,
-                salesPrice: 9999,
-                discount: 0,
-                total: 9999,
-                date: '',
-                description: 'Basic CRM for small teams',
-              },
-              {
-                productId: 'prod-2',
-                name: 'CRM Professional',
-                code: 'CRM-002',
-                quantity: 1,
-                salesPrice: 29999,
-                discount: 0,
-                total: 29999,
-                date: '',
-                description: 'Advanced CRM with automation',
-              },
-            ];
+          } else if (recData?.data?.line_items && Array.isArray(recData.data.line_items)) {
+            loadedItems = recData.data.line_items;
+          } else {
             try {
-              localStorage.setItem(`crm_line_items_${curId}`, JSON.stringify(loadedItems));
-              localStorage.setItem(`crm_line_items_visited_${curId}`, 'true');
+              const saved = localStorage.getItem(`crm_line_items_${curId}`);
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed)) loadedItems = parsed;
+              }
             } catch (e) { }
           }
 
@@ -914,8 +885,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
           if (currentObjKey.includes('deal') && loadedItems && loadedItems.length > 0) {
             const calcTotal = loadedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-            if (calcTotal > 0) {
-              setRecord((prev) => (prev ? { ...prev, amount: calcTotal } : prev));
+            setRecord((prev) => (prev ? { ...prev, amount: calcTotal } : prev));
+            if (recData?.amount !== calcTotal) {
               const payloadToSync = {
                 ...(recData || {}),
                 amount: calcTotal,
@@ -937,7 +908,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     return () => { isMounted = false; };
   }, [objectTypeId, recordId]);
 
-  /* Synchronize line items & update Deal Amount */
+  /* Synchronize line items & update Deal Amount conditionally */
   const syncLineItemsAndAmount = (newItems) => {
     setLineItems(newItems);
     if (recordId) {
@@ -947,20 +918,33 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       } catch (e) { }
     }
 
-    const grandTotal = newItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-
-    setRecord((prev) => (prev ? { ...prev, amount: grandTotal } : prev));
-
     const currentObjKey = String(objectTypeId).toLowerCase();
-    if (recordId && currentObjKey.includes('deal')) {
-      const updatedPayload = {
-        ...(record || {}),
-        amount: grandTotal,
-        line_items: newItems,
-      };
-      apiPut(`/objects/${objectTypeId}/${recordId}`, updatedPayload)
-        .catch(() => apiPut(`/deals/${recordId}`, updatedPayload))
-        .catch((err) => console.warn('Syncing deal amount failed soft:', err));
+    if (newItems && newItems.length > 0) {
+      const grandTotal = newItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+      setRecord((prev) => (prev ? { ...prev, amount: grandTotal } : prev));
+
+      if (recordId && currentObjKey.includes('deal')) {
+        const updatedPayload = {
+          ...(record || {}),
+          amount: grandTotal,
+          line_items: newItems,
+        };
+        apiPut(`/objects/${objectTypeId}/${recordId}`, updatedPayload)
+          .catch(() => apiPut(`/deals/${recordId}`, updatedPayload))
+          .catch((err) => console.warn('Syncing deal amount failed soft:', err));
+      }
+    } else {
+      // If all line items are removed, line_items is empty.
+      // Retain current manually set amount and preserve editability.
+      if (recordId && currentObjKey.includes('deal')) {
+        const updatedPayload = {
+          ...(record || {}),
+          line_items: [],
+        };
+        apiPut(`/objects/${objectTypeId}/${recordId}`, updatedPayload)
+          .catch(() => apiPut(`/deals/${recordId}`, updatedPayload))
+          .catch((err) => console.warn('Syncing empty line items failed soft:', err));
+      }
     }
   };
 
@@ -1262,27 +1246,36 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const getRecordValue = (fName, rec) => {
     if (!rec || !fName) return undefined;
 
-    // 1. Direct top-level check on universal_table record object
-    if (rec[fName] !== undefined && rec[fName] !== null && rec[fName] !== '') {
-      return rec[fName];
+    const aliasesMap = {
+      title: ['title', 'job_title', 'role'],
+      job_title: ['job_title', 'title', 'role'],
+      lead_source: ['lead_source', 'source'],
+      source: ['source', 'lead_source'],
+    };
+
+    const searchKeys = aliasesMap[(fName || '').toLowerCase()] || [fName];
+
+    for (const key of searchKeys) {
+      if (rec[key] !== undefined && rec[key] !== null && rec[key] !== '') {
+        return rec[key];
+      }
+      if (rec.data && typeof rec.data === 'object' && rec.data[key] !== undefined && rec.data[key] !== null && rec.data[key] !== '') {
+        return rec.data[key];
+      }
     }
 
-    // 2. Direct check on universal_table record.data JSON column
-    if (rec.data && typeof rec.data === 'object' && rec.data[fName] !== undefined && rec.data[fName] !== null && rec.data[fName] !== '') {
-      return rec.data[fName];
-    }
+    for (const key of searchKeys) {
+      const targetClean = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const sources = [rec, rec.data || {}];
 
-    // 3. Dynamic Case-Insensitive & Formatted Key Match across all keys in universal_table record
-    const targetClean = String(fName).toLowerCase().replace(/[^a-z0-9]/g, '');
-    const sources = [rec, rec.data || {}];
-
-    for (const src of sources) {
-      if (!src || typeof src !== 'object') continue;
-      for (const [k, v] of Object.entries(src)) {
-        if (k === 'data') continue;
-        const kClean = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (kClean === targetClean && v !== undefined && v !== null && v !== '') {
-          return v;
+      for (const src of sources) {
+        if (!src || typeof src !== 'object') continue;
+        for (const [k, v] of Object.entries(src)) {
+          if (k === 'data') continue;
+          const kClean = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (kClean === targetClean && v !== undefined && v !== null && v !== '') {
+            return v;
+          }
         }
       }
     }

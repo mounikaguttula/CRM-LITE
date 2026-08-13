@@ -17,6 +17,12 @@ const objectService = {
   normalizeRecord: (row) => {
     if (!row) return null;
     const { id, name, status, owner_id, created_by, updated_by, parent_id, secondary_parent_id, data, created_at, updated_at } = row;
+    const dataObj = typeof data === 'object' && data !== null ? data : {};
+
+    // Harmonize alias fields for Job Title and Lead Source
+    const titleVal = dataObj.title || dataObj.job_title || '';
+    const sourceVal = dataObj.lead_source || dataObj.source || '';
+
     return {
       id,
       name,
@@ -28,7 +34,9 @@ const objectService = {
       secondary_parent_id,
       created_at,
       updated_at,
-      ...(typeof data === 'object' && data !== null ? data : {}),
+      ...dataObj,
+      ...(titleVal ? { title: titleVal, job_title: titleVal } : {}),
+      ...(sourceVal ? { lead_source: sourceVal, source: sourceVal } : {}),
     };
   },
 
@@ -121,8 +129,20 @@ const objectService = {
 
     const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = payload;
 
-    const resolvedParent = parent_id || (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : null));
-    const resolvedSecondary = secondary_parent_id || (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : null));
+    // Bi-directional alias syncing for title/job_title and lead_source/source
+    const titleVal = (payload.title || payload.job_title || '').trim();
+    if (titleVal) {
+      customData.title = titleVal;
+      customData.job_title = titleVal;
+    }
+    const sourceVal = (payload.lead_source || payload.source || '').trim();
+    if (sourceVal) {
+      customData.lead_source = sourceVal;
+      customData.source = sourceVal;
+    }
+
+    const resolvedParent = isUuid(parent_id) ? parent_id : (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : null));
+    const resolvedSecondary = isUuid(secondary_parent_id) ? secondary_parent_id : (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : null));
 
     const newRow = {
       organization_id: organizationId,
@@ -174,8 +194,20 @@ const objectService = {
     delete customData.created_at;
     delete customData.updated_at;
 
-    const resolvedParent = parent_id || (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : existing.parent_id));
-    const resolvedSecondary = secondary_parent_id || (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : existing.secondary_parent_id));
+    // Bi-directional alias syncing on update
+    const titleVal = (customData.title || customData.job_title || '').trim();
+    if (titleVal) {
+      customData.title = titleVal;
+      customData.job_title = titleVal;
+    }
+    const sourceVal = (customData.lead_source || customData.source || '').trim();
+    if (sourceVal) {
+      customData.lead_source = sourceVal;
+      customData.source = sourceVal;
+    }
+
+    const resolvedParent = isUuid(parent_id) ? parent_id : (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : (isUuid(existing.parent_id) ? existing.parent_id : null)));
+    const resolvedSecondary = isUuid(secondary_parent_id) ? secondary_parent_id : (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : (isUuid(existing.secondary_parent_id) ? existing.secondary_parent_id : null)));
 
     const updatePayload = {
       name: name || existing.name,
