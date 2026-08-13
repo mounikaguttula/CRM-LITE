@@ -1500,6 +1500,8 @@ function ObjectListContent({ objectTypeId }) {
     }
 
     if (val === undefined || val === null || val === '') {
+      if (key === 'title' || key === 'job_title') return record.title || record.job_title || (record.data && (record.data.title || record.data.job_title)) || '—';
+      if (key === 'lead_source' || key === 'source') return record.lead_source || record.source || (record.data && (record.data.lead_source || record.data.source)) || '—';
       if (key === 'first_name') return record.first_name || (record.name ? record.name.split(' ')[0] : '—');
       if (key === 'last_name') return record.last_name || (record.name && record.name.split(' ').length > 1 ? record.name.split(' ').slice(1).join(' ') : '—');
       if (key === 'contact_name') return record.contact_name || record.name || `${record.first_name || ''} ${record.last_name || ''}`.trim() || '—';

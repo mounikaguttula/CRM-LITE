@@ -97,6 +97,9 @@ const saveScannedLead = async (req, res, next) => {
     const firstName = req.body.first_name || nameParts[0] || fullNameClean;
     const lastName = req.body.last_name || nameParts.slice(1).join(' ') || firstName;
 
+    const rawTitle = (title || req.body?.job_title || req.body?.role || '').trim();
+    const rawSource = (lead_source || req.body?.source || 'QR Scan').trim();
+
     const leadPayload = {
       ...req.body,
       name: fullNameClean,
@@ -105,8 +108,10 @@ const saveScannedLead = async (req, res, next) => {
       email: email ? email.trim() : '',
       phone: phone ? phone.trim() : '',
       company: company ? company.trim() : '',
-      title: title ? title.trim() : '',
-      lead_source: lead_source || 'QR Scan',
+      title: rawTitle,
+      job_title: rawTitle,
+      lead_source: rawSource,
+      source: rawSource,
       description: description || '',
     };
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
+import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost, apiDelete } from '../../api/client';
 import {
   Megaphone, Plus, Search, Trash2, BarChart2, Check, ArrowRight, ArrowLeft,
@@ -145,7 +146,7 @@ function MetricCard({ label, value, sub, icon, color, bg }) {
 }
 
 /* ── Campaign Row Card ── */
-function CampaignCard({ campaign, onTrack, onDelete }) {
+function CampaignCard({ campaign, onTrack, onDelete, canDelete = true }) {
   const [hov, setHov] = useState(false);
   const badge = getStatusBadge(campaign.status);
   const recipientCount = campaign.target_emails?.length || campaign.total_sent || 0;
@@ -236,18 +237,20 @@ function CampaignCard({ campaign, onTrack, onDelete }) {
         </button>
 
         {/* Delete button */}
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(campaign.id, e); }}
-          style={{
-            width: 34, height: 34, borderRadius: 10,
-            background: '#fff1f2', border: '1px solid #fecdd3',
-            color: '#e11d48',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', transition: 'all 0.15s ease',
-          }}
-        >
-          <Trash2 size={14} />
-        </button>
+        {canDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(campaign.id, e); }}
+            style={{
+              width: 34, height: 34, borderRadius: 10,
+              background: '#fff1f2', border: '1px solid #fecdd3',
+              color: '#e11d48',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', transition: 'all 0.15s ease',
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -257,6 +260,14 @@ function CampaignCard({ campaign, onTrack, onDelete }) {
    MAIN PAGE COMPONENT
 ──────────────────────────────────────────────────── */
 function CampaignsPage() {
+  const workspace = useWorkspace() || {};
+  const permissions = workspace.permissions;
+  const campaignPerm = permissions?.campaign || permissions?.campaigns;
+
+  const canRead = campaignPerm?.canRead !== false;
+  const canCreate = campaignPerm?.canCreate !== false && campaignPerm?.canUpdate !== false;
+  const canDelete = campaignPerm?.canDelete !== false;
+
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -290,6 +301,10 @@ function CampaignsPage() {
   };
 
   const handleOpenModal = () => {
+    if (!canCreate) {
+      alert('You do not have permissions to create or send campaigns.');
+      return;
+    }
     const t = EMAIL_TEMPLATES[0];
     setSelectedTemplate(t);
     setFormData({ name: '', subject: t.subject, body: t.body, target_emails: '' });
@@ -369,6 +384,25 @@ function CampaignsPage() {
     { id: 'sent', label: 'Sent', count: campaigns.filter(c => { const s = String(c.status || '').toLowerCase(); return !s.includes('submit') && !s.includes('open'); }).length },
   ];
 
+  if (permissions && !canRead) {
+    return (
+      <div style={{ padding: '60px 36px', maxWidth: 800, margin: '0 auto', textAlign: 'center', fontFamily: "'Inter', -apple-system, sans-serif" }}>
+        <div style={{
+          background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 20,
+          padding: '48px 32px', color: '#be123c', boxShadow: '0 8px 24px rgba(225,29,72,0.08)'
+        }}>
+          <div style={{ width: 56, height: 56, borderRadius: 18, background: 'rgba(225,29,72,0.1)', color: '#e11d48', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <AlertCircle size={28} />
+          </div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: '#9f1239' }}>Access Denied</h2>
+          <p style={{ margin: 0, fontSize: 14, color: '#be123c', fontWeight: 500 }}>
+            Please check with your administrator. You do not have permissions to read campaigns.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: '28px 36px 48px', maxWidth: 1200, margin: '0 auto', fontFamily: "'Inter', -apple-system, sans-serif" }}>
 
@@ -422,20 +456,22 @@ function CampaignsPage() {
           >
             <RefreshCw size={16} />
           </button>
-          <button
-            onClick={handleOpenModal}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '10px 22px', borderRadius: 13,
-              fontSize: 13.5, fontWeight: 700, color: '#ffffff',
-              background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
-              border: 'none', cursor: 'pointer',
-              boxShadow: '0 6px 20px rgba(99,102,241,0.35)',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <Plus size={17} /> New Campaign
-          </button>
+          {canCreate && (
+            <button
+              onClick={handleOpenModal}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '10px 22px', borderRadius: 13,
+                fontSize: 13.5, fontWeight: 700, color: '#ffffff',
+                background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
+                border: 'none', cursor: 'pointer',
+                boxShadow: '0 6px 20px rgba(99,102,241,0.35)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <Plus size={17} /> New Campaign
+            </button>
+          )}
         </div>
       </div>
 
@@ -558,19 +594,21 @@ function CampaignsPage() {
               : `There are currently no campaigns with status "${TABS.find(t => t.id === activeTab)?.label}".`}
           </p>
           {campaigns.length === 0 ? (
-            <button
-              onClick={handleOpenModal}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                padding: '10px 22px', borderRadius: 12,
-                fontSize: 13.5, fontWeight: 700, color: '#ffffff',
-                background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
-                border: 'none', cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(99,102,241,0.3)',
-              }}
-            >
-              <Plus size={16} /> Create First Campaign
-            </button>
+            canCreate && (
+              <button
+                onClick={handleOpenModal}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '10px 22px', borderRadius: 12,
+                  fontSize: 13.5, fontWeight: 700, color: '#ffffff',
+                  background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
+                  border: 'none', cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(99,102,241,0.3)',
+                }}
+              >
+                <Plus size={16} /> Create First Campaign
+              </button>
+            )
           ) : (
             <button
               onClick={() => { setActiveTab('all'); setSearchQuery(''); }}
@@ -595,6 +633,7 @@ function CampaignsPage() {
               campaign={c}
               onTrack={setTrackingCampaign}
               onDelete={handleDeleteCampaign}
+              canDelete={canDelete}
             />
           ))}
         </div>
