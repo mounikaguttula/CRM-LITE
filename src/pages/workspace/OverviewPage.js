@@ -1515,7 +1515,9 @@ function ObjectListContent({ objectTypeId }) {
       try {
         const d = new Date(str);
         if (!isNaN(d.getTime())) {
-          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          const timePart = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+          return `${datePart}, ${timePart}`;
         }
       } catch {
         return str;
@@ -1583,6 +1585,7 @@ function ObjectListContent({ objectTypeId }) {
       const mapHeader = (h) => {
         if (h.includes('first') || h === 'fname') return 'first_name';
         if (h.includes('last') || h === 'lname') return 'last_name';
+        if (h.includes('alternate') || h.includes('duplicate') || h.includes('secondary') || h.includes('alt_email')) return 'alternate_email';
         if (h.includes('email')) return 'email';
         if (h.includes('phone') || h.includes('tel') || h.includes('mobile') || h.includes('alt')) return 'phone';
         if (h.includes('company') || h.includes('organization') || h.includes('org')) return 'company';

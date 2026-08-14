@@ -19,7 +19,7 @@ export default function CustomPicklist({
   const dropdownRef = useRef(null);
 
   // Normalize options array into [{ value, label }] objects
-  const normalizedOptions = (options || []).map((opt) => {
+  const rawNormalized = (options || []).map((opt) => {
     if (typeof opt === 'object' && opt !== null) {
       const val = opt.id || opt.user_id || opt.value || opt.name || opt.label || '';
       const lbl = opt.name || opt.displayName || opt.label || opt.email || opt.title || String(val);
@@ -27,6 +27,11 @@ export default function CustomPicklist({
     }
     return { value: String(opt), label: String(opt) };
   });
+
+  const normalizedOptions = [...rawNormalized];
+  if (value && String(value).trim() !== '' && !normalizedOptions.some((o) => o.value === String(value))) {
+    normalizedOptions.unshift({ value: String(value), label: String(value) });
+  }
 
   const selectedOpt = normalizedOptions.find((o) => o.value === String(value));
 

@@ -28,6 +28,7 @@ import {
   RefreshCw,
   Layers,
   AlertTriangle,
+  MapPin,
 } from 'lucide-react';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
@@ -256,7 +257,13 @@ function formatDateValue(val) {
     try {
       const d = new Date(str);
       if (!isNaN(d.getTime())) {
-        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        const datePart = d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        const hasTime = str.includes('T') || str.includes(':');
+        if (hasTime) {
+          const timePart = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+          return `${datePart}, ${timePart}`;
+        }
+        return datePart;
       }
     } catch (e) { }
   }
@@ -272,14 +279,28 @@ function fieldIcon(fieldName, fieldType) {
   if (n.includes('company') || n.includes('account') || n.includes('organization')) return <Building2 {...p} />;
   if (n.includes('contact')) return <User {...p} />;
   if (n.includes('email')) return <Mail {...p} />;
+  if (n.includes('address') || fieldType === 'address' || n.includes('street') || n.includes('city') || n.includes('state') || n.includes('country') || n.includes('zip')) return <MapPin {...p} />;
   if (n.includes('note') || n.includes('description')) return <FileText {...p} />;
   if (fieldType === 'number' || fieldType === 'currency' || n.includes('amount')) return <Hash {...p} />;
   return null;
 }
 
 /* ─── Merge Record Details & System Information fields (Created & Modified pushed to END) ─── */
-function getAllMergedFields(fields, record) {
+function getAllMergedFields(fields, record, objectTypeId) {
   const f = fields ? [...fields] : [];
+
+  const lowerObj = String(objectTypeId || '').toLowerCase();
+  if (lowerObj.includes('company') || lowerObj.includes('account')) {
+    const stdCompFields = [
+      { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address' },
+      { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address' },
+    ];
+    stdCompFields.forEach((scf) => {
+      if (!f.some((existing) => (existing.name || '').toLowerCase() === scf.name)) {
+        f.push(scf);
+      }
+    });
+  }
 
   const detailsFields = [];
   const sysFieldsMap = new Map();
@@ -1251,6 +1272,9 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       job_title: ['job_title', 'title', 'role'],
       lead_source: ['lead_source', 'source'],
       source: ['source', 'lead_source'],
+      billing_address: ['billing_address', 'address', 'billing_street', 'street'],
+      shipping_address: ['shipping_address', 'address', 'shipping_street', 'street'],
+      address: ['address', 'billing_address', 'shipping_address', 'street'],
     };
 
     const searchKeys = aliasesMap[(fName || '').toLowerCase()] || [fName];
@@ -1406,6 +1430,25 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       );
     }
 
+    if (f.type === 'address' || fNameLower.includes('address') || fNameLower.includes('street')) {
+      if (!val || val === '—') return <span style={{ fontWeight: 600, color: C.dim }}>—</span>;
+      const addrStr = String(val).trim();
+      const encodedMaps = encodeURIComponent(addrStr);
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontWeight: 600, color: C.text, whiteSpace: 'pre-line', lineHeight: 1.45 }}>{addrStr}</span>
+          <a
+            href={`https://maps.google.com/?q=${encodedMaps}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.76rem', color: C.indigo, fontWeight: 700, textDecoration: 'none', marginTop: 2 }}
+          >
+            <MapPin size={12} /> View on Google Maps <ExternalLink size={10} />
+          </a>
+        </div>
+      );
+    }
+
     const rawDisplayVal = val !== undefined && val !== null && val !== '' ? String(val) : '—';
     const displayVal = isUuid(rawDisplayVal)
       ? formatLookupValue(f.name, rawDisplayVal, record, currentUser, organization, company, lookupMap)
@@ -1417,7 +1460,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const currentObjKey = String(objectTypeId).toLowerCase();
 
   /* All fields with Created Date/By, Modified Date/By pushed to VERY END */
-  const mergedFields = getAllMergedFields(meta.fields, record);
+  const mergedFields = getAllMergedFields(meta.fields, record, objectTypeId);
 
   const ghostBtn = {
     display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px',
@@ -1819,13 +1862,14 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 }}
               >
                 {mergedFields.map((f) => {
-                  const isNotes = f.name === 'notes' || f.name === 'description' || f.name === 'note';
                   const isSystemField = (f.name || '').toLowerCase().includes('created') || (f.name || '').toLowerCase().includes('updated') || (f.name || '').toLowerCase().includes('modified');
+                  const renderedVal = renderFieldValue(f);
+                  const strVal = typeof renderedVal === 'string' || typeof renderedVal === 'number' ? String(renderedVal) : '';
+                  const isLongVal = strVal.length > 40 || strVal.includes('\n');
                   return (
                     <div
                       key={f.name}
                       style={{
-                        gridColumn: isNotes ? '1 / -1' : undefined,
                         borderBottom: '1px solid #f1f5f9',
                         paddingBottom: '14px',
                         background: isSystemField ? 'rgba(248,250,252,0.6)' : 'transparent',
@@ -1839,8 +1883,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                           {String(f.label || f.name).toUpperCase()}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.94rem', fontWeight: 600, color: '#0f172a', lineHeight: 1.5, wordBreak: 'break-word' }}>
-                        {renderFieldValue(f)}
+                      <div style={{ fontSize: isLongVal ? '0.8rem' : '0.94rem', fontWeight: isLongVal ? 500 : 600, color: '#0f172a', lineHeight: isLongVal ? 1.4 : 1.5, wordBreak: 'break-word' }}>
+                        {renderedVal}
                       </div>
                     </div>
                   );

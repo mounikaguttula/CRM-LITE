@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPut } from '../../api/client';
-import { ChevronRight, ArrowLeft, Save, X, AlertTriangle } from 'lucide-react';
+import { ChevronRight, ArrowLeft, Save, X, AlertTriangle, MapPin, FileText } from 'lucide-react';
 import CustomPicklist from '../../components/CustomPicklist';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
@@ -203,7 +203,20 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
   /* ── Metadata Normalization & FLS Read Enforcement ── */
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
-  const effectiveFields = fields.length > 0 ? fields : (rawMeta?.fields || []);
+  const effectiveFields = fields.length > 0 ? [...fields] : [...(rawMeta?.fields || [])];
+
+  const lowerObj = String(objectTypeId || '').toLowerCase();
+  if (lowerObj.includes('company') || lowerObj.includes('account')) {
+    const stdCompFields = [
+      { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address' },
+      { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address' },
+    ];
+    stdCompFields.forEach((scf) => {
+      if (!effectiveFields.some((existing) => (existing.name || '').toLowerCase() === scf.name)) {
+        effectiveFields.push(scf);
+      }
+    });
+  }
 
   const fpPerms = permissions?.fieldPermissions || {};
   const visibleFields = effectiveFields
@@ -439,7 +452,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   /* ── Field Renderers ── */
   const renderField = (f) => {
     const hasError = Boolean(errors[f.name]);
-    const isNotes = f.name === 'notes' || f.name === 'description' || f.name === 'note';
+    const isNotes = f.name === 'notes' || f.name === 'description' || f.name === 'note' || f.type === 'address' || (f.name || '').toLowerCase().includes('address') || (f.name || '').toLowerCase().includes('street');
 
     const fp = permissions?.fieldPermissions?.[f.id];
     const canUpdate = f.canUpdate !== undefined ? f.canUpdate : (fp ? fp.canUpdate !== false : true);
@@ -478,8 +491,8 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
           optionsList = ['1', '2', '3', '4', '5'];
         } else if (name.includes('contact') || label.includes('preferred contact')) {
           optionsList = ['Email', 'Mobile'];
-        } else if (name === 'source' || label.includes('source')) {
-          optionsList = ['Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Other'];
+        } else if (name === 'source' || name === 'lead_source' || label.includes('source')) {
+          optionsList = ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'];
         } else if (name === 'status' || label.includes('status')) {
           optionsList = ['New', 'Qualified', 'Not Qualified', 'Converted'];
         } else if (name === 'stage' || label.includes('stage')) {
@@ -628,7 +641,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     }
 
     return (
-      <div key={f.name} style={{ gridColumn: isNotes ? '1 / -1' : undefined }}>
+      <div key={f.name}>
         <label style={labelStyle}>
           {f.label}
           {f.required && <span style={{ color: C.danger, marginLeft: '2px' }}>*</span>}
@@ -802,49 +815,144 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       </div>
 
       {/* ── Main Form Layout ──────────────────────────────────── */}
-      <form onSubmit={handleSubmit} noValidate className="ep-rise">
-        {/* Dynamic Card Container for all fields */}
-        <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '20px 34px',
-              borderBottom: `1px solid ${C.border}`,
-              background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.05))',
-            }}
-          >
-            <span
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 12,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'rgba(99,102,241,.12)',
-                color: C.indigo,
-              }}
-            >
-              <Save style={{ width: 17, height: 17 }} />
-            </span>
-            <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
-              RECORD INFORMATION
-            </div>
-          </div>
+      {(() => {
+        const allFormFields = meta.fields || [];
+        const isAddressField = (f) => f.type === 'address' || (f.name || '').toLowerCase().includes('address') || (f.name || '').toLowerCase().includes('street');
+        const isDescriptionField = (f) => (f.name || '').toLowerCase() === 'description' || (f.name || '').toLowerCase() === 'notes' || (f.name || '').toLowerCase() === 'note';
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '22px 28px',
-              padding: '28px 34px 0',
-            }}
-          >
-            {(meta.fields || []).map((f) => renderField(f))}
-          </div>
-        </div>
+        const addressFields = allFormFields.filter(isAddressField);
+        const descriptionFields = allFormFields.filter(isDescriptionField);
+        const standardFields = allFormFields.filter((f) => !isAddressField(f) && !isDescriptionField(f));
+
+        return (
+          <form onSubmit={handleSubmit} noValidate className="ep-rise">
+            {/* 1. Record Information Card */}
+            {standardFields.length > 0 && (
+              <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '20px 34px',
+                    borderBottom: `1px solid ${C.border}`,
+                    background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.05))',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(99,102,241,.12)',
+                      color: C.indigo,
+                    }}
+                  >
+                    <Save style={{ width: 17, height: 17 }} />
+                  </span>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
+                    RECORD INFORMATION
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gap: '22px 28px',
+                    padding: '28px 34px 0',
+                  }}
+                >
+                  {standardFields.map((f) => renderField(f))}
+                </div>
+              </div>
+            )}
+
+            {/* 2. Address Information Card (Billing Address & Shipping Address side-by-side) */}
+            {addressFields.length > 0 && (
+              <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '20px 34px',
+                    borderBottom: `1px solid ${C.border}`,
+                    background: 'linear-gradient(90deg,rgba(34,211,238,.06),rgba(99,102,241,.05))',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(34,211,238,.14)',
+                      color: '#0891b2',
+                    }}
+                  >
+                    <MapPin style={{ width: 17, height: 17 }} />
+                  </span>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
+                    ADDRESS INFORMATION
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+                    gap: '22px 28px',
+                    padding: '28px 34px 0',
+                  }}
+                >
+                  {addressFields.map((f) => renderField(f))}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Description Information Card */}
+            {descriptionFields.length > 0 && (
+              <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '20px 34px',
+                    borderBottom: `1px solid ${C.border}`,
+                    background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.05))',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(99,102,241,.12)',
+                      color: C.indigo,
+                    }}
+                  >
+                    <FileText style={{ width: 17, height: 17 }} />
+                  </span>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
+                    DESCRIPTION INFORMATION
+                  </div>
+                </div>
+
+                <div style={{ padding: '28px 34px 0' }}>
+                  {descriptionFields.map((f) => renderField(f))}
+                </div>
+              </div>
+            )}
 
         {/* ── Footer Action Bar ───────────────────────────────── */}
         <div
@@ -1019,6 +1127,8 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
           </button>
         </div>
       </form>
+        );
+      })()}
     </div>
   );
 }
