@@ -289,18 +289,28 @@ const metadataService = {
 
 
       if (fieldRows && fieldRows.length > 0) {
-        businessFields = fieldRows.map((f) => ({
-          id: f.id,
-          name: f.api_name,
-          label: f.display_name,
-          type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
-          description: f.description || '',
-          required: f.required || false,
-          is_system: f.is_system || false,
-          picklist_values: f.picklist_values || null,
-          options: f.picklist_values || null,
-          isTitle: f.api_name === 'name' || f.api_name === 'title' || f.api_name === 'deal_name' || f.api_name === 'first_name',
-        }));
+        businessFields = fieldRows.map((f) => {
+          let fieldName = f.api_name;
+          let fieldLabel = f.display_name;
+          const fnLower = (fieldName || '').toLowerCase();
+          const flLower = (fieldLabel || '').toLowerCase();
+          if ((fnLower.includes('duplicate') || fnLower.includes('secondary')) && fnLower.includes('email') || (flLower.includes('duplicate') || flLower.includes('secondary')) && flLower.includes('email')) {
+            fieldName = 'alternate_email';
+            fieldLabel = 'Alternate Email ID';
+          }
+          return {
+            id: f.id,
+            name: fieldName,
+            label: fieldLabel,
+            type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
+            description: f.description || '',
+            required: f.required || false,
+            is_system: f.is_system || false,
+            picklist_values: f.picklist_values || null,
+            options: f.picklist_values || null,
+            isTitle: fieldName === 'name' || fieldName === 'title' || fieldName === 'deal_name' || fieldName === 'first_name',
+          };
+        });
       }
     }
 
@@ -319,9 +329,10 @@ const metadataService = {
         businessFields = [
           { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
           { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+          { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
           { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
           { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
           { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
         ];
       } else if (lowerKey.includes('deal')) {
@@ -336,30 +347,52 @@ const metadataService = {
           { id: 'f_industry', name: 'industry', label: 'Industry', type: 'text', isTitle: false },
           { id: 'f_website', name: 'website', label: 'Website', type: 'url', isTitle: false },
           { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
+          { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address', isTitle: false },
+          { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address', isTitle: false },
         ];
       }
     }
 
-    // Ensure standard lead fields (Job Title, Lead Source, etc.) are always present for lead objects even if field_definitions has partial rows
+    // Ensure standard lead fields & company address fields are always present even if field_definitions table has partial rows
     const stdLowerKey = String(objectKey).toLowerCase();
     if (stdLowerKey.includes('lead')) {
       const stdLeadFields = [
         { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
         { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+        { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
         { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
         { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-        { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+        { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
         { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
       ];
       stdLeadFields.forEach((slf) => {
         const hasField = businessFields.some((f) => {
           const fn = (f.name || f.api_name || '').toLowerCase();
+          const fl = (f.label || f.display_name || '').toLowerCase();
           if (slf.name === 'title') return fn === 'title' || fn === 'job_title';
           if (slf.name === 'lead_source') return fn === 'lead_source' || fn === 'source';
+          if (slf.name === 'alternate_email') return fn === 'alternate_email' || fn === 'secondary_email' || fn === 'duplicate_email' || fn === 'alt_email' || fl.includes('alternate email') || fl.includes('duplicate email');
           return fn === slf.name;
         });
         if (!hasField) {
           businessFields.push(slf);
+        }
+      });
+    } else if (stdLowerKey.includes('company') || stdLowerKey.includes('account')) {
+      const stdCompFields = [
+        { id: 'f_industry', name: 'industry', label: 'Industry', type: 'text', isTitle: false },
+        { id: 'f_website', name: 'website', label: 'Website', type: 'url', isTitle: false },
+        { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
+        { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address', isTitle: false },
+        { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address', isTitle: false },
+      ];
+      stdCompFields.forEach((scf) => {
+        const hasField = businessFields.some((f) => {
+          const fn = (f.name || f.api_name || '').toLowerCase();
+          return fn === scf.name;
+        });
+        if (!hasField) {
+          businessFields.push(scf);
         }
       });
     }
@@ -785,18 +818,28 @@ const metadataService = {
 
 
       if (rawFieldRows.length > 0) {
-        businessFields = rawFieldRows.map((f) => ({
-          id: f.id,
-          name: f.api_name,
-          label: f.display_name,
-          type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
-          description: f.description || '',
-          required: f.required || false,
-          is_system: f.is_system || false,
-          picklist_values: f.picklist_values || null,
-          options: f.picklist_values || null,
-          isTitle: f.api_name === 'name' || f.api_name === 'title' || f.api_name === 'deal_name' || f.api_name === 'first_name',
-        }));
+        businessFields = rawFieldRows.map((f) => {
+          let fieldName = f.api_name;
+          let fieldLabel = f.display_name;
+          const fnLower = (fieldName || '').toLowerCase();
+          const flLower = (fieldLabel || '').toLowerCase();
+          if ((fnLower.includes('duplicate') || fnLower.includes('secondary')) && fnLower.includes('email') || (flLower.includes('duplicate') || flLower.includes('secondary')) && flLower.includes('email')) {
+            fieldName = 'alternate_email';
+            fieldLabel = 'Alternate Email ID';
+          }
+          return {
+            id: f.id,
+            name: fieldName,
+            label: fieldLabel,
+            type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
+            description: f.description || '',
+            required: f.required || false,
+            is_system: f.is_system || false,
+            picklist_values: f.picklist_values || null,
+            options: f.picklist_values || null,
+            isTitle: fieldName === 'name' || fieldName === 'title' || fieldName === 'deal_name' || fieldName === 'first_name',
+          };
+        });
       } else {
         const lowerKey = String(obj.api_name).toLowerCase();
         if (lowerKey.includes('contact')) {
@@ -810,9 +853,10 @@ const metadataService = {
           businessFields = [
             { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
             { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+            { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
             { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
             { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-            { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+            { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
             { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
           ];
         } else if (lowerKey.includes('deal')) {
@@ -827,30 +871,52 @@ const metadataService = {
             { id: 'f_industry', name: 'industry', label: 'Industry', type: 'text', isTitle: false },
             { id: 'f_website', name: 'website', label: 'Website', type: 'url', isTitle: false },
             { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
+            { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address', isTitle: false },
+            { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address', isTitle: false },
           ];
         }
       }
 
-      // Ensure standard lead fields (Job Title, Lead Source, etc.) are always present for lead objects even if field_definitions has partial rows
+      // Ensure standard lead fields & company address fields are always present even if field_definitions has partial rows
       const stdLowerObjKey = String(obj.api_name).toLowerCase();
       if (stdLowerObjKey.includes('lead')) {
         const stdLeadFields = [
           { id: 'f_title', name: 'title', label: 'Job Title', type: 'text', isTitle: false },
           { id: 'f_email', name: 'email', label: 'Email Address', type: 'email', isTitle: false },
+          { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
           { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
           { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'text', isTitle: false },
+          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
           { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
         ];
         stdLeadFields.forEach((slf) => {
           const hasField = businessFields.some((f) => {
             const fn = (f.name || f.api_name || '').toLowerCase();
+            const fl = (f.label || f.display_name || '').toLowerCase();
             if (slf.name === 'title') return fn === 'title' || fn === 'job_title';
             if (slf.name === 'lead_source') return fn === 'lead_source' || fn === 'source';
+            if (slf.name === 'alternate_email') return fn === 'alternate_email' || fn === 'secondary_email' || fn === 'duplicate_email' || fn === 'alt_email' || fl.includes('alternate email') || fl.includes('duplicate email');
             return fn === slf.name;
           });
           if (!hasField) {
             businessFields.push(slf);
+          }
+        });
+      } else if (stdLowerObjKey.includes('company') || stdLowerObjKey.includes('account')) {
+        const stdCompFields = [
+          { id: 'f_industry', name: 'industry', label: 'Industry', type: 'text', isTitle: false },
+          { id: 'f_website', name: 'website', label: 'Website', type: 'url', isTitle: false },
+          { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
+          { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address', isTitle: false },
+          { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address', isTitle: false },
+        ];
+        stdCompFields.forEach((scf) => {
+          const hasField = businessFields.some((f) => {
+            const fn = (f.name || f.api_name || '').toLowerCase();
+            return fn === scf.name;
+          });
+          if (!hasField) {
+            businessFields.push(scf);
           }
         });
       }

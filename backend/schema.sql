@@ -282,6 +282,7 @@ INSERT INTO public.field_definitions (organization_id, object_type_id, api_name,
 VALUES
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'name', 'Lead Name', 'text', true),
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'email', 'Email Address', 'email', true),
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'alternate_email', 'Alternate Email ID', 'email', false),
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'company', 'Company Name', 'text', false),
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'status', 'Lead Status', 'dropdown', true),
 
@@ -299,7 +300,9 @@ VALUES
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'name', 'Company Name', 'text', true),
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'industry', 'Industry', 'text', false),
   ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'website', 'Website', 'url', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'phone', 'Phone', 'phone', false)
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'phone', 'Phone', 'phone', false),
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'billing_address', 'Billing Address', 'textarea', false),
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'shipping_address', 'Shipping Address', 'textarea', false)
 ON CONFLICT DO NOTHING;
 
 -- Seed Sample Records in universal_table for Leads

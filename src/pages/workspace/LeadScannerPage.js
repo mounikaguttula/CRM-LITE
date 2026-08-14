@@ -271,6 +271,8 @@ function LeadScannerPage() {
         setLastScannedText(detectedText);
         parsePayloadText(detectedText);
         setSuccessScan(true);
+        stopCamera();
+        setScannerStatus('Scanned Successfully');
         setTimeout(() => setSuccessScan(false), 3000);
       }
     }, 400);
@@ -297,7 +299,7 @@ function LeadScannerPage() {
       company: '',
       title: '',
       lead_source: 'QR Scan',
-      description: text,
+      description: '',
     };
 
     const cleanText = text.trim();
@@ -311,7 +313,7 @@ function LeadScannerPage() {
         parsed.phone = params.get('phone') || params.get('tel') || params.get('mobile') || '';
         parsed.company = params.get('company') || params.get('org') || '';
         parsed.title = params.get('title') || params.get('role') || '';
-        parsed.description = `Scanned URL: ${cleanText}`;
+        parsed.description = params.get('notes') || params.get('desc') || params.get('description') || '';
       } catch (e) {}
     }
 
@@ -324,7 +326,7 @@ function LeadScannerPage() {
           parsed.phone = json.phone || json.mobile || json.tel || '';
           parsed.company = json.company || json.org || '';
           parsed.title = json.title || json.job_title || json.role || '';
-          parsed.description = json.description || json.notes || cleanText;
+          parsed.description = json.description || json.notes || '';
         }
       } catch (e) {}
     }
@@ -370,8 +372,8 @@ function LeadScannerPage() {
           parsed.title = trimmedLine.split(':')[1]?.trim() || '';
         }
 
-        if (lower.startsWith('note:') || lower.startsWith('notes:')) {
-          parsed.description = trimmedLine.split(':')[1]?.trim() || cleanText;
+        if (lower.startsWith('note:') || lower.startsWith('notes:') || lower.startsWith('desc:') || lower.startsWith('description:')) {
+          parsed.description = trimmedLine.split(':')[1]?.trim() || '';
         }
       });
     }
@@ -406,7 +408,7 @@ function LeadScannerPage() {
       job_title: parsed.title || prev.title || '',
       lead_source: parsed.lead_source || prev.lead_source || 'QR Scan',
       source: parsed.lead_source || prev.lead_source || 'QR Scan',
-      description: parsed.description || prev.description,
+      description: parsed.description || '',
     }));
   };
 
