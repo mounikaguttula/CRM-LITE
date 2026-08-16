@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPut } from '../../api/client';
-import { ChevronRight, ArrowLeft, Save, X, AlertTriangle, MapPin, FileText } from 'lucide-react';
+import { ChevronRight, ArrowLeft, Save, X, AlertTriangle, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import CustomPicklist from '../../components/CustomPicklist';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
@@ -26,7 +26,7 @@ function getInitials(str) {
     : String(str).slice(0, 2).toUpperCase();
 }
 
-const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+const isUuid = (val) => Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
 
 /* ─── Format Lookup & Owner IDs to Human Names ───────────────── */
 function formatLookupValue(fieldName, val, record, currentUser, organization, company) {
@@ -77,6 +77,8 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lineItemsCount, setLineItemsCount] = useState(0);
+  const [addressExpanded, setAddressExpanded] = useState(true);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -109,8 +111,11 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
         const finalUsers = usersList.length > 0 ? usersList : (currentUser ? [currentUser] : []);
         const finalCompanies = compList;
+        const humanName = (isUuid(recData?.name) || !recData?.name)
+          ? (recData?.company_name || recData?.account_name || recData?.data?.company_name || recData?.data?.name || recData?.title || '')
+          : recData.name;
 
-        const initialForm = recData ? { ...recData } : {};
+        const initialForm = recData ? { ...recData, ...(humanName ? { name: humanName } : {}) } : {};
 
         // Inspect product line items for Deal / Opportunity objects
         let dealItems = [];
@@ -238,7 +243,18 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   };
 
   function handleChange(fieldName, value) {
-    setFormData((prev) => ({ ...prev, [fieldName]: value }));
+    setFormData((prev) => {
+      const next = { ...prev, [fieldName]: value };
+      if (fieldName === 'lead_source' || fieldName === 'source') {
+        next.lead_source = value;
+        next.source = value;
+      }
+      if (fieldName === 'title' || fieldName === 'job_title') {
+        next.title = value;
+        next.job_title = value;
+      }
+      return next;
+    });
     if (errors[fieldName]) {
       setErrors((prev) => ({ ...prev, [fieldName]: null }));
     }
@@ -289,6 +305,16 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         valErrors[field.name] = `${field.label} is required.`;
       }
     });
+
+    // Check for duplicate Primary Email and Alternate Email ID
+    const primaryEmail = (payload.email || payload.work_email || payload.primary_email || '').trim().toLowerCase();
+    const altEmail = (payload.alternate_email || payload.alternate_email_id || payload.secondary_email || payload.alt_email || '').trim().toLowerCase();
+
+    if (primaryEmail && altEmail && primaryEmail === altEmail) {
+      const emailFieldKey = fieldsList.find(f => ['alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email'].includes(f.name))?.name || 'alternate_email';
+      valErrors[emailFieldKey] = 'Email and Alternate Email ID cannot be the same address.';
+      setSubmitError('Validation Error: Email and Alternate Email ID cannot be the same address.');
+    }
 
     if (Object.keys(valErrors).length > 0) {
       setErrors(valErrors);
@@ -377,8 +403,19 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     );
   }
 
-  const rawEditTitle = formData.name || formData.company_name || formData.company || formData.title || formData.subject;
-  const recordTitle = (rawEditTitle && !isUuid(rawEditTitle)) ? rawEditTitle : (formData.name || `Record #${recordId}`);
+  const getHumanEditTitle = (data) => {
+    if (!data) return meta.displayName || 'Record';
+    const keys = ['name', 'company_name', 'account_name', 'title', 'subject', 'display_name'];
+    for (const k of keys) {
+      const val = data[k] || (data.data && data.data[k]);
+      if (val && typeof val === 'string' && !isUuid(val) && val.trim() !== '') {
+        return val.trim();
+      }
+    }
+    return meta.displayName || 'Record';
+  };
+
+  const recordTitle = getHumanEditTitle(formData);
 
   /* ── Input Styling ── */
   const inputStyle = (hasError) => ({
@@ -826,133 +863,194 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
         return (
           <form onSubmit={handleSubmit} noValidate className="ep-rise">
-            {/* 1. Record Information Card */}
-            {standardFields.length > 0 && (
-              <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
-                <div
+            {/* Single Unified Master Card Container */}
+            <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
+              {/* 1. Primary Record Information Header */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '20px 34px',
+                  borderBottom: `1px solid ${C.border}`,
+                  background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.05))',
+                }}
+              >
+                <span
                   style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 12,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
-                    padding: '20px 34px',
-                    borderBottom: `1px solid ${C.border}`,
-                    background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.05))',
+                    justifyContent: 'center',
+                    background: 'rgba(99,102,241,.12)',
+                    color: C.indigo,
                   }}
                 >
-                  <span
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 12,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: 'rgba(99,102,241,.12)',
-                      color: C.indigo,
-                    }}
-                  >
-                    <Save style={{ width: 17, height: 17 }} />
-                  </span>
-                  <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
-                    RECORD INFORMATION
-                  </div>
+                  <Save style={{ width: 17, height: 17 }} />
+                </span>
+                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
+                  RECORD INFORMATION
                 </div>
+              </div>
 
+              {/* Standard Fields Grid */}
+              {standardFields.length > 0 && (
                 <div
                   style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
                     gap: '22px 28px',
-                    padding: '28px 34px 0',
+                    padding: '28px 34px 20px',
                   }}
                 >
                   {standardFields.map((f) => renderField(f))}
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* 2. Address Information Card (Billing Address & Shipping Address side-by-side) */}
-            {addressFields.length > 0 && (
-              <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '20px 34px',
-                    borderBottom: `1px solid ${C.border}`,
-                    background: 'linear-gradient(90deg,rgba(34,211,238,.06),rgba(99,102,241,.05))',
-                  }}
-                >
-                  <span
+              {/* 2. Expandable Address Information Accordion */}
+              {addressFields.length > 0 && (
+                <div style={{ borderTop: `1px solid ${C.border}` }}>
+                  <button
+                    type="button"
+                    onClick={() => setAddressExpanded((prev) => !prev)}
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 12,
+                      width: '100%',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      background: 'rgba(34,211,238,.14)',
-                      color: '#0891b2',
+                      justifyContent: 'space-between',
+                      padding: '18px 34px',
+                      background: '#ffffff',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.18s ease',
+                      outline: 'none',
                     }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.03)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = '#ffffff'; }}
                   >
-                    <MapPin style={{ width: 17, height: 17 }} />
-                  </span>
-                  <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
-                    ADDRESS INFORMATION
-                  </div>
-                </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 10,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'rgba(34,211,238,.14)',
+                          color: '#0891b2',
+                        }}
+                      >
+                        <MapPin style={{ width: 17, height: 17 }} />
+                      </span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
+                        ADDRESS INFORMATION
+                      </span>
+                    </div>
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-                    gap: '22px 28px',
-                    padding: '28px 34px 0',
-                  }}
-                >
-                  {addressFields.map((f) => renderField(f))}
-                </div>
-              </div>
-            )}
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: addressExpanded ? 'rgba(99,102,241,0.12)' : '#f1f5f9',
+                        color: addressExpanded ? C.indigo : '#64748b',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
+                      }}
+                    >
+                      {addressExpanded ? <ChevronUp size={22} strokeWidth={2.5} /> : <ChevronDown size={22} strokeWidth={2.5} />}
+                    </div>
+                  </button>
 
-            {/* 3. Description Information Card */}
-            {descriptionFields.length > 0 && (
-              <div style={{ ...sectionCardStyle, marginBottom: '22px' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '20px 34px',
-                    borderBottom: `1px solid ${C.border}`,
-                    background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.05))',
-                  }}
-                >
-                  <span
+                  {addressExpanded && (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+                        gap: '22px 28px',
+                        padding: '24px 34px 20px',
+                        animation: 'ep-rise .3s cubic-bezier(.2,.7,.3,1) both',
+                      }}
+                    >
+                      {addressFields.map((f) => renderField(f))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 3. Expandable Description Information Accordion */}
+              {descriptionFields.length > 0 && (
+                <div style={{ borderTop: `1px solid ${C.border}` }}>
+                  <button
+                    type="button"
+                    onClick={() => setDescriptionExpanded((prev) => !prev)}
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 12,
+                      width: '100%',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      background: 'rgba(99,102,241,.12)',
-                      color: C.indigo,
+                      justifyContent: 'space-between',
+                      padding: '18px 34px',
+                      background: '#ffffff',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.18s ease',
+                      outline: 'none',
                     }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.03)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = '#ffffff'; }}
                   >
-                    <FileText style={{ width: 17, height: 17 }} />
-                  </span>
-                  <div style={{ fontSize: '0.74rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
-                    DESCRIPTION INFORMATION
-                  </div>
-                </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 10,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'rgba(99,102,241,.12)',
+                          color: C.indigo,
+                        }}
+                      >
+                        <FileText style={{ width: 17, height: 17 }} />
+                      </span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 800, color: C.text, letterSpacing: '0.12em' }}>
+                        DESCRIPTION INFORMATION
+                      </span>
+                    </div>
 
-                <div style={{ padding: '28px 34px 0' }}>
-                  {descriptionFields.map((f) => renderField(f))}
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: descriptionExpanded ? 'rgba(99,102,241,0.12)' : '#f1f5f9',
+                        color: descriptionExpanded ? C.indigo : '#64748b',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
+                      }}
+                    >
+                      {descriptionExpanded ? <ChevronUp size={22} strokeWidth={2.5} /> : <ChevronDown size={22} strokeWidth={2.5} />}
+                    </div>
+                  </button>
+
+                  {descriptionExpanded && (
+                    <div style={{ padding: '24px 34px 20px', animation: 'ep-rise .3s cubic-bezier(.2,.7,.3,1) both' }}>
+                      {descriptionFields.map((f) => renderField(f))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
         {/* ── Footer Action Bar ───────────────────────────────── */}
         <div

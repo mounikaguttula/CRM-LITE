@@ -30,13 +30,13 @@ import {
   Briefcase,
   Shield,
   FileText,
+  AlertTriangle,
   RefreshCw,
   UserPlus,
   Sparkles,
   ArrowRight,
   CheckSquare,
   Trash2,
-  AlertTriangle,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -623,6 +623,12 @@ function LeadQRScannerContent() {
   const [saving, setSaving] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  const showToast = (text, type = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   const [leadForm, setLeadForm] = useState({
     name: '',
@@ -747,14 +753,14 @@ function LeadQRScannerContent() {
   const handleSaveLead = async (e) => {
     e.preventDefault();
     if (!leadForm.name || !leadForm.name.trim()) {
-      alert('Please enter Full Name for the lead.');
+      showToast('Please enter Full Name for the lead.', 'error');
       return;
     }
 
     setSaving(true);
     try {
       await apiPost('/objects/lead', leadForm);
-      alert(`🎉 Lead "${leadForm.name}" created successfully from QR Scan!`);
+      showToast(`🎉 Lead "${leadForm.name}" created successfully from QR Scan!`, 'success');
       setLeadForm({
         name: '',
         email: '',
@@ -769,7 +775,7 @@ function LeadQRScannerContent() {
       setManualPayload('');
     } catch (err) {
       console.error('Error saving lead from scanner:', err);
-      alert(`⚠️ Failed to save lead: ${err.message || 'An unexpected error occurred.'}`);
+      showToast(`⚠️ Failed to save lead: ${err.message || 'An unexpected error occurred.'}`, 'error');
     } finally {
       setSaving(false);
     }
@@ -1158,6 +1164,33 @@ function LeadQRScannerContent() {
           </form>
         </div>
       </div>
+
+      {toastMessage && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', bottom: 30, right: 30, zIndex: 9999999,
+          background: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#fef2f2' : '#ffffff',
+          color: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#991b1b' : '#0f172a',
+          padding: '14px 22px', borderRadius: 16, display: 'flex', alignItems: 'center', gap: 12,
+          boxShadow: (typeof toastMessage === 'object' && toastMessage.type === 'error')
+            ? '0 20px 45px -10px rgba(239, 68, 68, 0.3), 0 8px 16px -4px rgba(0, 0, 0, 0.08)'
+            : '0 20px 45px -10px rgba(99, 102, 241, 0.3), 0 8px 16px -4px rgba(0, 0, 0, 0.08)',
+          border: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '1.5px solid #fecaca' : '1.5px solid #a7f3d0',
+          fontSize: '0.9rem', fontWeight: 700,
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          animation: 'cp-rise .3s cubic-bezier(.2,.7,.3,1) both',
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%',
+            background: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#fee2e2' : '#d1fae5',
+            color: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#dc2626' : '#059669',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            {(typeof toastMessage === 'object' && toastMessage.type === 'error') ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+          </div>
+          <span>{typeof toastMessage === 'object' ? toastMessage.text : toastMessage}</span>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1327,6 +1360,11 @@ function ObjectListContent({ objectTypeId }) {
   const [deleteError, setDeleteError] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
 
+  const showToast = (text, type = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   const handleDeleteRecordClick = (e, recordId, recordTitle) => {
     e.stopPropagation();
     setDeleteModalRecord({ id: recordId, title: recordTitle || 'this record' });
@@ -1342,8 +1380,7 @@ function ObjectListContent({ objectTypeId }) {
       setRecords((prev) => prev.filter((r) => r.id !== deleteModalRecord.id));
       const deletedTitle = deleteModalRecord.title;
       setDeleteModalRecord(null);
-      setToastMessage(`"${deletedTitle}" deleted successfully!`);
-      setTimeout(() => setToastMessage(null), 3500);
+      showToast(`"${deletedTitle}" deleted successfully!`, 'success');
     } catch (err) {
       console.error('Delete record error:', err);
       setDeleteError(err?.message || 'Failed to delete record.');
@@ -1529,7 +1566,7 @@ function ObjectListContent({ objectTypeId }) {
   const handleExportCSV = () => {
     const listToExport = filteredRecords && filteredRecords.length > 0 ? filteredRecords : records;
     if (!listToExport || listToExport.length === 0) {
-      alert(`No ${meta.pluralDisplayName.toLowerCase()} records available to export.`);
+      showToast(`No ${meta.pluralDisplayName.toLowerCase()} records available to export.`, 'error');
       return;
     }
 
@@ -1566,7 +1603,7 @@ function ObjectListContent({ objectTypeId }) {
   const handleFileProcess = (file) => {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.csv')) {
-      alert('Please select a valid .csv file.');
+      showToast('Please select a valid .csv file.', 'error');
       return;
     }
 
@@ -1680,9 +1717,9 @@ function ObjectListContent({ objectTypeId }) {
 
     if (successCount > 0) {
       setRecords((prev) => [...newAdded, ...prev]);
-      alert(`🎉 Successfully imported ${successCount} ${meta.pluralDisplayName.toLowerCase()}!`);
+      showToast(`🎉 Successfully imported ${successCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
     } else {
-      alert(`⚠️ Failed to import. Please check CSV format.`);
+      showToast(`⚠️ Failed to import. Please check CSV format.`, 'error');
     }
   };
 
@@ -2012,110 +2049,247 @@ function ObjectListContent({ objectTypeId }) {
         </div>
       </div>
 
-      {/* CSV Import Modal */}
-      {importModalOpen && (
+      {/* CSV Import Modal (Portal with Banner & Unified Design Tokens) */}
+      {importModalOpen && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(15, 23, 42, 0.45)',
-          backdropFilter: 'blur(8px)',
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999,
+          background: 'rgba(11, 18, 32, 0.65)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 20,
+          padding: '24px 16px',
         }}>
           <div style={{
             background: '#ffffff',
-            borderRadius: 20,
+            borderRadius: 24,
             width: '100%',
-            maxWidth: 620,
-            padding: '28px 32px',
-            boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.25)',
-            position: 'relative',
+            maxWidth: 720,
+            boxShadow: '0 30px 70px -15px rgba(8, 12, 28, 0.45)',
+            overflow: 'hidden',
+            border: '1px solid rgba(226, 232, 240, 0.8)',
+            animation: 'ep-rise .3s cubic-bezier(.2,.7,.3,1) both',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                  width: 42, height: 42, borderRadius: 12,
-                  background: 'rgba(99, 102, 241, 0.1)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <UploadCloud size={22} color="#6366f1" />
+            {/* Header Banner */}
+            <div style={{
+              position: 'relative',
+              overflow: 'hidden',
+              background: 'linear-gradient(115deg,#0b1220 0%,#0f1c2e 45%,#0a2a2a 100%)',
+              padding: '24px 28px',
+              borderBottom: '1px solid rgba(255,255,255,.08)',
+            }}>
+              <div style={{ position: 'absolute', top: -70, right: -40, width: 180, height: 180, borderRadius: '50%', background: 'rgba(34,211,238,.2)', filter: 'blur(50px)', pointerEvents: 'none' }} />
+              <div style={{ position: 'absolute', bottom: -80, left: 70, width: 160, height: 160, borderRadius: '50%', background: 'rgba(99,102,241,.25)', filter: 'blur(50px)', pointerEvents: 'none' }} />
+
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 16,
+                    background: 'linear-gradient(135deg,#6366f1,#22d3ee)',
+                    color: '#ffffff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 0 0 2px rgba(255,255,255,.12), 0 12px 24px -10px rgba(34,211,238,.6)',
+                    flexShrink: 0,
+                  }}>
+                    <UploadCloud size={24} />
+                  </div>
+                  <div>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '3px 9px', borderRadius: 999,
+                      background: 'rgba(34,211,238,.14)', border: '1px solid rgba(34,211,238,.32)',
+                      color: '#a5f3fc', fontSize: '.6rem', fontWeight: 800, letterSpacing: '.12em',
+                      marginBottom: 4,
+                    }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee' }} />
+                      IMPORT ENGINE
+                    </span>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.02em' }}>
+                      Import {meta.pluralDisplayName} from CSV
+                    </h2>
+                  </div>
                 </div>
-                <div>
-                  <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
-                    Import Leads from CSV
-                  </h2>
-                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setImportModalOpen(false); setSelectedFile(null); setParsedRecords([]); }}
+                  style={{
+                    background: 'rgba(255,255,255,.08)',
+                    border: '1px solid rgba(255,255,255,.16)',
+                    borderRadius: 10,
+                    width: 32,
+                    height: 32,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#cbd5e1',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,.16)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.color = '#cbd5e1'; e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <button
-                onClick={() => { setImportModalOpen(false); setSelectedFile(null); setParsedRecords([]); }}
-                style={{ background: 'none', border: 'none', padding: 6, color: '#94a3b8', cursor: 'pointer' }}
-              >
-                <X size={18} />
-              </button>
             </div>
 
-            {!selectedFile ? (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                    handleFileProcess(e.dataTransfer.files[0]);
-                  }
-                }}
-                style={{
-                  border: isDragging ? '2px dashed #6366f1' : '2px dashed #cbd5e1',
-                  borderRadius: 16,
-                  padding: '36px 20px',
-                  textAlign: 'center',
-                  background: isDragging ? 'rgba(99,102,241,0.04)' : '#fafafa',
-                  cursor: 'pointer',
-                  marginBottom: 24,
-                }}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv"
-                  onChange={(e) => e.target.files?.[0] && handleFileProcess(e.target.files[0])}
-                  style={{ display: 'none' }}
-                />
-                <UploadCloud size={28} color="#6366f1" style={{ marginBottom: 8 }} />
-                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#4f46e5' }}>
-                  Click to upload CSV
+            {/* Modal Body Content */}
+            <div style={{ padding: '24px 28px 20px' }}>
+              {!selectedFile ? (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleFileProcess(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  style={{
+                    border: isDragging ? '2.5px dashed #6366f1' : '2px dashed #cbd5e1',
+                    borderRadius: 18,
+                    padding: '38px 24px',
+                    textAlign: 'center',
+                    background: isDragging ? 'rgba(99,102,241,0.04)' : '#f8fafc',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => e.target.files?.[0] && handleFileProcess(e.target.files[0])}
+                    style={{ display: 'none' }}
+                  />
+                  <div style={{
+                    width: 52, height: 52, borderRadius: 16,
+                    background: 'rgba(99,102,241,0.1)', color: '#6366f1',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    marginBottom: 12,
+                  }}>
+                    <UploadCloud size={26} />
+                  </div>
+                  <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
+                    Click or Drag &amp; Drop CSV file here
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 500 }}>
+                    Upload comma-separated value spreadsheet (.csv)
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 18px', marginBottom: 24 }}>
-                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>{selectedFile.name}</div>
-                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{parsedRecords.length} leads detected</div>
-              </div>
-            )}
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* File Info Bar */}
+                  <div style={{
+                    background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14,
+                    padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(99,102,241,0.12)', color: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <FileSpreadsheet size={18} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>{selectedFile.name}</div>
+                        <div style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 500 }}>{parsedRecords.length} records detected and mapped</div>
+                      </div>
+                    </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedFile(null); setParsedRecords([]); }}
+                      style={{
+                        padding: '5px 12px', borderRadius: 999, fontSize: '0.76rem', fontWeight: 700,
+                        color: '#fb7185', background: '#fef2f2', border: '1px solid #fecaca', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      <X size={13} /> Change File
+                    </button>
+                  </div>
+
+                  {/* Preview Table */}
+                  {parsedRecords.length > 0 && (
+                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', maxHeight: 220, overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', sticky: 'top' }}>
+                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>#</th>
+                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Name</th>
+                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Email</th>
+                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Company</th>
+                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Lead Source</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {parsedRecords.slice(0, 4).map((r, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>{idx + 1}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a' }}>{r.name || '—'}</td>
+                              <td style={{ padding: '10px 14px', color: '#475569' }}>{r.email || '—'}</td>
+                              <td style={{ padding: '10px 14px', color: '#475569' }}>{r.company || '—'}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0284c7', background: '#e0f2fe', padding: '2px 8px', borderRadius: 999 }}>
+                                  {r.lead_source || 'CSV Import'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Action Bar */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12,
+              padding: '16px 28px', background: '#f8fafc', borderTop: '1px solid #e2e8f0',
+            }}>
               <button
+                type="button"
                 onClick={() => { setImportModalOpen(false); setSelectedFile(null); setParsedRecords([]); }}
-                style={{ padding: '9px 18px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
+                style={{
+                  padding: '10px 18px', borderRadius: 12, border: '1px solid #cbd5e1',
+                  background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
+                }}
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleImportSubmit}
                 disabled={!selectedFile || parsedRecords.length === 0 || importing}
                 style={{
-                  padding: '9px 22px', borderRadius: 10, border: 'none',
-                  background: (!selectedFile || parsedRecords.length === 0) ? '#94a3b8' : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                  color: '#ffffff', fontWeight: 700, fontSize: 13,
+                  padding: '10px 22px', borderRadius: 12, border: 'none',
+                  background: (!selectedFile || parsedRecords.length === 0 || importing)
+                    ? '#94a3b8'
+                    : 'linear-gradient(135deg, #6366f1 0%, #22d3ee 100%)',
+                  color: '#ffffff', fontWeight: 700, fontSize: '0.84rem',
                   cursor: (!selectedFile || parsedRecords.length === 0 || importing) ? 'not-allowed' : 'pointer',
+                  boxShadow: (!selectedFile || parsedRecords.length === 0 || importing) ? 'none' : '0 8px 20px -6px rgba(99,102,241,0.5)',
+                  display: 'flex', alignItems: 'center', gap: 8,
                 }}
               >
-                {importing ? 'Importing…' : `Import ${parsedRecords.length} Leads`}
+                {importing ? (
+                  <>
+                    <RefreshCw size={15} style={{ animation: 'ep-spin .8s linear infinite' }} />
+                    Importing Records…
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud size={15} />
+                    {`Import ${parsedRecords.length > 0 ? parsedRecords.length : ''} ${meta.pluralDisplayName}`}
+                  </>
+                )}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete Record Confirmation Custom Modal */}
@@ -2211,38 +2385,41 @@ function ObjectListContent({ objectTypeId }) {
         document.body
       )}
 
-      {/* Success Toast Pop Out Banner */}
+      {/* In-App Toast Notification Banner */}
       {toastMessage && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', bottom: 28, right: 28, zIndex: 999999,
-          background: '#ffffff',
-          color: '#065f46',
-          padding: '12px 20px',
-          borderRadius: 14,
+          position: 'fixed', bottom: 30, right: 30, zIndex: 9999999,
+          background: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#fef2f2' : '#ffffff',
+          color: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#991b1b' : '#0f172a',
+          padding: '14px 22px',
+          borderRadius: 16,
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          boxShadow: '0 20px 40px -10px rgba(16, 185, 129, 0.25), 0 8px 16px -4px rgba(0, 0, 0, 0.08)',
-          border: '1px solid #a7f3d0',
-          fontSize: '0.88rem',
-          fontWeight: 600,
+          gap: 12,
+          boxShadow: (typeof toastMessage === 'object' && toastMessage.type === 'error')
+            ? '0 20px 45px -10px rgba(239, 68, 68, 0.3), 0 8px 16px -4px rgba(0, 0, 0, 0.08)'
+            : '0 20px 45px -10px rgba(99, 102, 241, 0.3), 0 8px 16px -4px rgba(0, 0, 0, 0.08)',
+          border: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '1.5px solid #fecaca' : '1.5px solid #a7f3d0',
+          fontSize: '0.9rem',
+          fontWeight: 700,
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
+          animation: 'cp-rise .3s cubic-bezier(.2,.7,.3,1) both',
         }}>
           <div style={{
-            width: 26,
-            height: 26,
+            width: 28,
+            height: 28,
             borderRadius: '50%',
-            background: '#d1fae5',
-            color: '#059669',
+            background: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#fee2e2' : '#d1fae5',
+            color: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#dc2626' : '#059669',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <CheckCircle2 size={16} />
+            {(typeof toastMessage === 'object' && toastMessage.type === 'error') ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           </div>
-          <span>{toastMessage}</span>
+          <span>{typeof toastMessage === 'object' ? toastMessage.text : toastMessage}</span>
         </div>,
         document.body
       )}

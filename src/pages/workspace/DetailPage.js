@@ -188,7 +188,7 @@ function familyBadge(family) {
 
 /* ─── UUID format validator ─── */
 const isUuid = (val) =>
-  Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+  Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
 
 /* ─── Format Lookup & Owner IDs to Human Names ─── */
 function formatLookupValue(fieldName, val, record, currentUser, organization, company, lookupMap = {}) {
@@ -407,7 +407,7 @@ function deriveHeaderTiles(objectTypeId, record, currentUser, organization, comp
     const status = getRealVal(['status', 'lead_status']);
     if (status) tiles.push({ label: 'Status', value: status, color: '#00b09b' });
 
-    const source = getRealVal(['source', 'lead_source']);
+    const source = getRealVal(['lead_source', 'source']);
     if (source) tiles.push({ label: 'Source', value: source, color: '#4facfe' });
 
     const priority = getRealVal(['rating', 'priority', 'score']);
@@ -815,7 +815,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     ])
       .then(([rec, fList, compListRes, contactListRes, dealListRes, userListRes]) => {
         if (!isMounted) return;
-        const recData = rec?.data || rec;
+        const recData = (rec?.data && typeof rec.data === 'object' && rec.data.id) ? rec.data : rec;
         setRecord(recData);
 
         const fieldsData = Array.isArray(fList) ? fList : fList?.data || [];
@@ -1254,36 +1254,37 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     );
   }
 
-  /* Derive titles & subtitles */
-  const titleField = meta.fields?.find((f) => f.isTitle || f.name === 'name' || f.name === 'title' || f.name === 'company_name' || f.name === 'subject');
-  const titleCandidate = (titleField && titleField.name !== 'id' && record[titleField.name])
-    ? record[titleField.name]
-    : (record.name || record.company_name || record.company || record.title || record.subject || record.display_name || record.account_name);
-  const recordTitle = (titleCandidate && !isUuid(titleCandidate))
-    ? titleCandidate
-    : (record.name || record.company_name || record.title || record.subject || `Record #${recordId}`);
-
   /* ── Fully Dynamic Field Value Lookup from Universal Table Record ── */
   const getRecordValue = (fName, rec) => {
     if (!rec || !fName) return undefined;
 
     const aliasesMap = {
-      title: ['title', 'job_title', 'role'],
-      job_title: ['job_title', 'title', 'role'],
+      name: ['name', 'company_name', 'account_name', 'title', 'subject', 'display_name'],
+      company_name: ['company_name', 'name', 'account_name', 'company'],
+      account_name: ['account_name', 'company_name', 'name'],
+      title: ['title', 'job_title', 'role', 'designation', 'name'],
+      job_title: ['job_title', 'title', 'role', 'designation'],
+      role: ['role', 'designation', 'job_title', 'title'],
+      designation: ['designation', 'role', 'job_title', 'title'],
+      phone: ['phone', 'work_phone', 'phone_number', 'mobile', 'tel'],
+      work_phone: ['work_phone', 'phone', 'phone_number', 'mobile', 'tel'],
+      address: ['address', 'country', 'city', 'state', 'location', 'billing_address', 'shipping_address', 'street'],
+      country: ['country', 'address', 'city', 'location'],
+      number_of_employees: ['number_of_employees', 'company_size', 'employee_count', 'employees', 'num_employees'],
+      company_size: ['company_size', 'number_of_employees', 'employee_count', 'employees', 'num_employees'],
       lead_source: ['lead_source', 'source'],
       source: ['source', 'lead_source'],
       billing_address: ['billing_address', 'address', 'billing_street', 'street'],
       shipping_address: ['shipping_address', 'address', 'shipping_street', 'street'],
-      address: ['address', 'billing_address', 'shipping_address', 'street'],
     };
 
     const searchKeys = aliasesMap[(fName || '').toLowerCase()] || [fName];
 
     for (const key of searchKeys) {
-      if (rec[key] !== undefined && rec[key] !== null && rec[key] !== '') {
+      if (rec[key] !== undefined && rec[key] !== null && rec[key] !== '' && !isUuid(rec[key])) {
         return rec[key];
       }
-      if (rec.data && typeof rec.data === 'object' && rec.data[key] !== undefined && rec.data[key] !== null && rec.data[key] !== '') {
+      if (rec.data && typeof rec.data === 'object' && rec.data[key] !== undefined && rec.data[key] !== null && rec.data[key] !== '' && !isUuid(rec.data[key])) {
         return rec.data[key];
       }
     }
@@ -1297,15 +1298,63 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         for (const [k, v] of Object.entries(src)) {
           if (k === 'data') continue;
           const kClean = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (kClean === targetClean && v !== undefined && v !== null && v !== '') {
+          if (kClean === targetClean && v !== undefined && v !== null && v !== '' && !isUuid(v)) {
             return v;
           }
         }
       }
     }
 
+    // Fallback: If only a raw UUID or ID value exists for an ID field lookup, return it
+    for (const key of searchKeys) {
+      if (rec[key] !== undefined && rec[key] !== null && rec[key] !== '') return rec[key];
+      if (rec.data && typeof rec.data === 'object' && rec.data[key] !== undefined && rec.data[key] !== null && rec.data[key] !== '') {
+        return rec.data[key];
+      }
+    }
+
     return undefined;
   };
+
+  /* Derive titles & subtitles with UUID filtering */
+  const getHumanTitle = (rec) => {
+    if (!rec) return meta.displayName || 'Record';
+
+    const candidates = [
+      getRecordValue('name', rec),
+      getRecordValue('company_name', rec),
+      getRecordValue('account_name', rec),
+      getRecordValue('title', rec),
+      getRecordValue('subject', rec),
+      getRecordValue('display_name', rec),
+      rec.name,
+      rec.company_name,
+      rec.account_name,
+      rec.title,
+      rec.subject,
+      rec.display_name,
+      rec.data?.name,
+      rec.data?.company_name,
+      rec.data?.account_name,
+      rec.data?.title,
+      rec.data?.display_name,
+    ];
+
+    for (const item of candidates) {
+      if (item && typeof item === 'string' && !isUuid(item) && item.trim() !== '') {
+        return item.trim();
+      }
+    }
+
+    const fn = getRecordValue('first_name', rec) || rec.first_name || rec.data?.first_name || '';
+    const ln = getRecordValue('last_name', rec) || rec.last_name || rec.data?.last_name || '';
+    const full = `${fn} ${ln}`.trim();
+    if (full && !isUuid(full)) return full;
+
+    return meta.displayName || 'Record';
+  };
+
+  const recordTitle = getHumanTitle(record);
 
   const subtitleField = meta.fields?.find((f) => f.name === 'email' || f.name === 'company' || f.name === 'company_name' || f.name === 'account');
   let rawSubtitleVal = subtitleField

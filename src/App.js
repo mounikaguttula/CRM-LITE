@@ -12,6 +12,10 @@ import EditPage from './pages/workspace/EditPage';
 import LeadScannerPage from './pages/workspace/LeadScannerPage';
 import CampaignsPage from './pages/workspace/CampaignsPage';
 import CampaignFormPage from './pages/public/CampaignFormPage';
+import FormsPage from './pages/workspace/FormsPage';
+import FormBuilderPage from './pages/workspace/FormBuilderPage';
+import FormSubmissionsPage from './pages/workspace/FormSubmissionsPage';
+import PublicFormPage from './pages/public/PublicFormPage';
 
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/theme.css';
@@ -40,6 +44,7 @@ function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/public/campaign-form" element={<CampaignFormPage />} />
+          <Route path="/forms/:slug" element={<PublicFormPage />} />
           <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
 
           <Route path="/workspace" element={<ProtectedRoute><MainPage /></ProtectedRoute>}>
@@ -48,6 +53,11 @@ function App() {
             <Route path="lead-scanner" element={<LeadScannerPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="object/campaign" element={<CampaignsPage />} />
+            <Route path="forms" element={<FormsPage />} />
+            <Route path="object/form" element={<FormsPage />} />
+            <Route path="forms/new" element={<FormBuilderPage />} />
+            <Route path="forms/:formId/edit" element={<FormBuilderPage />} />
+            <Route path="forms/:formId/submissions" element={<FormSubmissionsPage />} />
             <Route path="validation-rules" element={<Navigate to="/setup?tab=validation" replace />} />
             <Route path="object/:objectTypeId" element={<OverviewPage />} />
             <Route path="object/:objectTypeId/new" element={<CreatePage />} />
@@ -62,5 +72,6 @@ function App() {
     </AuthProvider>
   );
 }
+
 
 export default App;

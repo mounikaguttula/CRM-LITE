@@ -82,10 +82,10 @@ function NavigationPage({ onNavigate }) {
     ? displayName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
 
-  /* Build nav items from backend, filtering out campaign from modules list */
+  /* Build nav items from backend, filtering out internal form and form_submission system objects */
   const hasNav = Array.isArray(navigation) && navigation.length > 0;
   const hasObj = objectTypes && Object.keys(objectTypes).length > 0;
-  const rawNavItems = hasNav
+  const rawNavItems = (hasNav
     ? navigation
     : hasObj
       ? Object.keys(objectTypes).map((key) => ({
@@ -94,7 +94,12 @@ function NavigationPage({ onNavigate }) {
           route: `/workspace/object/${key}`,
           icon: key,
         }))
-      : [];
+      : []
+  ).filter((item) => {
+    const key = String(item.id || item.icon || item.displayName || '').toLowerCase();
+    return !key.includes('form');
+  });
+
 
   const getNavOrder = (item) => {
     const val = String(item.id || item.displayName || item.icon || '').toLowerCase();
@@ -241,6 +246,15 @@ function NavigationPage({ onNavigate }) {
 
         {/* Tools after all modules */}
         <SidebarNavItem
+          to="/workspace/forms"
+          label="Forms"
+          icon={<FileText size={15} color="#fff" />}
+          gradient="linear-gradient(135deg,#4f46e5,#818cf8)"
+          isActive={location.pathname.startsWith('/workspace/forms')}
+          onClick={onNavigate}
+        />
+
+        <SidebarNavItem
           to="/workspace/lead-scanner"
           label="Lead QR Scanner"
           icon={<QrCode size={15} color="#fff" />}
@@ -248,6 +262,7 @@ function NavigationPage({ onNavigate }) {
           isActive={location.pathname === '/workspace/lead-scanner'}
           onClick={onNavigate}
         />
+
       </nav>
 
       {/* Footer */}
