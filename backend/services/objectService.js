@@ -3,7 +3,35 @@ const metadataService = require('./metadataService');
 const validationRuleService = require('./validationRuleService');
 
 // Helper to validate UUID format to prevent PostgreSQL syntax errors
-const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+const isUuid = (val) => Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
+
+// Helper to validate that Primary Email and Alternate Email ID are not identical
+const validateDuplicateEmails = (payload) => {
+  if (!payload || typeof payload !== 'object') return;
+
+  const getEmailVal = (keys) => {
+    for (const k of keys) {
+      const v = payload[k] !== undefined ? payload[k] : (payload.data && typeof payload.data === 'object' ? payload.data[k] : undefined);
+      if (v && typeof v === 'string' && v.trim() !== '') {
+        return v.trim().toLowerCase();
+      }
+    }
+    return '';
+  };
+
+  const primaryEmailKeys = ['email', 'work_email', 'primary_email', 'email_address'];
+  const altEmailKeys = ['alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email', 'other_email', 'email_2', 'email2', 'alternate_email_address'];
+
+  const primary = getEmailVal(primaryEmailKeys);
+  const alt = getEmailVal(altEmailKeys);
+
+  if (primary && alt && primary === alt) {
+    throw {
+      statusCode: 400,
+      message: 'Validation Error: Primary Email and Alternate Email ID cannot be the same address.'
+    };
+  }
+};
 
 /**
  * Generic Object Service
@@ -17,15 +45,28 @@ const objectService = {
   normalizeRecord: (row) => {
     if (!row) return null;
     const { id, name, status, owner_id, created_by, updated_by, parent_id, secondary_parent_id, data, created_at, updated_at } = row;
-    const dataObj = typeof data === 'object' && data !== null ? data : {};
+    const dataObj = typeof data === 'object' && data !== null ? { ...data } : {};
+    delete dataObj.data;
 
-    // Harmonize alias fields for Job Title and Lead Source
+    // Harmonize alias fields for Job Title, Designation/Role, Address/Country, Employees, Lead Source
     const titleVal = dataObj.title || dataObj.job_title || '';
+    const designationVal = dataObj.designation || dataObj.role || '';
+    const addressVal = dataObj.address || dataObj.country || '';
+    const employeesVal = dataObj.number_of_employees || dataObj.company_size || '';
     const sourceVal = dataObj.lead_source || dataObj.source || '';
+
+    // Resolve human name if row.name is a UUID
+    let humanName = name;
+    if (isUuid(name) || !name) {
+      const candidateName = dataObj.name || dataObj.company_name || dataObj.account_name || dataObj.title || dataObj.subject || dataObj.display_name;
+      if (candidateName && typeof candidateName === 'string' && !isUuid(candidateName)) {
+        humanName = candidateName;
+      }
+    }
 
     return {
       id,
-      name,
+      name: humanName,
       status,
       owner_id,
       created_by: created_by || owner_id || null,
@@ -36,6 +77,9 @@ const objectService = {
       updated_at,
       ...dataObj,
       ...(titleVal ? { title: titleVal, job_title: titleVal } : {}),
+      ...(designationVal ? { designation: designationVal, role: designationVal } : {}),
+      ...(addressVal ? { address: addressVal, country: addressVal } : {}),
+      ...(employeesVal ? { number_of_employees: employeesVal, company_size: employeesVal } : {}),
       ...(sourceVal ? { lead_source: sourceVal, source: sourceVal } : {}),
     };
   },
@@ -114,6 +158,9 @@ const objectService = {
       if (!payload.last_name) payload.last_name = rawName.split(' ').slice(1).join(' ') || payload.first_name;
     }
 
+    // Validate duplicate primary and alternate email addresses
+    validateDuplicateEmails(payload);
+
     // Validate required fields based on field_definitions metadata
     for (const field of fields) {
       if (field.required && (payload[field.name] === undefined || payload[field.name] === '')) {
@@ -184,6 +231,7 @@ const objectService = {
 
     // Execute active custom validation rules on update
     const mergedRecord = { ...existing, ...payload };
+    validateDuplicateEmails(mergedRecord);
     const vErrorsUpdate = await validationRuleService.validateRecord(objectKey, mergedRecord, organizationId).catch(() => []);
     if (vErrorsUpdate.length > 0) {
       throw { statusCode: 400, message: vErrorsUpdate.join(' | ') };
@@ -193,14 +241,32 @@ const objectService = {
     delete customData.organization_id;
     delete customData.created_at;
     delete customData.updated_at;
+    delete customData.created_by;
+    delete customData.updated_by;
+    delete customData.data;
 
-    // Bi-directional alias syncing on update
-    const titleVal = (customData.title || customData.job_title || '').trim();
+    // Bi-directional alias syncing on update (prioritize payload updates over unchanged existing values)
+    let titleVal = '';
+    if (payload.title !== undefined && String(payload.title).trim() !== '' && String(payload.title).trim() !== String(existing.title || '').trim()) {
+      titleVal = String(payload.title).trim();
+    } else if (payload.job_title !== undefined && String(payload.job_title).trim() !== '' && String(payload.job_title).trim() !== String(existing.job_title || '').trim()) {
+      titleVal = String(payload.job_title).trim();
+    } else {
+      titleVal = (payload.title || payload.job_title || customData.title || customData.job_title || '').trim();
+    }
     if (titleVal) {
       customData.title = titleVal;
       customData.job_title = titleVal;
     }
-    const sourceVal = (customData.lead_source || customData.source || '').trim();
+
+    let sourceVal = '';
+    if (payload.lead_source !== undefined && String(payload.lead_source).trim() !== '' && String(payload.lead_source).trim() !== String(existing.lead_source || '').trim()) {
+      sourceVal = String(payload.lead_source).trim();
+    } else if (payload.source !== undefined && String(payload.source).trim() !== '' && String(payload.source).trim() !== String(existing.source || '').trim()) {
+      sourceVal = String(payload.source).trim();
+    } else {
+      sourceVal = (payload.lead_source || payload.source || customData.lead_source || customData.source || '').trim();
+    }
     if (sourceVal) {
       customData.lead_source = sourceVal;
       customData.source = sourceVal;

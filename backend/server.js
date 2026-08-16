@@ -22,6 +22,7 @@ const leadScannerRoutes = require('./routes/leadScannerRoutes');
 const campaignRoutes = require('./routes/campaignRoutes');
 const publicRoutes = require('./routes/publicRoutes');
 const companyRoutes = require('./routes/companyRoutes');
+const formRoutes = require('./routes/formRoutes');
 
 
 const app = express();
@@ -64,7 +65,7 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
-    uptime: process.uptime(),
+    uptime: process.env.UPTIME || process.uptime(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -79,6 +80,7 @@ app.use('/', companyRoutes);
 app.use('/api', companyRoutes);
 app.use('/', leadScannerRoutes);
 app.use('/', campaignRoutes);
+app.use('/', formRoutes);
 app.use('/', accessRequestRoutes);
 app.use('/', metadataRoutes);
 app.use('/', userRoutes);
@@ -88,6 +90,7 @@ app.use('/api/users', userRoutes);
 app.use('/roles', roleRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/', objectRoutes);
+
 
 
 // Global Error Handler (must be registered last)
