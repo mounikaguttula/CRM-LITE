@@ -303,7 +303,24 @@ const SYSTEM_VALIDATION_RULES = [
         group_logic: 'AND',
         conditions: [
           { field_name: 'email', operator: 'is_not_blank', value: '', row_logic: 'AND' },
-          { field_name: 'email', operator: 'not_regex', value: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$', row_logic: 'AND' },
+          { field_name: 'email', operator: 'not_regex', value: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*\\.[a-zA-Z]{2,}$', row_logic: 'AND' },
+        ],
+      },
+    ],
+  },
+  {
+    rule_key: 'lead_valid_alternate_email_format',
+    object_name: 'lead',
+    rule_name: 'Valid_Alternate_Email_Format',
+    error_message: 'Please enter a valid alternate email address (e.g. user@company.com).',
+    is_active: true,
+    condition_groups: [
+      {
+        group_order: 1,
+        group_logic: 'AND',
+        conditions: [
+          { field_name: 'alternate_email', operator: 'is_not_blank', value: '', row_logic: 'AND' },
+          { field_name: 'alternate_email', operator: 'not_regex', value: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*\\.[a-zA-Z]{2,}$', row_logic: 'AND' },
         ],
       },
     ],

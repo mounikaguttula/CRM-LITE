@@ -78,12 +78,16 @@ function PublicFormPage() {
     e.preventDefault();
     if (!form) return;
 
+    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
     const errors = {};
     (form.fields_config || []).forEach((f) => {
-      if (f.required) {
-        const val = fieldValues[f.api_name];
-        if (val === undefined || val === null || String(val).trim() === '') {
-          errors[f.api_name] = `${f.label || f.api_name} is required.`;
+      const val = fieldValues[f.api_name];
+      const strVal = val !== undefined && val !== null ? String(val).trim() : '';
+      if (f.required && !strVal) {
+        errors[f.api_name] = `${f.label || f.api_name} is required.`;
+      } else if (strVal && (f.type === 'email' || (f.api_name || '').toLowerCase().includes('email') || (f.label || '').toLowerCase().includes('email'))) {
+        if (!EMAIL_REGEX.test(strVal)) {
+          errors[f.api_name] = `Please enter a valid email address for ${f.label || f.api_name} (e.g. user@company.com).`;
         }
       }
     });

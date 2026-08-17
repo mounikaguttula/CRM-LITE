@@ -127,9 +127,16 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     const fieldsList = meta.fields || [];
     const valErrors = {};
 
+    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+
     fieldsList.forEach((field) => {
-      if (field.required && (!formData[field.name] || String(formData[field.name]).trim() === '')) {
+      const val = (formData[field.name] !== undefined && formData[field.name] !== null) ? String(formData[field.name]).trim() : '';
+      if (field.required && !val) {
         valErrors[field.name] = `${field.label} is required.`;
+      } else if (val && (field.type === 'email' || (field.name || '').toLowerCase().includes('email') || (field.label || '').toLowerCase().includes('email'))) {
+        if (!EMAIL_REGEX.test(val)) {
+          valErrors[field.name] = `Please enter a valid email address for ${field.label} (e.g. user@company.com).`;
+        }
       }
     });
 
@@ -140,11 +147,12 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     if (primaryEmail && altEmail && primaryEmail === altEmail) {
       const emailFieldKey = fieldsList.find(f => ['alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email'].includes(f.name))?.name || 'alternate_email';
       valErrors[emailFieldKey] = 'Email and Alternate Email ID cannot be the same address.';
-      setSubmitError('Validation Error: Email and Alternate Email ID cannot be the same address.');
     }
 
     if (Object.keys(valErrors).length > 0) {
       setErrors(valErrors);
+      const firstErrMsg = Object.values(valErrors)[0];
+      setSubmitError(firstErrMsg ? `Validation Error: ${firstErrMsg}` : 'Validation Error: Please review the errors on this page.');
       return;
     }
 

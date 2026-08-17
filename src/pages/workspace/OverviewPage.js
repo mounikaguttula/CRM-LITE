@@ -1265,8 +1265,15 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
 
   if (nameLower.includes('company') || nameLower.includes('organization') || nameLower.includes('account')) {
     if (isUuid(val)) {
+      const compObj = lookupMap?.[val] || (lookupMap?.companies && lookupMap.companies[val]);
+      if (compObj) {
+        const compName = compObj.name || compObj.company_name || compObj.account_name;
+        if (compName && !isUuid(compName)) return compName;
+      }
       if (record?.company_name) return record.company_name;
       if (record?.company?.name) return record.company.name;
+      if (record?.data?.company_name) return record.data.company_name;
+      if (record?.company && typeof record.company === 'string' && !isUuid(record.company)) return record.company;
       return organization?.name || company?.name || '—';
     }
     return String(val);
