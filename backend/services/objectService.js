@@ -33,6 +33,40 @@ const validateDuplicateEmails = (payload) => {
   }
 };
 
+// Helper to validate email format for all primary and alternate email fields
+const validateEmailFormats = (payload) => {
+  if (!payload || typeof payload !== 'object') return;
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+  const emailKeys = [
+    'email', 'work_email', 'primary_email', 'email_address',
+    'alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email', 'other_email', 'email_2', 'email2', 'alternate_email_address'
+  ];
+
+  for (const [key, rawVal] of Object.entries(payload)) {
+    if (rawVal === undefined || rawVal === null || key === 'data') continue;
+    const val = String(rawVal).trim();
+    if (!val) continue;
+
+    const lowerKey = key.toLowerCase();
+    const isEmailField = emailKeys.includes(lowerKey) || lowerKey.includes('email');
+
+    if (isEmailField && !emailRegex.test(val)) {
+      const fieldLabel = (lowerKey.includes('alternate') || lowerKey.includes('secondary') || lowerKey.includes('alt') || lowerKey.includes('other') || lowerKey.includes('2'))
+        ? 'Alternate Email ID'
+        : 'Email Address';
+      throw {
+        statusCode: 400,
+        message: `Validation Error: Please enter a valid email address for ${fieldLabel} (e.g. user@company.com).`
+      };
+    }
+  }
+
+  if (payload.data && typeof payload.data === 'object') {
+    validateEmailFormats(payload.data);
+  }
+};
+
 /**
  * Generic Object Service
  * Executes dynamic CRUD operations against Supabase universal_table.
@@ -158,8 +192,9 @@ const objectService = {
       if (!payload.last_name) payload.last_name = rawName.split(' ').slice(1).join(' ') || payload.first_name;
     }
 
-    // Validate duplicate primary and alternate email addresses
+    // Validate duplicate primary and alternate email addresses and email formats
     validateDuplicateEmails(payload);
+    validateEmailFormats(payload);
 
     // Validate required fields based on field_definitions metadata
     for (const field of fields) {
@@ -232,6 +267,7 @@ const objectService = {
     // Execute active custom validation rules on update
     const mergedRecord = { ...existing, ...payload };
     validateDuplicateEmails(mergedRecord);
+    validateEmailFormats(mergedRecord);
     const vErrorsUpdate = await validationRuleService.validateRecord(objectKey, mergedRecord, organizationId).catch(() => []);
     if (vErrorsUpdate.length > 0) {
       throw { statusCode: 400, message: vErrorsUpdate.join(' | ') };

@@ -29,6 +29,7 @@ import {
   Layers,
   AlertTriangle,
   MapPin,
+  Sparkles,
 } from 'lucide-react';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
@@ -199,12 +200,17 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
       if (lookupMap && lookupMap[val]) {
         const u = lookupMap[val];
         const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
-        if (uName) return uName;
+        if (uName && !isUuid(uName)) return uName;
       }
       if (lookupMap.users?.[val]) {
         const u = lookupMap.users[val];
         const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
-        if (uName) return uName;
+        if (uName && !isUuid(uName)) return uName;
+      }
+      if (lookupMap.all?.[val]) {
+        const u = lookupMap.all[val];
+        const uName = u.name || u.display_name || (`${u.first_name || ''} ${u.last_name || ''}`.trim()) || u.email;
+        if (uName && !isUuid(uName)) return uName;
       }
       if (currentUser && (val === currentUser.id || val === currentUser.user_id)) {
         const cName = currentUser.name || (`${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim()) || currentUser.email || 'Admin User';
@@ -224,26 +230,47 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
 
   if (nameLower.includes('company') || nameLower.includes('organization') || nameLower.includes('account')) {
     if (isUuid(val)) {
-      if (lookupMap.companies?.[val]) return lookupMap.companies[val].name || lookupMap.companies[val].company_name;
+      const compObj = lookupMap.companies?.[val] || lookupMap.all?.[val] || (lookupMap && lookupMap[val]);
+      if (compObj) {
+        const compName = compObj.name || compObj.company_name || compObj.account_name || compObj.data?.name || compObj.data?.company_name;
+        if (compName && !isUuid(compName)) return compName;
+      }
       if (record?.company_name) return record.company_name;
       if (record?.company?.name) return record.company.name;
-      return organization?.name || company?.name || '—';
+      if (record?.data?.company_name) return record.data.company_name;
+      if (record?.company && typeof record.company === 'string' && !isUuid(record.company)) return record.company;
+      if (organization?.name) return organization.name;
+      if (company?.name) return company.name;
+      return '—';
     }
     return String(val);
   }
 
   if (nameLower.includes('contact')) {
     if (isUuid(val)) {
-      if (lookupMap.contacts?.[val]) return lookupMap.contacts[val].name || lookupMap.contacts[val].first_name;
+      const contObj = lookupMap.contacts?.[val] || lookupMap.all?.[val] || (lookupMap && lookupMap[val]);
+      if (contObj) {
+        const contName = contObj.name || (`${contObj.first_name || ''} ${contObj.last_name || ''}`.trim()) || contObj.email;
+        if (contName && !isUuid(contName)) return contName;
+      }
       if (record?.contact_name) return record.contact_name;
       if (record?.contact?.name) return record.contact.name;
+      if (record?.data?.contact_name) return record.data.contact_name;
+      if (record?.contact && typeof record.contact === 'string' && !isUuid(record.contact)) return record.contact;
+      return '—';
     }
     return String(val);
   }
 
   if (isUuid(val)) {
-    if (lookupMap.all?.[val]) return lookupMap.all[val].name;
-    return record?.[`${fieldName}_name`] || record?.[fieldName?.replace('_id', '')]?.name || '—';
+    if (lookupMap.all?.[val]) {
+      const item = lookupMap.all[val];
+      const itemName = item.name || item.company_name || item.display_name;
+      if (itemName && !isUuid(itemName)) return itemName;
+    }
+    const resolvedName = record?.[`${fieldName}_name`] || record?.[fieldName?.replace('_id', '')]?.name;
+    if (resolvedName && !isUuid(resolvedName)) return resolvedName;
+    return '—';
   }
 
   return String(val);
@@ -781,6 +808,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('Overview');
   const [converting, setConverting] = useState(false);
+  const [showConvertModal, setShowConvertModal] = useState(false);
+  const [convertError, setConvertError] = useState(null);
 
   /* Lookup Data Stores for Related Records & Lookup Resolution */
   const [lookupMap, setLookupMap] = useState({ users: {}, companies: {}, contacts: {}, deals: {}, all: {} });
@@ -990,7 +1019,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     if (!meta?.fields || !Array.isArray(meta.fields)) return { ...payload, ...extras };
 
     const result = { ...payload, ...extras };
-    const companyName = String(record?.company || record?.company_name || record?.account || `${record?.name || record?.title || 'Company'} Company`).trim();
+    const companyName = String(record?.company || record?.company_name || record?.account || (record?.name ? `${record?.name} Company` : 'Company')).trim();
     const contactName = String(record?.name || `${record?.first_name || ''} ${record?.last_name || ''}`.trim() || record?.email || 'Contact').trim();
 
     for (const field of meta.fields) {
@@ -1086,7 +1115,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const currentLeadStatus = String(record?.status || record?.data?.status || record?.stage || record?.data?.stage || '').toLowerCase();
   const isAlreadyConverted = currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted);
 
-  const handleConvertLead = async () => {
+  const handleOpenConvertModal = () => {
     if (!record || converting) return;
 
     if (isAlreadyConverted) {
@@ -1094,18 +1123,39 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return;
     }
 
-    if (!window.confirm('Convert this lead into Company, Contact and Deal?')) return;
+    setConvertError(null);
+    setShowConvertModal(true);
+  };
+
+  const executeConvertLead = async () => {
+    if (!record || converting) return;
 
     setConverting(true);
-    setError(null);
+    setConvertError(null);
 
     try {
-      const companyName = String(record.company || record.company_name || record.account || `${record.name || record.title || 'Company'} Company`).trim();
-      const contactName = String(record.name || `${record.first_name || ''} ${record.last_name || ''}`.trim() || record.email || 'Contact').trim();
-      const dealName = String(record.title || `${contactName} Opportunity`).trim();
+      const explicitDealName = String(record.deal_name || record.data?.deal_name || record.deal_title || record.data?.deal_title || '').trim();
+      const rawCompany = String(record.company || record.company_name || record.account || record.data?.company || record.data?.company_name || record.data?.account || '').trim();
+      const leadFirstName = String(record.first_name || record.data?.first_name || '').trim();
+      const leadLastName = String(record.last_name || record.data?.last_name || '').trim();
+      const leadFullName = `${leadFirstName} ${leadLastName}`.trim() || String(record.name || record.data?.name || '').trim();
+      const contactName = String(leadFullName || record.email || record.data?.email || 'Contact').trim();
+
+      const companyName = rawCompany;
+
+      let dealName = explicitDealName;
+      if (!dealName) {
+        if (companyName) {
+          dealName = `${companyName} - Opportunity`;
+        } else if (leadFullName) {
+          dealName = `${leadFullName} - Opportunity`;
+        } else {
+          dealName = `${contactName} - Opportunity`;
+        }
+      }
 
       const companyPayload = fillRequiredFields('company', {
-        name: companyName || 'New Company',
+        name: companyName || (leadFullName ? `${leadFullName} Company` : 'New Company'),
         industry: record.industry || record.company_industry || null,
         phone: record.phone || record.mobile || null,
         website: record.website || record.web || null,
@@ -1145,6 +1195,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       await apiPut(`/objects/${objectTypeId}/${recordId}`, leadPayload).catch(() => apiPut(`/${objectTypeId}/${recordId}`, leadPayload));
 
       setRecord((prev) => ({ ...prev, ...leadPayload }));
+      setShowConvertModal(false);
+
       if (dealId) {
         navigate(`/workspace/object/deal/${dealId}`);
       } else if (companyId) {
@@ -1152,7 +1204,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       }
     } catch (err) {
       console.error('Lead conversion failed:', err);
-      setError(err.message || 'Lead conversion failed.');
+      setConvertError(err.message || 'Lead conversion failed.');
     } finally {
       setConverting(false);
     }
@@ -1409,6 +1461,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       const companyVal = formatLookupValue(f.name, val, record, currentUser, organization, company, lookupMap);
       const targetId = isUuid(compId) ? compId : (parentCompany ? parentCompany.id : null);
 
+      let displayCompanyText = companyVal;
+      if (!displayCompanyText || isUuid(displayCompanyText) || displayCompanyText === '—') {
+        displayCompanyText = parentCompany?.name || record?.company_name || (typeof record?.company === 'string' && !isUuid(record.company) ? record.company : null) || 'View Company';
+      }
+
       if (targetId) {
         return (
           <Link
@@ -1427,12 +1484,12 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             }}
           >
             <Building2 size={15} />
-            {companyVal !== '—' ? companyVal : (parentCompany?.name || 'View Company')}
+            {displayCompanyText}
             <ExternalLink size={13} style={{ opacity: 0.7 }} />
           </Link>
         );
       }
-      return <span style={{ fontWeight: 600, color: C.text }}>{companyVal}</span>;
+      return <span style={{ fontWeight: 600, color: C.text }}>{displayCompanyText}</span>;
     }
 
     /* Contact Lookup Field */
@@ -1440,6 +1497,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       const contactIdVal = isUuid(val) ? val : (record.contact_id || record.contact || record.secondary_parent_id);
       const contactVal = formatLookupValue(f.name, val, record, currentUser, organization, company, lookupMap);
       const targetId = isUuid(contactIdVal) ? contactIdVal : (primaryContact ? primaryContact.id : null);
+
+      let displayContactText = contactVal;
+      if (!displayContactText || isUuid(displayContactText) || displayContactText === '—') {
+        displayContactText = primaryContact?.name || record?.contact_name || (typeof record?.contact === 'string' && !isUuid(record.contact) ? record.contact : null) || 'View Contact';
+      }
 
       if (targetId) {
         return (
@@ -1459,12 +1521,12 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             }}
           >
             <User size={15} />
-            {contactVal !== '—' ? contactVal : (primaryContact?.name || 'View Contact')}
+            {displayContactText}
             <ExternalLink size={13} style={{ opacity: 0.7 }} />
           </Link>
         );
       }
-      return <span style={{ fontWeight: 600, color: C.text }}>{contactVal}</span>;
+      return <span style={{ fontWeight: 600, color: C.text }}>{displayContactText}</span>;
     }
 
     if (f.type === 'datetime' || f.type === 'date' || fNameLower.includes('date') || fNameLower.includes('created_at') || fNameLower.includes('updated_at')) {
@@ -1823,7 +1885,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   </span>
                 ) : (
                   <button
-                    onClick={handleConvertLead}
+                    onClick={handleOpenConvertModal}
                     disabled={converting}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 7,
@@ -2927,6 +2989,100 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   <>
                     <Trash2 size={16} />
                     <span>Delete Record</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Custom Lead Conversion Modal Portal */}
+      {showConvertModal && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 400,
+            padding: '24px 22px 20px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', position: 'relative',
+            textAlign: 'center',
+          }}>
+            <button 
+              type="button" 
+              onClick={() => { if (!converting) { setShowConvertModal(false); setConvertError(null); } }}
+              disabled={converting}
+              style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', color: '#64748b', cursor: converting ? 'not-allowed' : 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{
+              width: 52, height: 52, borderRadius: '50%', background: 'rgba(249,115,22,0.12)',
+              color: '#f97316', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 12, boxShadow: '0 0 0 6px rgba(249, 115, 22, 0.08)'
+            }}>
+              <Sparkles size={24} />
+            </div>
+
+            <h3 className="font-display" style={{ margin: '0 0 6px 0', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+              Convert Lead?
+            </h3>
+
+            <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: '#64748b', lineHeight: 1.5 }}>
+              Are you sure you want to convert <strong style={{ color: '#0f172a' }}>"{recordTitle}"</strong> into Company, Contact, and Deal?
+            </p>
+
+            {convertError && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+                fontSize: '0.82rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{convertError}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => { setShowConvertModal(false); setConvertError(null); }}
+                disabled={converting}
+                style={{
+                  flex: 1, height: 42, borderRadius: 12, border: '1px solid #cbd5e1',
+                  background: '#ffffff', color: '#334155', fontWeight: 700, fontSize: '0.88rem',
+                  cursor: converting ? 'not-allowed' : 'pointer', transition: 'all 0.15s ease'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeConvertLead}
+                disabled={converting}
+                style={{
+                  flex: 1, height: 42, borderRadius: 12, border: 'none',
+                  background: converting ? '#94a3b8' : 'linear-gradient(135deg, #f97316 0%, #ef4444 100%)',
+                  color: '#ffffff', fontWeight: 700, fontSize: '0.88rem',
+                  cursor: converting ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  boxShadow: converting ? 'none' : '0 4px 14px rgba(249, 115, 22, 0.4)', transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => { if (!converting) e.currentTarget.style.filter = 'brightness(1.08)'; }}
+                onMouseLeave={(e) => { if (!converting) e.currentTarget.style.filter = 'brightness(1)'; }}
+              >
+                {converting ? (
+                  <span>Converting…</span>
+                ) : (
+                  <>
+                    <Sparkles size={16} />
+                    <span>Convert Lead</span>
                   </>
                 )}
               </button>
