@@ -1019,7 +1019,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     if (!meta?.fields || !Array.isArray(meta.fields)) return { ...payload, ...extras };
 
     const result = { ...payload, ...extras };
-    const companyName = String(record?.company || record?.company_name || record?.account || (record?.name ? `${record?.name} Company` : 'Company')).trim();
+    const rawComp = String(record?.company_name || record?.company || record?.account || '').trim();
+    const companyName = (!isUuid(rawComp) && rawComp) ? rawComp : (record?.name ? `${record.name} Company` : 'New Company');
     const contactName = String(record?.name || `${record?.first_name || ''} ${record?.last_name || ''}`.trim() || record?.email || 'Contact').trim();
 
     for (const field of meta.fields) {
@@ -1057,11 +1058,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           break;
         case 'company_id':
         case 'company':
-          result[key] = result.company_id || result.company || extras.companyId || undefined;
+          result[key] = extras.companyId || result.company_id || result.company || undefined;
           break;
         case 'contact_id':
         case 'contact':
-          result[key] = result.contact_id || result.contact || extras.contactId || undefined;
+          result[key] = extras.contactId || result.contact_id || result.contact || undefined;
           break;
         default:
           if (key.endsWith('_id') && key.includes('company')) {
@@ -1134,63 +1135,188 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     setConvertError(null);
 
     try {
-      const explicitDealName = String(record.deal_name || record.data?.deal_name || record.deal_title || record.data?.deal_title || '').trim();
-      const rawCompany = String(record.company || record.company_name || record.account || record.data?.company || record.data?.company_name || record.data?.account || '').trim();
-      const leadFirstName = String(record.first_name || record.data?.first_name || '').trim();
-      const leadLastName = String(record.last_name || record.data?.last_name || '').trim();
-      const leadFullName = `${leadFirstName} ${leadLastName}`.trim() || String(record.name || record.data?.name || '').trim();
-      const contactName = String(leadFullName || record.email || record.data?.email || 'Contact').trim();
+      // Step 1: Resolve Company ID and Company Name
+      let companyId = null;
+      let actualCompanyName = '';
 
-      const companyName = rawCompany;
+      // Extract raw values from Lead supporting case variants
+      const getVal = (keys) => {
+        for (const k of keys) {
+          if (record[k] !== undefined && record[k] !== null && String(record[k]).trim() !== '') return record[k];
+          if (record.data && record.data[k] !== undefined && record.data[k] !== null && String(record.data[k]).trim() !== '') return record.data[k];
+        }
+        return '';
+      };
 
-      let dealName = explicitDealName;
-      if (!dealName) {
-        if (companyName) {
-          dealName = `${companyName} - Opportunity`;
-        } else if (leadFullName) {
-          dealName = `${leadFullName} - Opportunity`;
-        } else {
-          dealName = `${contactName} - Opportunity`;
+      const leadCompanyRawValue = getVal(['company_id', 'Company_id', 'company', 'Company', 'account', 'Account', 'parent_id']);
+      const rawCompanyNameStr = getVal(['company_name', 'Company_name', 'company', 'Company', 'account', 'Account']);
+
+      // Resolve explicit human-readable text company name (non-UUID)
+      let extractedCompanyName = '';
+      if (!isUuid(rawCompanyNameStr) && String(rawCompanyNameStr).trim()) {
+        extractedCompanyName = String(rawCompanyNameStr).trim();
+      } else if (!isUuid(leadCompanyRawValue) && String(leadCompanyRawValue).trim()) {
+        extractedCompanyName = String(leadCompanyRawValue).trim();
+      } else if (parentCompany?.name && !isUuid(parentCompany.name)) {
+        extractedCompanyName = String(parentCompany.name).trim();
+      }
+
+      const isRawValueUuid = isUuid(leadCompanyRawValue);
+      let referencedCompanyId = isRawValueUuid ? leadCompanyRawValue : null;
+      let referencedCompanyName = '';
+      let isReferencedCompanyMatch = false;
+
+      // If raw company reference is a UUID, fetch referenced Company and verify name match
+      if (referencedCompanyId) {
+        try {
+          let compRec = lookupMap?.companies?.[referencedCompanyId] || lookupMap?.all?.[referencedCompanyId];
+          if (!compRec) {
+            const res = await apiGet(`/objects/company/${referencedCompanyId}`).catch(() => apiGet(`/company/${referencedCompanyId}`));
+            compRec = res?.data || res;
+          }
+          if (compRec) {
+            referencedCompanyName = compRec.name || compRec.data?.name || compRec.company_name || compRec.data?.company_name || '';
+          }
+        } catch (e) {
+          console.warn('[ConvertLead] Error fetching referenced company by UUID:', referencedCompanyId, e);
+        }
+
+        if (referencedCompanyName && !isUuid(referencedCompanyName)) {
+          if (!extractedCompanyName || extractedCompanyName.toLowerCase() === referencedCompanyName.toLowerCase()) {
+            isReferencedCompanyMatch = true;
+            companyId = referencedCompanyId;
+            actualCompanyName = referencedCompanyName;
+            console.log('[ConvertLead] Reusing referenced Company by UUID (matched name):', companyId, actualCompanyName);
+          } else {
+            console.warn(`[ConvertLead] MISMATCH DETECTED! Lead company name '${extractedCompanyName}' does NOT match referenced Company '${referencedCompanyName}' (${referencedCompanyId}). Ignoring stale UUID!`);
+          }
         }
       }
 
-      const companyPayload = fillRequiredFields('company', {
-        name: companyName || (leadFullName ? `${leadFullName} Company` : 'New Company'),
-        industry: record.industry || record.company_industry || null,
-        phone: record.phone || record.mobile || null,
-        website: record.website || record.web || null,
-      });
-      const companyRecord = await createObjectRecord('company', companyPayload);
-      const companyId = companyRecord?.id || companyRecord?._id || companyRecord?.company_id || null;
+      // If companyId is not resolved yet, use extractedCompanyName to search existing or create new Company
+      if (!companyId && extractedCompanyName) {
+        try {
+          const listRes = await apiGet(`/objects/company?search=${encodeURIComponent(extractedCompanyName)}`).catch(() => apiGet(`/company?search=${encodeURIComponent(extractedCompanyName)}`));
+          const existingComps = Array.isArray(listRes?.data) ? listRes.data : (Array.isArray(listRes) ? listRes : []);
+          const matchedComp = existingComps.find(c => {
+            const cName = String(c.name || c.data?.name || c.company_name || '').trim().toLowerCase();
+            return cName === extractedCompanyName.toLowerCase() && isUuid(c.id);
+          });
 
+          if (matchedComp) {
+            companyId = matchedComp.id;
+            actualCompanyName = matchedComp.name || matchedComp.data?.name || extractedCompanyName;
+            console.log('[ConvertLead] Reusing existing Company by exact name match:', companyId, actualCompanyName);
+          }
+        } catch (e) {
+          console.warn('[ConvertLead] Search existing company by name failed:', e);
+        }
+
+        if (!companyId) {
+          // Create new Company record
+          const companyPayload = fillRequiredFields('company', {
+            name: extractedCompanyName,
+            company_name: extractedCompanyName,
+            industry: record.industry || record.data?.industry || record.company_industry || null,
+            phone: record.phone || record.data?.phone || record.mobile || null,
+            website: record.website || record.data?.website || record.web || null,
+          });
+
+          console.log('[ConvertLead] Creating new Company with payload:', companyPayload);
+          const companyRecord = await createObjectRecord('company', companyPayload);
+          companyId = companyRecord?.id || companyRecord?._id || companyRecord?.company_id || null;
+
+          if (!companyId || !isUuid(companyId)) {
+            throw new Error('Failed to create Company during Lead conversion.');
+          }
+          actualCompanyName = companyRecord?.name || companyRecord?.data?.name || extractedCompanyName;
+          console.log('[ConvertLead] Created new Company:', companyId, actualCompanyName);
+        }
+      }
+
+      // Output Diagnostic Logging
+      console.log('[ConvertLead] Company Resolution Diagnostics:', {
+        leadCompanyRawValue,
+        extractedCompanyName,
+        isRawValueUuid,
+        referencedCompanyId,
+        referencedCompanyName,
+        isReferencedCompanyMatch,
+        finalResolvedCompanyId: companyId,
+        finalResolvedCompanyName: actualCompanyName,
+      });
+
+      // Step 2: Resolve Contact Name
+      const leadFirstName = String(record.first_name || record.data?.first_name || '').trim();
+      const leadLastName = String(record.last_name || record.data?.last_name || '').trim();
+      let contactName = `${leadFirstName} ${leadLastName}`.trim();
+      if (!contactName) {
+        const rawLeadName = String(record.name || record.data?.name || '').trim();
+        contactName = (!isUuid(rawLeadName) && rawLeadName) ? rawLeadName : (record.email || record.data?.email || 'Contact').split('@')[0];
+      }
+
+      // Construct Contact Payload with explicit company lookup references
       const contactPayload = fillRequiredFields('contact', {
         name: contactName,
-        email: record.email || record.email_address || null,
-        phone: record.phone || record.mobile || null,
-        company_id: companyId || undefined,
-        company: companyId || undefined,
-      }, { companyId });
+        first_name: leadFirstName || contactName.split(' ')[0] || contactName,
+        last_name: leadLastName || contactName.split(' ').slice(1).join(' ') || '',
+        email: record.email || record.data?.email || record.email_address || null,
+        phone: record.phone || record.data?.phone || record.mobile || null,
+        title: record.title || record.data?.title || null,
+        ...(companyId && isUuid(companyId) ? { company: companyId, company_id: companyId, Company: companyId, company_name: actualCompanyName } : {}),
+      }, { companyId: companyId && isUuid(companyId) ? companyId : undefined });
+
+      console.log('[ConvertLead] Creating Contact with payload:', contactPayload);
       const contactRecord = await createObjectRecord('contact', contactPayload);
       const contactId = contactRecord?.id || contactRecord?._id || contactRecord?.contact_id || null;
 
+      if (!contactId || !isUuid(contactId)) {
+        throw new Error('Failed to create Contact during Lead conversion.');
+      }
+      console.log('[ConvertLead] Created Contact:', contactId, contactName);
+
+      // Step 3: Resolve Deal Name
+      const explicitDealName = String(record.deal_name || record.data?.deal_name || record.deal_title || record.data?.deal_title || '').trim();
+      let dealName = (!isUuid(explicitDealName) && explicitDealName) ? explicitDealName : '';
+      if (!dealName) {
+        if (actualCompanyName) {
+          dealName = actualCompanyName;
+        } else if (contactName) {
+          dealName = contactName;
+        } else {
+          dealName = 'New Deal';
+        }
+      }
+
+      // Construct Deal Payload with explicit company & contact lookup references
       const dealPayload = fillRequiredFields('deal', {
         name: dealName,
-        company_id: companyId || undefined,
-        contact_id: contactId || undefined,
-        amount: record.amount || record.value || null,
+        amount: record.amount || record.data?.amount || record.value || null,
         stage: 'Qualification',
         status: 'New',
-      }, { companyId, contactId });
+        contact: contactId,
+        contact_id: contactId,
+        contact_name: contactName,
+        ...(companyId && isUuid(companyId) ? { company: companyId, company_id: companyId, Company: companyId, company_name: actualCompanyName } : {}),
+      }, { companyId: companyId && isUuid(companyId) ? companyId : undefined, contactId });
+
+      console.log('[ConvertLead] Creating Deal with payload:', dealPayload);
       const dealRecord = await createObjectRecord('deal', dealPayload);
       const dealId = dealRecord?.id || dealRecord?._id || dealRecord?.deal_id || null;
 
+      if (!dealId || !isUuid(dealId)) {
+        throw new Error('Failed to create Deal during Lead conversion.');
+      }
+      console.log('[ConvertLead] Created Deal:', dealId, dealName);
+
+      // Update Lead Status to Converted with linked references
       const leadPayload = {
         status: 'Converted',
         stage: 'Converted',
-        company_id: companyId || undefined,
-        company: companyId || undefined,
-        contact_id: contactId || undefined,
-        contact: contactId || undefined,
+        contact_id: contactId,
+        contact: contactId,
+        contact_name: contactName,
+        ...(companyId && isUuid(companyId) ? { company_id: companyId, company: companyId, company_name: actualCompanyName } : {}),
       };
       await apiPut(`/objects/${objectTypeId}/${recordId}`, leadPayload).catch(() => apiPut(`/${objectTypeId}/${recordId}`, leadPayload));
 
@@ -1203,7 +1329,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         navigate(`/workspace/object/company/${companyId}`);
       }
     } catch (err) {
-      console.error('Lead conversion failed:', err);
+      console.error('[ConvertLead] Conversion failed:', err);
       setConvertError(err.message || 'Lead conversion failed.');
     } finally {
       setConverting(false);
@@ -1457,16 +1583,16 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
     /* Company / Account Lookup Field */
     if (fNameLower.includes('company') || fNameLower.includes('account')) {
-      const compId = isUuid(val) ? val : (record.company_id || record.company || record.parent_id);
-      const companyVal = formatLookupValue(f.name, val, record, currentUser, organization, company, lookupMap);
+      const compId = isUuid(val) ? val : (record.company_id || record.Company_id || record.company || record.Company || record.parent_id || record.data?.company || record.data?.Company);
+      const companyVal = formatLookupValue(f.name, compId || val, record, currentUser, organization, company, lookupMap);
       const targetId = isUuid(compId) ? compId : (parentCompany ? parentCompany.id : null);
 
       let displayCompanyText = companyVal;
       if (!displayCompanyText || isUuid(displayCompanyText) || displayCompanyText === '—') {
-        displayCompanyText = parentCompany?.name || record?.company_name || (typeof record?.company === 'string' && !isUuid(record.company) ? record.company : null) || 'View Company';
+        displayCompanyText = parentCompany?.name || parentCompany?.data?.name || record?.company_name || record?.data?.company_name || (typeof record?.company === 'string' && !isUuid(record.company) ? record.company : null) || '—';
       }
 
-      if (targetId) {
+      if (targetId && displayCompanyText && displayCompanyText !== '—') {
         return (
           <Link
             to={`/workspace/object/company/${targetId}`}
@@ -1494,16 +1620,16 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
     /* Contact Lookup Field */
     if (fNameLower.includes('contact')) {
-      const contactIdVal = isUuid(val) ? val : (record.contact_id || record.contact || record.secondary_parent_id);
-      const contactVal = formatLookupValue(f.name, val, record, currentUser, organization, company, lookupMap);
+      const contactIdVal = isUuid(val) ? val : (record.contact_id || record.Contact_id || record.contact || record.Contact || record.secondary_parent_id || record.data?.contact || record.data?.Contact);
+      const contactVal = formatLookupValue(f.name, contactIdVal || val, record, currentUser, organization, company, lookupMap);
       const targetId = isUuid(contactIdVal) ? contactIdVal : (primaryContact ? primaryContact.id : null);
 
       let displayContactText = contactVal;
       if (!displayContactText || isUuid(displayContactText) || displayContactText === '—') {
-        displayContactText = primaryContact?.name || record?.contact_name || (typeof record?.contact === 'string' && !isUuid(record.contact) ? record.contact : null) || 'View Contact';
+        displayContactText = primaryContact?.name || primaryContact?.data?.name || record?.contact_name || record?.data?.contact_name || (typeof record?.contact === 'string' && !isUuid(record.contact) ? record.contact : null) || '—';
       }
 
-      if (targetId) {
+      if (targetId && displayContactText && displayContactText !== '—') {
         return (
           <Link
             to={`/workspace/object/contact/${targetId}`}
