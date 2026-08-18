@@ -98,6 +98,10 @@ const objectService = {
       }
     }
 
+    if (humanName && typeof humanName === 'string' && !isUuid(humanName)) {
+      dataObj.name = humanName;
+    }
+
     return {
       id,
       name: humanName,
@@ -196,9 +200,9 @@ const objectService = {
     validateDuplicateEmails(payload);
     validateEmailFormats(payload);
 
-    // Validate required fields based on field_definitions metadata
+    // Validate required fields based on field_definitions metadata (exempt lookup relations if null/omitted)
     for (const field of fields) {
-      if (field.required && (payload[field.name] === undefined || payload[field.name] === '')) {
+      if (field.required && field.type !== 'lookup' && (payload[field.name] === undefined || payload[field.name] === '')) {
         throw { statusCode: 400, message: `Validation Error: Field '${field.label || field.name}' is required for ${objectKey}.` };
       }
     }
@@ -210,6 +214,39 @@ const objectService = {
     }
 
     const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = payload;
+
+    // Object-aware canonical record name resolution
+    const cleanKey = String(objectKey || '').toLowerCase();
+    let resolvedName = '';
+
+    if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
+      const candidate = payload.name || payload.company_name || payload.account_name || (payload.data && (payload.data.name || payload.data.company_name));
+      resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : '';
+    } else if (cleanKey === 'contact' || cleanKey === 'person' || cleanKey === 'contacts' || cleanKey === 'people') {
+      const explicitName = (!isUuid(payload.name) && String(payload.name || '').trim()) ? String(payload.name).trim() : '';
+      const fn = String(payload.first_name || (payload.data && payload.data.first_name) || '').trim();
+      const ln = String(payload.last_name || (payload.data && payload.data.last_name) || '').trim();
+      const combined = `${fn} ${ln}`.trim();
+      resolvedName = explicitName || combined || (!isUuid(payload.email) && payload.email ? String(payload.email).split('@')[0] : 'Contact');
+    } else if (cleanKey === 'deal' || cleanKey === 'opportunity' || cleanKey === 'deals' || cleanKey === 'opportunities') {
+      const candidate = payload.name || payload.deal_name || (payload.data && (payload.data.name || payload.data.deal_name));
+      resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : 'New Deal';
+    } else {
+      const candidate = payload.name || payload.title || payload.subject || (payload.data && payload.data.name);
+      resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : 'Untitled';
+    }
+
+    if (!resolvedName) {
+      resolvedName = (!isUuid(name) && String(name || '').trim()) ? String(name).trim() : 'Untitled';
+    }
+
+    // Explicitly set canonical data.name field to match universal_table.name
+    customData.name = resolvedName;
+    if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
+      customData.company_name = resolvedName;
+    } else if (cleanKey === 'contact' || cleanKey === 'person' || cleanKey === 'contacts' || cleanKey === 'people') {
+      customData.contact_name = resolvedName;
+    }
 
     // Bi-directional alias syncing for title/job_title and lead_source/source
     const titleVal = (payload.title || payload.job_title || '').trim();
@@ -223,13 +260,78 @@ const objectService = {
       customData.source = sourceVal;
     }
 
-    const resolvedParent = isUuid(parent_id) ? parent_id : (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : null));
-    const resolvedSecondary = isUuid(secondary_parent_id) ? secondary_parent_id : (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : null));
+    const resolvedParent = isUuid(parent_id)
+      ? parent_id
+      : (isUuid(payload.company_id)
+        ? payload.company_id
+        : (isUuid(payload.company)
+          ? payload.company
+          : (isUuid(payload.Company)
+            ? payload.Company
+            : (isUuid(payload.Company_id)
+              ? payload.Company_id
+              : null))));
+
+    const resolvedSecondary = isUuid(secondary_parent_id)
+      ? secondary_parent_id
+      : (isUuid(payload.contact_id)
+        ? payload.contact_id
+        : (isUuid(payload.contact)
+          ? payload.contact
+          : (isUuid(payload.Contact)
+            ? payload.Contact
+            : (isUuid(payload.Contact_id)
+              ? payload.Contact_id
+              : null))));
+
+    if (resolvedParent) {
+      customData.company = resolvedParent;
+      customData.company_id = resolvedParent;
+      customData.Company = resolvedParent;
+    }
+
+    if (resolvedSecondary) {
+      customData.contact = resolvedSecondary;
+      customData.contact_id = resolvedSecondary;
+      customData.Contact = resolvedSecondary;
+    }
+
+    if (resolvedParent && (!customData.company_name || isUuid(customData.company_name))) {
+      try {
+        const { data: parentRow } = await supabase
+          .from('universal_table')
+          .select('name, data')
+          .eq('id', resolvedParent)
+          .single();
+        if (parentRow) {
+          const compName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name;
+          if (compName && typeof compName === 'string' && !isUuid(compName)) {
+            customData.company_name = compName;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (resolvedSecondary && (!customData.contact_name || isUuid(customData.contact_name))) {
+      try {
+        const { data: secondaryRow } = await supabase
+          .from('universal_table')
+          .select('name, data')
+          .eq('id', resolvedSecondary)
+          .single();
+        if (secondaryRow) {
+          const contName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name;
+          if (contName && typeof contName === 'string' && !isUuid(contName)) {
+            customData.contact_name = contName;
+          }
+        }
+      } catch (e) {}
+    }
 
     const newRow = {
       organization_id: organizationId,
       object_type_id: objDef.id || 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41',
-      name: name || payload.title || payload.first_name || 'Untitled',
+      name: resolvedName,
       status: status || 'Active',
       owner_id: owner_id || userId || null,
       parent_id: resolvedParent,
@@ -311,8 +413,11 @@ const objectService = {
     const resolvedParent = isUuid(parent_id) ? parent_id : (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : (isUuid(existing.parent_id) ? existing.parent_id : null)));
     const resolvedSecondary = isUuid(secondary_parent_id) ? secondary_parent_id : (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : (isUuid(existing.secondary_parent_id) ? existing.secondary_parent_id : null)));
 
+    const finalResolvedName = name || existing.name || customData.name || 'Untitled';
+    customData.name = finalResolvedName;
+
     const updatePayload = {
-      name: name || existing.name,
+      name: finalResolvedName,
       status: status || existing.status,
       owner_id: owner_id || existing.owner_id,
       parent_id: resolvedParent,
