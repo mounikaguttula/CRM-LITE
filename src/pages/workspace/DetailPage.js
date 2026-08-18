@@ -1234,6 +1234,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         }
       }
 
+      // Guard: Restrict Lead Conversion if Company Name is empty
+      if (!actualCompanyName && !extractedCompanyName) {
+        throw new Error('Company Name is required to convert a Lead into a Company, Contact, and Deal. Please edit this Lead and provide a Company Name before converting.');
+      }
+
       // Output Diagnostic Logging
       console.log('[ConvertLead] Company Resolution Diagnostics:', {
         leadCompanyRawValue,
