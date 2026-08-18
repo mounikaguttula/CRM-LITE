@@ -445,6 +445,24 @@ const objectService = {
    * Soft delete record in universal_table.
    */
   deleteRecord: async (objectKey, id, organizationId, userId) => {
+    const cleanKey = String(objectKey || '').toLowerCase();
+
+    // Guard: Prevent deletion of Converted Leads
+    if (cleanKey === 'lead' || cleanKey === 'leads' || cleanKey.includes('lead')) {
+      const existing = await objectService.getRecordById(objectKey, id, organizationId).catch(() => null);
+      if (existing) {
+        const statusVal = String(existing.status || existing.data?.status || existing.stage || existing.data?.stage || '').toLowerCase();
+        const isConverted = statusVal === 'converted' || Boolean(existing.is_converted) || Boolean(existing.data?.is_converted);
+
+        if (isConverted) {
+          throw {
+            statusCode: 400,
+            message: 'Converted leads cannot be deleted because they are preserved for historical tracking and linked to active Company, Contact, and Deal records.',
+          };
+        }
+      }
+    }
+
     const { error } = await supabase
       .from('universal_table')
       .update({

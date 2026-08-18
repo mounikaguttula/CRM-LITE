@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { apiGet, apiPost } from '../../api/client';
+import { apiGet, apiPost, apiDelete } from '../../api/client';
 import {
   ArrowLeft, Users, Mail, Search, Download, Send, RefreshCw,
-  ExternalLink, CheckCircle, AlertCircle, FileText, Calendar, Filter
+  ExternalLink, CheckCircle, AlertCircle, FileText, Calendar, Filter, Trash2
 } from 'lucide-react';
 
 function FormSubmissionsPage() {
@@ -23,6 +23,7 @@ function FormSubmissionsPage() {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
+  const [targetAudience, setTargetAudience] = useState('unsent'); // 'unsent' | 'all'
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState(null);
 
@@ -52,13 +53,25 @@ function FormSubmissionsPage() {
     fetchData();
   }, [formId]);
 
+  const handleDeleteSubmission = async (submissionId, registrantName) => {
+    if (!window.confirm(`Are you sure you want to delete the submission for "${registrantName || 'this registrant'}"?`)) {
+      return;
+    }
+    try {
+      await apiDelete(`/api/forms/${formId}/submissions/${submissionId}`);
+      await fetchData();
+    } catch (err) {
+      alert(`Failed to delete submission: ${err.message}`);
+    }
+  };
+
   const handleExportCSV = () => {
     if (submissions.length === 0) {
       alert('No submissions available to export.');
       return;
     }
 
-    const headers = ['Submission ID', 'Registrant Name', 'Email', 'Company', 'Phone', 'Source', 'Submitted At'];
+    const headers = ['Submission ID', 'Registrant Name', 'Email', 'Company', 'Phone', 'Source', 'Submitted At', 'Email Sent'];
     const rows = submissions.map((s) => [
       s.id,
       `"${s.name || ''}"`,
@@ -67,6 +80,7 @@ function FormSubmissionsPage() {
       `"${s.phone || ''}"`,
       `"${s.source || ''}"`,
       `"${s.submitted_at || ''}"`,
+      s.email_sent ? 'Yes' : 'No',
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
@@ -96,8 +110,10 @@ function FormSubmissionsPage() {
       const res = await apiPost(`/api/forms/${formId}/email-registrants`, {
         subject: emailSubject.trim(),
         body: emailBody.trim(),
+        targetAudience,
       });
       setEmailResult(res);
+      fetchData(); // Refresh submission email statuses
     } catch (err) {
       console.error('Error sending email to registrants:', err);
       setEmailResult({
@@ -108,6 +124,9 @@ function FormSubmissionsPage() {
       setSendingEmail(false);
     }
   };
+
+  const unsentCount = submissions.filter((s) => !s.email_sent && !s.data?.email_sent).length;
+  const alreadySentCount = submissions.length - unsentCount;
 
   const filteredSubmissions = submissions.filter((sub) => {
     const matchesSearch = (sub.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -162,7 +181,7 @@ function FormSubmissionsPage() {
 
           <button
             type="button"
-            onClick={() => { setShowEmailModal(true); setEmailResult(null); }}
+            onClick={() => { setShowEmailModal(true); setEmailResult(null); setTargetAudience('unsent'); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px',
               borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
@@ -177,20 +196,29 @@ function FormSubmissionsPage() {
       </div>
 
       {/* Summary Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginBottom: 24 }}>
         <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
           <div style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-            Total Registrations
+            Total Registrants
           </div>
           <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#0f172a' }}>{submissions.length}</div>
         </div>
 
         <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-            Unique Registrants
+          <div style={{ fontSize: '0.8rem', color: '#d97706', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+            Unsent Registrants
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#16a34a' }}>
-            {new Set(submissions.map((s) => (s.email || '').toLowerCase())).size}
+          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#d97706' }}>
+            {unsentCount}
+          </div>
+        </div>
+
+        <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.8rem', color: '#059669', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+            Emailed Registrants
+          </div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#059669' }}>
+            {alreadySentCount}
           </div>
         </div>
 
@@ -268,56 +296,87 @@ function FormSubmissionsPage() {
                 <th style={{ padding: '14px 20px' }}>Company</th>
                 <th style={{ padding: '14px 20px' }}>Phone</th>
                 <th style={{ padding: '14px 20px' }}>Submission Date</th>
-                <th style={{ padding: '14px 20px' }}>Source</th>
+                <th style={{ padding: '14px 20px' }}>Email Status</th>
                 <th style={{ padding: '14px 20px' }}>Associated Lead</th>
               </tr>
             </thead>
             <tbody>
-              {filteredSubmissions.map((sub) => (
-                <tr key={sub.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '14px 20px', fontWeight: 700, color: '#0f172a' }}>
-                    {sub.name || 'Anonymous'}
-                  </td>
-                  <td style={{ padding: '14px 20px', color: '#4f46e5', fontWeight: 600 }}>
-                    {sub.email || '—'}
-                  </td>
-                  <td style={{ padding: '14px 20px', color: '#334155' }}>
-                    {sub.company || '—'}
-                  </td>
-                  <td style={{ padding: '14px 20px', color: '#334155' }}>
-                    {sub.phone || '—'}
-                  </td>
-                  <td style={{ padding: '14px 20px', color: '#64748b', fontSize: '0.82rem' }}>
-                    {new Date(sub.submitted_at).toLocaleString()}
-                  </td>
-                  <td style={{ padding: '14px 20px' }}>
-                    <span style={{
-                      padding: '4px 8px', borderRadius: 6, background: '#f1f5f9',
-                      fontSize: '0.75rem', fontWeight: 600, color: '#475569'
-                    }}>
-                      {sub.source || 'Direct'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '14px 20px' }}>
-                    {sub.lead_id ? (
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/workspace/object/lead/${sub.lead_id}`)}
-                        style={{
-                          border: 'none', background: '#eef2ff', color: '#4f46e5',
-                          borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem',
-                          fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer'
-                        }}
-                      >
-                        <ExternalLink size={13} />
-                        View Lead
-                      </button>
-                    ) : (
-                      <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {filteredSubmissions.map((sub) => {
+                const isEmailed = sub.email_sent || sub.data?.email_sent;
+                const sentAt = sub.last_email_sent_at || sub.data?.last_email_sent_at;
+
+                return (
+                  <tr key={sub.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '14px 20px', fontWeight: 700, color: '#0f172a' }}>
+                      {sub.name || 'Anonymous'}
+                    </td>
+                    <td style={{ padding: '14px 20px', color: '#4f46e5', fontWeight: 600 }}>
+                      {sub.email || '—'}
+                    </td>
+                    <td style={{ padding: '14px 20px', color: '#334155' }}>
+                      {sub.company || '—'}
+                    </td>
+                    <td style={{ padding: '14px 20px', color: '#334155' }}>
+                      {sub.phone || '—'}
+                    </td>
+                    <td style={{ padding: '14px 20px', color: '#64748b', fontSize: '0.82rem' }}>
+                      {new Date(sub.submitted_at).toLocaleString()}
+                    </td>
+                    <td style={{ padding: '14px 20px' }}>
+                      {isEmailed ? (
+                        <span
+                          title={sentAt ? `Sent on ${new Date(sentAt).toLocaleString()}` : 'Email sent'}
+                          style={{
+                            padding: '4px 10px', borderRadius: 6, background: '#ecfdf5',
+                            fontSize: '0.75rem', fontWeight: 700, color: '#059669', border: '1px solid #a7f3d0'
+                          }}
+                        >
+                          ✓ Email Sent
+                        </span>
+                      ) : (
+                        <span style={{
+                          padding: '4px 10px', borderRadius: 6, background: '#fff7ed',
+                          fontSize: '0.75rem', fontWeight: 700, color: '#c2410c', border: '1px solid #ffedd5'
+                        }}>
+                          ● Pending
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '14px 20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {sub.lead_id ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/workspace/object/lead/${sub.lead_id}`)}
+                            style={{
+                              border: 'none', background: '#eef2ff', color: '#4f46e5',
+                              borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem',
+                              fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer'
+                            }}
+                          >
+                            <ExternalLink size={13} />
+                            View Lead
+                          </button>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>—</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSubmission(sub.id, sub.name)}
+                          title="Delete Submission"
+                          style={{
+                            border: 'none', background: '#fef2f2', color: '#dc2626',
+                            borderRadius: 6, padding: '6px 8px', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -358,7 +417,7 @@ function FormSubmissionsPage() {
                   Email Form Registrants
                 </h2>
                 <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
-                  Send individual email updates to {submissions.length} registrants for "{form?.name}".
+                  Send email updates to registrants for "{form?.name}".
                 </p>
               </div>
             </div>
@@ -381,6 +440,60 @@ function FormSubmissionsPage() {
                 )}
               </div>
             )}
+
+            {/* Target Audience Selector */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 8 }}>
+                Target Audience *
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div
+                  onClick={() => setTargetAudience('unsent')}
+                  style={{
+                    padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                    border: targetAudience === 'unsent' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                    background: targetAudience === 'unsent' ? '#eef2ff' : '#ffffff',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
+                    Unsent Registrants Only ({unsentCount})
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
+                    Send only to registrants who have not received an email yet.
+                  </div>
+                  {unsentCount > 0 ? (
+                    <div style={{ fontSize: '0.76rem', color: '#6366f1', fontWeight: 600 }}>
+                      ✓ {alreadySentCount} previously emailed registrants will be skipped.
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.76rem', color: '#dc2626', fontWeight: 700 }}>
+                      No unsent registrants.
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  onClick={() => setTargetAudience('all')}
+                  style={{
+                    padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                    border: targetAudience === 'all' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                    background: targetAudience === 'all' ? '#eef2ff' : '#ffffff',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
+                    All Registrants ({submissions.length})
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
+                    Send to everyone. Use for schedule, date/time, venue, or important updates.
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: '#d97706', fontWeight: 600 }}>
+                    ⚠️ Will send to all {submissions.length} registrants (includes previously emailed).
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 6 }}>
@@ -439,16 +552,27 @@ function FormSubmissionsPage() {
               <button
                 type="button"
                 onClick={handleSendEmail}
-                disabled={sendingEmail}
+                disabled={sendingEmail || (targetAudience === 'unsent' && unsentCount === 0)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '10px 24px',
-                  borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                  color: '#fff', fontWeight: 700, cursor: 'pointer',
-                  boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)'
+                  borderRadius: 10, border: 'none',
+                  background: (targetAudience === 'unsent' && unsentCount === 0)
+                    ? '#cbd5e1'
+                    : 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                  color: '#fff', fontWeight: 700,
+                  cursor: (targetAudience === 'unsent' && unsentCount === 0) ? 'not-allowed' : 'pointer',
+                  boxShadow: (targetAudience === 'unsent' && unsentCount === 0)
+                    ? 'none'
+                    : '0 4px 14px rgba(79, 70, 229, 0.3)'
                 }}
               >
                 <Send size={16} />
-                {sendingEmail ? 'Sending Emails…' : `Send to ${submissions.length} Registrants`}
+                {sendingEmail
+                  ? 'Sending Emails…'
+                  : targetAudience === 'unsent'
+                    ? unsentCount > 0 ? `Send to ${unsentCount} Unsent Registrants` : 'No Unsent Registrants'
+                    : `Send to ${submissions.length} Registrants`
+                }
               </button>
             </div>
           </div>

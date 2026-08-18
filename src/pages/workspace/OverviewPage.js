@@ -2023,26 +2023,57 @@ function ObjectListContent({ objectTypeId }) {
                           <IconBtn icon={Mail} />
                           <IconBtn icon={Phone} />
                           {canDeleteRecord && (
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteRecordClick(e, r.id, titleVal)}
-                              title="Delete Record"
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 8,
-                                border: '1px solid rgba(244,63,94,0.3)',
-                                background: 'rgba(244,63,94,0.08)',
-                                color: '#f43f5e',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                              }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            (() => {
+                              const isConvertedLead = String(objectTypeId || '').toLowerCase().includes('lead') && (
+                                String(r.status || r.data?.status || r.stage || r.data?.stage || '').toLowerCase() === 'converted' ||
+                                Boolean(r.is_converted) || Boolean(r.data?.is_converted)
+                              );
+
+                              if (isConvertedLead) {
+                                return (
+                                  <span
+                                    title="Converted leads cannot be deleted because they are preserved for historical tracking and linked to active Company, Contact, and Deal records."
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: 8,
+                                      border: '1px solid #e2e8f0',
+                                      background: '#f8fafc',
+                                      color: '#cbd5e1',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'not-allowed',
+                                    }}
+                                  >
+                                    <Trash2 size={13} />
+                                  </span>
+                                );
+                              }
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteRecordClick(e, r.id, titleVal)}
+                                  title="Delete Record"
+                                  style={{
+                                    width: 28,
+                                    height: 28,
+                                    borderRadius: 8,
+                                    border: '1px solid rgba(244,63,94,0.3)',
+                                    background: 'rgba(244,63,94,0.08)',
+                                    color: '#f43f5e',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              );
+                            })()
                           )}
                           <IconBtn icon={MoreHorizontal} />
                         </div>

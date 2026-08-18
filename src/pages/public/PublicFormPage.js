@@ -133,7 +133,12 @@ function PublicFormPage() {
       }
     } catch (err) {
       console.error('Submission error:', err);
-      alert(err.message || 'An error occurred while submitting the form.');
+      const msg = err.message || 'An error occurred while submitting the form.';
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('duplicate')) {
+        const emailFieldKey = Object.keys(fieldValues).find(k => k.toLowerCase().includes('email')) || 'email';
+        setFormErrors((prev) => ({ ...prev, [emailFieldKey]: msg }));
+      }
+      alert(msg);
     } finally {
       setSubmitting(false);
     }
