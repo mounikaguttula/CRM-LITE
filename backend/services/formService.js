@@ -90,6 +90,51 @@ const formService = {
   /**
    * List all forms for an organization from universal_table
    */
+  /**
+   * Helper: Sync live total_submissions count on a form record in universal_table
+   */
+  syncFormSubmissionCount: async (formId, organizationId) => {
+    try {
+      const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
+      const { count } = await supabase
+        .from('universal_table')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+        .eq('object_type_id', submissionDefId)
+        .eq('parent_id', formId)
+        .eq('is_deleted', false);
+
+      const liveCount = typeof count === 'number' ? count : 0;
+
+      const { data: formRow } = await supabase
+        .from('universal_table')
+        .select('data')
+        .eq('id', formId)
+        .single();
+
+      if (formRow) {
+        await supabase
+          .from('universal_table')
+          .update({
+            data: {
+              ...(formRow.data || {}),
+              total_submissions: liveCount,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', formId);
+      }
+
+      return liveCount;
+    } catch (err) {
+      console.warn('[FormService] Error syncing submission count:', err.message);
+      return 0;
+    }
+  },
+
+  /**
+   * List all forms for an organization from universal_table
+   */
   listForms: async (organizationId) => {
     const { formDefId, submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
 
@@ -110,24 +155,28 @@ const formService = {
     // Fetch submission counts grouped by parent_id
     const { data: subRows } = await supabase
       .from('universal_table')
-      .select('parent_id')
+      .select('parent_id, data')
       .eq('organization_id', organizationId)
       .eq('object_type_id', submissionDefId)
       .eq('is_deleted', false);
 
     const countsMap = {};
     (subRows || []).forEach((sub) => {
-      if (sub.parent_id) {
-        countsMap[sub.parent_id] = (countsMap[sub.parent_id] || 0) + 1;
+      const fId = sub.parent_id || sub.data?.form_id;
+      if (fId) {
+        countsMap[fId] = (countsMap[fId] || 0) + 1;
       }
     });
 
     return (formRows || []).map((row) => {
       const normalized = objectService.normalizeRecord(row);
-      const submissionCount = countsMap[row.id] || normalized.total_submissions || 0;
+      // Strictly compute live count from active non-deleted submissions.
+      // Do NOT fall back to stale stored row.data.total_submissions if live count is 0!
+      const liveCount = typeof countsMap[row.id] === 'number' ? countsMap[row.id] : 0;
+
       return {
         ...normalized,
-        total_submissions: submissionCount,
+        total_submissions: liveCount,
         slug: normalized.slug || row.data?.slug || '',
         status: normalized.status || row.status || 'Draft',
         description: normalized.description || row.data?.description || '',
@@ -157,18 +206,21 @@ const formService = {
 
     const normalized = objectService.normalizeRecord(row);
 
-    // Get live submission count
-    const { formDefId, submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
+    // Get live submission count strictly from active non-deleted submissions
+    const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
     const { count } = await supabase
       .from('universal_table')
       .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
       .eq('parent_id', formId)
       .eq('object_type_id', submissionDefId)
       .eq('is_deleted', false);
 
+    const liveCount = typeof count === 'number' ? count : 0;
+
     return {
       ...normalized,
-      total_submissions: count || normalized.total_submissions || 0,
+      total_submissions: liveCount,
       slug: normalized.slug || row.data?.slug || '',
       status: normalized.status || row.status || 'Draft',
       description: normalized.description || row.data?.description || '',
@@ -468,6 +520,39 @@ const formService = {
     const lastName = extractedTargets.last_name || String(submittedFields[mapping.last_name] || getValueForKeys(['last_name', 'lname'])).trim();
     const email = extractedTargets.email || String(submittedFields[mapping.email] || getValueForKeys(['email', 'work_email', 'email_address'])).trim();
 
+    // Guard: Prevent Duplicate Submissions for the Same Form by Email
+    if (email) {
+      const emailLower = email.toLowerCase().trim();
+      const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
+
+      const { data: existingSubs } = await supabase
+        .from('universal_table')
+        .select('id, data')
+        .eq('organization_id', organizationId)
+        .eq('object_type_id', submissionDefId)
+        .eq('is_deleted', false)
+        .or(`parent_id.eq.${form.id},data->>form_id.eq.${form.id}`);
+
+      const duplicate = (existingSubs || []).find((sub) => {
+        const subEmail = String(
+          sub.data?.registrant_email ||
+          sub.data?.email ||
+          sub.data?.submitted_fields?.email ||
+          sub.data?.submitted_fields?.work_email ||
+          sub.data?.submitted_fields?.email_address ||
+          ''
+        ).toLowerCase().trim();
+        return subEmail === emailLower;
+      });
+
+      if (duplicate) {
+        throw {
+          statusCode: 400,
+          message: `The email address '${email}' is already registered for this form. Multiple submissions with the same email are not allowed.`,
+        };
+      }
+    }
+
     const address = extractedTargets.address || extractedTargets.country || String(submittedFields[mapping.address] || getValueForKeys(['country', 'address', 'location', 'city', 'state'])).trim();
     let company = extractedTargets.company || String(submittedFields[mapping.company] || getValueForKeys(['company', 'company_name', 'organization'])).trim();
 
@@ -637,6 +722,9 @@ const formService = {
         submitted_fields: normalized.submitted_fields || row.data?.submitted_fields || {},
         source: normalized.source || row.data?.source || 'Direct',
         utm: normalized.utm || row.data?.utm || {},
+        email_sent: Boolean(row.data?.email_sent || row.email_sent || normalized.email_sent),
+        last_email_sent_at: row.data?.last_email_sent_at || row.last_email_sent_at || normalized.last_email_sent_at || null,
+        last_email_subject: row.data?.last_email_subject || row.last_email_subject || normalized.last_email_subject || null,
         submitted_at: normalized.submitted_at || row.created_at,
         created_at: row.created_at,
       };
@@ -644,44 +732,98 @@ const formService = {
   },
 
   /**
+   * Delete a single form submission record
+   */
+  deleteSubmission: async (formId, submissionId, organizationId, userId) => {
+    const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
+
+    const { error } = await supabase
+      .from('universal_table')
+      .update({
+        is_deleted: true,
+        deleted_by: userId || null,
+        deleted_at: new Date().toISOString(),
+      })
+      .eq('id', submissionId)
+      .eq('organization_id', organizationId)
+      .eq('object_type_id', submissionDefId);
+
+    if (error) {
+      console.error('[FormService] Error deleting submission:', error.message);
+      throw new Error(`Failed to delete submission: ${error.message}`);
+    }
+
+    // Sync live total_submissions count on form record
+    await formService.syncFormSubmissionCount(formId, organizationId);
+
+    return {
+      success: true,
+      message: 'Submission deleted successfully.',
+    };
+  },
+
+  /**
    * Email Registrants Feature:
    * Dispatches personalized emails to all valid registered email addresses for a form
    */
-  sendFormRegistrantsEmail: async (formId, { subject, body }, organizationId) => {
+  /**
+   * Email Registrants Feature:
+   * Dispatches personalized emails to form registrants with audience targeting ('unsent' | 'all')
+   * Tracks email_sent and last_email_sent_at per submission to prevent duplicate spamming
+   */
+  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent' }, organizationId) => {
     if (!subject || !subject.trim()) {
       throw new Error('Email subject is required.');
     }
     if (!body || !body.trim()) {
       throw new Error('Email message body is required.');
     }
+    if (!['unsent', 'all'].includes(targetAudience)) {
+      throw new Error("Invalid targetAudience parameter. Must be 'unsent' or 'all'.");
+    }
 
     const form = await formService.getFormById(formId, organizationId);
-    const submissions = await formService.listSubmissions(formId, organizationId);
+    const allSubmissions = await formService.listSubmissions(formId, organizationId);
 
-    if (submissions.length === 0) {
+    if (allSubmissions.length === 0) {
       throw new Error('No registrants/submissions found for this form.');
     }
 
-    // Extract & deduplicate recipient list
+    let targetSubmissions = allSubmissions;
+    let skippedCount = 0;
+
+    if (targetAudience === 'unsent') {
+      targetSubmissions = allSubmissions.filter((sub) => sub.email_sent !== true && sub.data?.email_sent !== true);
+      skippedCount = allSubmissions.length - targetSubmissions.length;
+
+      if (targetSubmissions.length === 0) {
+        throw new Error('No unsent registrants found. All current registrants have already received an email update. Select "All Registrants" if you wish to re-send or broadcast a schedule/time change.');
+      }
+    }
+
+    // Extract & deduplicate recipient list (grouping all matching submission IDs per email)
     const validRecipients = [];
-    const seenEmails = new Set();
     let invalidCount = 0;
 
-    for (const sub of submissions) {
+    for (const sub of targetSubmissions) {
       const email = (sub.email || '').trim();
       if (email && email.includes('@')) {
         const lowerEmail = email.toLowerCase();
-        if (!seenEmails.has(lowerEmail)) {
-          seenEmails.add(lowerEmail);
+        let recipient = validRecipients.find((r) => r.email.toLowerCase() === lowerEmail);
+        if (!recipient) {
           const fullName = sub.name || 'Registrant';
           const firstName = fullName.split(' ')[0] || fullName;
           const lastName = fullName.split(' ').slice(1).join(' ') || '';
-          validRecipients.push({
+          recipient = {
+            subIds: [sub.id],
             email,
             firstName,
             lastName,
             fullName,
-          });
+          };
+          validRecipients.push(recipient);
+        } else {
+          recipient.subIds.push(sub.id);
         }
       } else {
         invalidCount++;
@@ -689,7 +831,7 @@ const formService = {
     }
 
     if (validRecipients.length === 0) {
-      throw new Error('No valid email addresses found among the form registrants.');
+      throw new Error('No valid email addresses found among the selected registrants.');
     }
 
     let sentCount = 0;
@@ -741,6 +883,33 @@ const formService = {
 
       if (dispatchResult) {
         sentCount++;
+        // Update all form submission records for this email in universal_table to mark email_sent = true
+        if (recipient.subIds && recipient.subIds.length > 0) {
+          for (const sId of recipient.subIds) {
+            try {
+              const { data: currentSubRow } = await supabase
+                .from('universal_table')
+                .select('data')
+                .eq('id', sId)
+                .single();
+
+              await supabase
+                .from('universal_table')
+                .update({
+                  data: {
+                    ...(currentSubRow?.data || {}),
+                    email_sent: true,
+                    last_email_sent_at: new Date().toISOString(),
+                    last_email_subject: subject.trim(),
+                  },
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', sId);
+            } catch (e) {
+              console.warn('[FormService] Note updating email_sent status for submission:', sId, e.message);
+            }
+          }
+        }
       } else {
         failedCount++;
       }
@@ -748,11 +917,13 @@ const formService = {
 
     return {
       success: true,
-      total: validRecipients.length + invalidCount,
+      targetAudience,
+      total: allSubmissions.length,
       sent: sentCount,
       failed: failedCount,
+      skipped: skippedCount,
       invalid: invalidCount,
-      message: `Emails dispatched to ${sentCount} recipient(s). (${failedCount} failed, ${invalidCount} invalid)`,
+      message: `Emails dispatched to ${sentCount} registrant(s). (${failedCount} failed, ${skippedCount} skipped, ${invalidCount} invalid)`,
     };
   },
 

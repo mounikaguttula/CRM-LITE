@@ -108,6 +108,22 @@ const formController = {
   },
 
   /**
+   * DELETE /api/forms/:id/submissions/:submissionId
+   * Delete a single submission record
+   */
+  deleteSubmission: async (req, res, next) => {
+    try {
+      const { id, submissionId } = req.params;
+      const organizationId = req.user?.organization_id;
+      const userId = req.user?.id;
+      const result = await formService.deleteSubmission(id, submissionId, organizationId, userId);
+      return res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
    * POST /api/forms/:id/email-registrants
    * Send email campaign to form registrants
    */
@@ -115,9 +131,9 @@ const formController = {
     try {
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
-      const { subject, body } = req.body || {};
+      const { subject, body, targetAudience } = req.body || {};
 
-      const result = await formService.sendFormRegistrantsEmail(id, { subject, body }, organizationId);
+      const result = await formService.sendFormRegistrantsEmail(id, { subject, body, targetAudience }, organizationId);
       return res.status(200).json(result);
     } catch (err) {
       return res.status(400).json({
