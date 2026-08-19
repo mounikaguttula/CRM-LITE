@@ -267,6 +267,7 @@ const formService = {
       slug: normalized.slug || activeForm.data?.slug,
       status: normalized.status || activeForm.status,
       description: normalized.description || activeForm.data?.description || '',
+      form_type: normalized.form_type || activeForm.data?.form_type || null,
       header_content: normalized.header_content || activeForm.data?.header_content || {},
       appearance: normalized.appearance || activeForm.data?.appearance || {},
       fields_config: normalized.fields_config || activeForm.data?.fields_config || [],
@@ -613,6 +614,9 @@ const formService = {
     const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
     const submissionId = crypto.randomUUID();
 
+    // Determine if this is a webinar registration form using existing form_type field
+    const isWebinarForm = (form.form_type || '').toLowerCase() === 'webinar_registration';
+
     const submissionData = {
       id: submissionId,
       form_id: form.id,
@@ -632,6 +636,8 @@ const formService = {
         referrer,
       },
       submitted_at: new Date().toISOString(),
+      // Only set attendance_status for webinar registration forms
+      ...(isWebinarForm ? { attendance_status: 'Registered' } : {}),
     };
 
     const newSubRow = {
@@ -725,6 +731,7 @@ const formService = {
         email_sent: Boolean(row.data?.email_sent || row.email_sent || normalized.email_sent),
         last_email_sent_at: row.data?.last_email_sent_at || row.last_email_sent_at || normalized.last_email_sent_at || null,
         last_email_subject: row.data?.last_email_subject || row.last_email_subject || normalized.last_email_subject || null,
+        attendance_status: normalized.attendance_status || row.data?.attendance_status || null,
         submitted_at: normalized.submitted_at || row.created_at,
         created_at: row.created_at,
       };
@@ -763,6 +770,79 @@ const formService = {
   },
 
   /**
+   * Update attendance_status for one or more form submissions.
+   * Validates: allowed status values, submission ownership (form + org).
+   */
+  updateSubmissionAttendance: async (formId, submissionIds, attendanceStatus, organizationId) => {
+    const VALID_STATUSES = ['Registered', 'Attended', 'No Show', 'Unknown'];
+    if (!VALID_STATUSES.includes(attendanceStatus)) {
+      throw new Error(`Invalid attendance_status '${attendanceStatus}'. Allowed values: ${VALID_STATUSES.join(', ')}`);
+    }
+
+    if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
+      throw new Error('At least one submission_id is required.');
+    }
+
+    const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
+
+    // Verify all submission IDs belong to this form and organization
+    const { data: validRows, error: fetchErr } = await supabase
+      .from('universal_table')
+      .select('id, data')
+      .eq('organization_id', organizationId)
+      .eq('object_type_id', submissionDefId)
+      .eq('parent_id', formId)
+      .eq('is_deleted', false)
+      .in('id', submissionIds);
+
+    if (fetchErr) {
+      console.error('[FormService] Error verifying submission ownership:', fetchErr.message);
+      throw new Error(`Failed to verify submissions: ${fetchErr.message}`);
+    }
+
+    const validIds = new Set((validRows || []).map((r) => r.id));
+    const invalidIds = submissionIds.filter((sid) => !validIds.has(sid));
+    if (invalidIds.length > 0) {
+      throw new Error(`The following submission IDs do not belong to this form or organization: ${invalidIds.join(', ')}`);
+    }
+
+    // Update each submission's attendance_status in the data JSONB column
+    let updatedCount = 0;
+    for (const row of validRows) {
+      try {
+        const updatedData = {
+          ...(row.data || {}),
+          attendance_status: attendanceStatus,
+        };
+
+        const { error: updateErr } = await supabase
+          .from('universal_table')
+          .update({
+            data: updatedData,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', row.id);
+
+        if (updateErr) {
+          console.warn(`[FormService] Error updating attendance for submission ${row.id}:`, updateErr.message);
+        } else {
+          updatedCount++;
+        }
+      } catch (e) {
+        console.warn(`[FormService] Exception updating attendance for submission ${row.id}:`, e.message);
+      }
+    }
+
+    return {
+      success: true,
+      updated: updatedCount,
+      total: submissionIds.length,
+      attendance_status: attendanceStatus,
+      message: `Updated attendance status to '${attendanceStatus}' for ${updatedCount} submission(s).`,
+    };
+  },
+
+  /**
    * Email Registrants Feature:
    * Dispatches personalized emails to all valid registered email addresses for a form
    */
@@ -771,7 +851,7 @@ const formService = {
    * Dispatches personalized emails to form registrants with audience targeting ('unsent' | 'all')
    * Tracks email_sent and last_email_sent_at per submission to prevent duplicate spamming
    */
-  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent' }, organizationId) => {
+  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent', attendanceFilter = null }, organizationId) => {
     if (!subject || !subject.trim()) {
       throw new Error('Email subject is required.');
     }
@@ -780,6 +860,11 @@ const formService = {
     }
     if (!['unsent', 'all'].includes(targetAudience)) {
       throw new Error("Invalid targetAudience parameter. Must be 'unsent' or 'all'.");
+    }
+
+    const VALID_ATTENDANCE_VALUES = ['Registered', 'Attended', 'No Show', 'Unknown'];
+    if (attendanceFilter && !VALID_ATTENDANCE_VALUES.includes(attendanceFilter)) {
+      throw new Error(`Invalid attendanceFilter. Must be one of: ${VALID_ATTENDANCE_VALUES.join(', ')}`);
     }
 
     const form = await formService.getFormById(formId, organizationId);
@@ -792,12 +877,22 @@ const formService = {
     let targetSubmissions = allSubmissions;
     let skippedCount = 0;
 
+    // Apply attendance_status filter first (if specified)
+    if (attendanceFilter) {
+      targetSubmissions = targetSubmissions.filter((sub) => {
+        const subAttendance = sub.attendance_status || sub.data?.attendance_status || null;
+        return subAttendance === attendanceFilter;
+      });
+    }
+
+    // Then apply email-sent filter
     if (targetAudience === 'unsent') {
-      targetSubmissions = allSubmissions.filter((sub) => sub.email_sent !== true && sub.data?.email_sent !== true);
+      targetSubmissions = targetSubmissions.filter((sub) => sub.email_sent !== true && sub.data?.email_sent !== true);
       skippedCount = allSubmissions.length - targetSubmissions.length;
 
       if (targetSubmissions.length === 0) {
-        throw new Error('No unsent registrants found. All current registrants have already received an email update. Select "All Registrants" if you wish to re-send or broadcast a schedule/time change.');
+        const filterNote = attendanceFilter ? ` with attendance status '${attendanceFilter}'` : '';
+        throw new Error(`No unsent registrants found${filterNote}. All matching registrants have already received an email update. Select "All Registrants" if you wish to re-send.`);
       }
     }
 

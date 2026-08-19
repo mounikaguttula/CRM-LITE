@@ -200,6 +200,9 @@ function PublicFormPage() {
   const navLink1Target = headerContent.nav_link1_target || '#learn';
   const navLink2Text = headerContent.nav_link2_text || 'Speakers';
   const navLink2Target = headerContent.nav_link2_target || '#speakers';
+  const speakersTitle = headerContent.speakers_title || 'Featured Speaker';
+  const formCardTitle = headerContent.form_card_title || 'Register for the Event';
+  const learnItemsTitle = headerContent.learn_items_title || "What You'll Learn";
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', fontFamily: fontFamily, color: '#0f172a', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -255,7 +258,7 @@ function PublicFormPage() {
               </h1>
 
               <p style={{ margin: 0, fontSize: '1.05rem', color: '#475569', lineHeight: 1.6 }}>
-                {headerContent.subtitle || form.description}
+                {headerContent.subtitle !== undefined && headerContent.subtitle !== null ? headerContent.subtitle : form.description}
               </p>
 
               {learnItems.length > 0 && (
@@ -265,7 +268,7 @@ function PublicFormPage() {
                   onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.08)'; }}
                   onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.03)'; }}
                 >
-                  <h3 style={{ margin: '0 0 14px', fontSize: '1.05rem', fontWeight: 800 }}>What You'll Learn</h3>
+                  <h3 style={{ margin: '0 0 14px', fontSize: '1.05rem', fontWeight: 800 }}>{learnItemsTitle}</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {learnItems.map((item, idx) => (
                       <div key={idx} style={{ display: 'flex', gap: 10, fontSize: '0.88rem', color: '#334155' }}>
@@ -284,13 +287,14 @@ function PublicFormPage() {
                   onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.08)'; }}
                   onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
                 >
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#0f172a', marginBottom: 12 }}>Featured Speaker</div>
+                  <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#0f172a', marginBottom: 16 }}>{speakersTitle}</div>
                   {speakers.map((spk, idx) => (
-                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <img src={spk.avatar_url} alt={spk.name} style={{ width: 52, height: 52, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${primaryColor}` }} />
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{spk.name}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{spk.title}, {spk.company}</div>
+                    <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: idx < speakers.length - 1 ? 20 : 0 }}>
+                      <img src={spk.avatar_url} alt={spk.name} style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${primaryColor}`, flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#0f172a' }}>{spk.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', margin: '2px 0 6px' }}>{spk.title}, {spk.company}</div>
+                        {spk.bio && <p style={{ margin: 0, fontSize: '0.82rem', color: '#475569', lineHeight: 1.5, textAlign: 'justify' }}>{spk.bio}</p>}
                       </div>
                     </div>
                   ))}
@@ -300,7 +304,7 @@ function PublicFormPage() {
 
             <div id="register" style={{ background: '#ffffff', borderRadius: borderRadius, padding: 32, border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.06)', position: 'sticky', top: 24, transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)' }}>
               <h3 style={{ margin: '0 0 20px', fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', borderBottom: '1px solid #f1f5f9', paddingBottom: 12 }}>
-                Register Now
+                {formCardTitle}
               </h3>
 
               {submittedSuccess ? (
@@ -417,7 +421,7 @@ function PublicFormPage() {
               </h1>
 
               <p style={{ margin: '0 0 28px', fontSize: '1.1rem', opacity: 0.9, maxWidth: 740, marginInline: 'auto', lineHeight: 1.6, color: '#cbd5e1' }}>
-                {headerContent.subtitle || form.description}
+                {headerContent.subtitle !== undefined && headerContent.subtitle !== null ? headerContent.subtitle : form.description}
               </p>
 
               {(headerContent.event_date || headerContent.event_time || headerContent.event_badge) && (
@@ -462,7 +466,7 @@ function PublicFormPage() {
                     onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.08)'; }}
                     onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.03)'; }}
                   >
-                    <h3 style={{ margin: '0 0 18px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>What You'll Learn</h3>
+                    <h3 style={{ margin: '0 0 18px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>{learnItemsTitle}</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                       {learnItems.map((item, idx) => (
                         <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, fontSize: '0.9rem', color: '#334155', lineHeight: 1.5 }}>
@@ -481,14 +485,14 @@ function PublicFormPage() {
                     onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.08)'; }}
                     onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.03)'; }}
                   >
-                    <h3 style={{ margin: '0 0 18px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>Featured Speaker</h3>
+                    <h3 style={{ margin: '0 0 18px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>{speakersTitle}</h3>
                     {speakers.map((spk, idx) => (
-                      <div key={spk.id || idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                        <img src={spk.avatar_url} alt={spk.name} style={{ width: 68, height: 68, borderRadius: '50%', objectFit: 'cover', border: `3px solid ${primaryColor}` }} />
-                        <div>
+                      <div key={spk.id || idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 18, marginBottom: idx < speakers.length - 1 ? 24 : 0 }}>
+                        <img src={spk.avatar_url} alt={spk.name} style={{ width: 68, height: 68, borderRadius: '50%', objectFit: 'cover', border: `3px solid ${primaryColor}`, flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#0f172a' }}>{spk.name}</div>
                           <div style={{ fontSize: '0.85rem', color: '#64748b', margin: '2px 0 8px' }}>{spk.title}, {spk.company}</div>
-                          {spk.bio && <p style={{ margin: 0, fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 }}>{spk.bio}</p>}
+                          {spk.bio && <p style={{ margin: 0, fontSize: '0.88rem', color: '#475569', lineHeight: 1.6, textAlign: 'justify' }}>{spk.bio}</p>}
                         </div>
                       </div>
                     ))}
@@ -524,7 +528,7 @@ function PublicFormPage() {
                 position: 'sticky', top: 24, transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
               }}>
                 <h3 style={{ margin: '0 0 20px', fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', borderBottom: '1px solid #f1f5f9', paddingBottom: 12 }}>
-                  Register for the Event
+                  {formCardTitle}
                 </h3>
 
                 {submittedSuccess ? (

@@ -60,7 +60,7 @@ function FormsPage() {
 
   const filteredForms = forms.filter((form) => {
     const matchesSearch = (form.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (form.slug || '').toLowerCase().includes(searchTerm.toLowerCase());
+      (form.slug || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'ALL' || (form.status || 'Draft').toUpperCase() === statusFilter.toUpperCase();
     return matchesSearch && matchesStatus;
   });
@@ -87,7 +87,7 @@ function FormsPage() {
             </h1>
           </div>
           <p style={{ margin: 0, color: '#64748b', fontSize: '0.9rem' }}>
-            HubSpot-style dynamic form builder for Lead capture, Webinars, Demo Requests & Contact Us forms.
+            Dynamic form builder for Lead capture, Webinars, Demo Requests & Contact Us forms.
           </p>
         </div>
 

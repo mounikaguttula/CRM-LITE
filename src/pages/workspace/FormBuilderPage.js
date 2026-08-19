@@ -11,7 +11,7 @@ import {
   Zap, Database, Share2, Upload, Eye, Check, ShoppingBag, MessageSquare,
   Globe, Hash, CheckSquare, Radio, ExternalLink, MoreVertical, Layers,
   AlignLeft, AlignCenter, AlignRight, RefreshCw, User, GripVertical, X,
-  AlertTriangle, Video, Target
+  AlertTriangle, Video, Target, Edit
 } from 'lucide-react';
 
 const LinkedinIcon = ({ size = 16, color = 'currentColor' }) => (
@@ -166,6 +166,7 @@ function FormBuilderPage() {
   const [description, setDescription] = useState('');
   const [formType, setFormType] = useState('webinar_registration');
   const [slug, setSlug] = useState('');
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [status, setStatus] = useState('Active');
 
   // HEADER & NAVIGATION CONTROLS
@@ -185,6 +186,11 @@ function FormBuilderPage() {
   const [eventTime, setEventTime] = useState('');
   const [eventBadge, setEventBadge] = useState('');
   const [heroBgImage, setHeroBgImage] = useState('https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=1200');
+
+  // CUSTOMIZABLE SECTION TITLES
+  const [speakersTitle, setSpeakersTitle] = useState('Featured Speaker');
+  const [formCardTitle, setFormCardTitle] = useState('Register for the Event');
+  const [learnItemsTitle, setLearnItemsTitle] = useState("What You'll Learn");
 
   // FOOTER & SOCIAL CONTROLS
   const [copyrightText, setCopyrightText] = useState('');
@@ -225,7 +231,7 @@ function FormBuilderPage() {
   const [primaryColor, setPrimaryColor] = useState('#4f46e5');
   const [bgColor, setBgColor] = useState('#0f172a');
   const [textColor, setTextColor] = useState('#ffffff');
-  const [submitBtnText, setSubmitBtnText] = useState('Submit Form');
+  const [submitBtnText, setSubmitBtnText] = useState('Register Now');
   const [buttonStyle, setButtonStyle] = useState('solid');
   const [borderRadius, setBorderRadius] = useState('12px');
   const [fontFamily, setFontFamily] = useState('Plus Jakarta Sans');
@@ -284,11 +290,12 @@ const generateUUID = () => {
       setDescription(form.description || '');
       setFormType(form.form_type || 'custom');
       setSlug(form.slug || '');
+      setSlugManuallyEdited(false);
       setStatus(form.status || 'Active');
       if (Array.isArray(form.fields_config)) setFieldsConfig(form.fields_config);
       if (form.header_content) {
         setHeaderTitle(form.header_content.title || '');
-        setHeaderSubtitle(form.header_content.subtitle || '');
+        setHeaderSubtitle(form.header_content.subtitle !== undefined && form.header_content.subtitle !== null ? form.header_content.subtitle : (form.description || ''));
         setDescriptionText(form.header_content.description_text || '');
         setEventDate(form.header_content.event_date || '');
         setEventTime(form.header_content.event_time || '');
@@ -301,6 +308,9 @@ const generateUUID = () => {
         setNavLink1Target(form.header_content.nav_link1_target || '');
         setNavLink2Text(form.header_content.nav_link2_text || '');
         setNavLink2Target(form.header_content.nav_link2_target || '');
+        setSpeakersTitle(form.header_content.speakers_title || 'Featured Speaker');
+        setFormCardTitle(form.header_content.form_card_title || 'Register for the Event');
+        setLearnItemsTitle(form.header_content.learn_items_title || "What You'll Learn");
         if (Array.isArray(form.header_content.badges)) setBadges(form.header_content.badges);
         if (Array.isArray(form.header_content.learn_items)) setLearnItems(form.header_content.learn_items);
         if (Array.isArray(form.header_content.speakers)) setSpeakers(form.header_content.speakers);
@@ -343,7 +353,7 @@ const generateUUID = () => {
     setFormType(tmpl.form_type || 'custom');
     setSlug(tmpl.id.replace(/_/g, '-'));
     setHeaderTitle(tmpl.title);
-    setHeaderSubtitle(tmpl.subtitle);
+    setHeaderSubtitle(tmpl.subtitle || tmpl.description || '');
     if (tmpl.description_text) setDescriptionText(tmpl.description_text);
     if (tmpl.event_date) setEventDate(tmpl.event_date);
     if (tmpl.event_time) setEventTime(tmpl.event_time);
@@ -352,6 +362,9 @@ const generateUUID = () => {
     if (tmpl.badges) setBadges(tmpl.badges);
     if (tmpl.learnItems) setLearnItems(tmpl.learnItems);
     if (tmpl.speakers) setSpeakers(tmpl.speakers);
+    if (tmpl.speakers_title) setSpeakersTitle(tmpl.speakers_title);
+    if (tmpl.form_card_title) setFormCardTitle(tmpl.form_card_title);
+    if (tmpl.learn_items_title) setLearnItemsTitle(tmpl.learn_items_title);
     if (tmpl.product_block) setProductBlock(tmpl.product_block);
     setPrimaryColor(tmpl.primaryColor);
     setBgColor(tmpl.bgColor);
@@ -601,6 +614,9 @@ const generateUUID = () => {
         nav_link1_target: navLink1Target,
         nav_link2_text: navLink2Text,
         nav_link2_target: navLink2Target,
+        speakers_title: speakersTitle || 'Featured Speaker',
+        form_card_title: formCardTitle || 'Register for the Event',
+        learn_items_title: learnItemsTitle || "What You'll Learn",
         badges,
         learn_items: learnItems,
         speakers,
@@ -982,13 +998,22 @@ const generateUUID = () => {
             ← Back to Forms
           </button>
           <div style={{ height: 20, width: 1, background: '#e2e8f0', flexShrink: 0 }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0, background: '#f8fafc', padding: '3px 10px', borderRadius: 8, border: '1px solid #cbd5e1' }}>
+            <Edit size={13} color="#64748b" style={{ flexShrink: 0 }} />
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Webinar & Event Registration"
-              style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a', border: 'none', outline: 'none', background: 'transparent', flex: '1 1 auto', minWidth: 120, maxWidth: 240, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}
+              onChange={(e) => {
+                const val = e.target.value;
+                setName(val);
+                if (!slugManuallyEdited) {
+                  const autoSlug = val.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                  if (autoSlug) setSlug(autoSlug);
+                }
+              }}
+              placeholder="Form Name"
+              title="Click to edit Form Name"
+              style={{ fontSize: '0.88rem', fontWeight: 800, color: '#0f172a', border: 'none', outline: 'none', background: 'transparent', flex: '1 1 auto', minWidth: 120, maxWidth: 220, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}
             />
             <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: '0.68rem', fontWeight: 800, background: '#dcfce7', color: '#166534', textTransform: 'uppercase', whiteSpace: 'nowrap', flexShrink: 0 }}>
               ● {status}
@@ -1247,7 +1272,19 @@ const generateUUID = () => {
               {/* WHAT YOU'LL LEARN CONTROLS */}
               {selectedSectionId === 'learn_items' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.73rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>
+                      Section Header Title (e.g. What You'll Learn, Key Benefits, Agenda)
+                    </label>
+                    <input
+                      type="text"
+                      value={learnItemsTitle}
+                      onChange={(e) => setLearnItemsTitle(e.target.value)}
+                      placeholder="e.g. What You'll Learn, Key Benefits"
+                      style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 700 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
                     <label style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0f172a' }}>Takeaway Bullets</label>
                     <button type="button" onClick={handleAddLearnItem} style={{ border: 'none', background: '#eef2ff', color: '#4f46e5', padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>+ Add Bullet</button>
                   </div>
@@ -1263,9 +1300,21 @@ const generateUUID = () => {
               {/* SPEAKERS CONTROLS */}
               {selectedSectionId === 'speakers' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0f172a' }}>Featured Speakers</label>
-                    <button type="button" onClick={handleAddSpeaker} style={{ border: 'none', background: '#eef2ff', color: '#4f46e5', padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>+ Add Speaker</button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0f172a' }}>Speakers / Team Section</label>
+                    <button type="button" onClick={handleAddSpeaker} style={{ border: 'none', background: '#eef2ff', color: '#4f46e5', padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>+ Add Member</button>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.73rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>
+                      Section Header Title (e.g. Featured Speaker, Team Lead, Mentor)
+                    </label>
+                    <input
+                      type="text"
+                      value={speakersTitle}
+                      onChange={(e) => setSpeakersTitle(e.target.value)}
+                      placeholder="e.g. Featured Speaker, Team Lead, Mentor"
+                      style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 700 }}
+                    />
                   </div>
                   {speakers.map((spk, idx) => (
                     <div key={spk.id || idx} style={{ background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1286,6 +1335,29 @@ const generateUUID = () => {
               {/* REGISTRATION FORM FIELD CONTROLS WITH EDITABLE PLACEHOLDERS */}
               {selectedSectionId === 'registration_form' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.73rem', fontWeight: 700, color: '#475569', marginBottom: 3 }}>Form Header Title</label>
+                      <input
+                        type="text"
+                        value={formCardTitle}
+                        onChange={(e) => setFormCardTitle(e.target.value)}
+                        placeholder="e.g. Register for the Event, Get in Touch"
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 700 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.73rem', fontWeight: 700, color: '#475569', marginBottom: 3 }}>Submit Button Text</label>
+                      <input
+                        type="text"
+                        value={submitBtnText}
+                        onChange={(e) => setSubmitBtnText(e.target.value)}
+                        placeholder="e.g. Submit, Register Now, Join Event"
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 700 }}
+                      />
+                    </div>
+                  </div>
+
                   <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
                     <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#4f46e5', marginBottom: 8 }}>+ Add Form Field</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -1485,16 +1557,59 @@ const generateUUID = () => {
           {/* SETTINGS MODE */}
           {workspaceMode === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>CRM Mapping & Automation</h3>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>Form Field → CRM Lead Field</label>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>Form Settings & CRM Mapping</h3>
+              
+              <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0f172a' }}>Form Identity & Link</label>
+                
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Form Name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setName(val);
+                      if (!slugManuallyEdited) {
+                        const autoSlug = val.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                        if (autoSlug) setSlug(autoSlug);
+                      }
+                    }}
+                    placeholder="e.g. Contact Us Form"
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', fontWeight: 700 }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Custom Public URL Slug</label>
+                  <div style={{ display: 'flex', alignItems: 'center', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 6, padding: '0 8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>/forms/</span>
+                    <input
+                      type="text"
+                      value={slug}
+                      onChange={(e) => {
+                        setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''));
+                        setSlugManuallyEdited(true);
+                      }}
+                      placeholder="custom-link-name"
+                      style={{ flex: 1, padding: '7px 4px', border: 'none', background: 'transparent', outline: 'none', fontSize: '0.82rem', fontWeight: 700, color: '#4f46e5' }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 4 }}>
+                    Link: <code style={{ color: '#4f46e5', fontWeight: 700 }}>/forms/{slug}</code>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>Form Field → CRM Lead Field</label>
                 {fieldsConfig.map((f) => (
-                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.78rem' }}>
-                    <span>{f.label}</span>
+                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.78rem' }}>
+                    <span style={{ fontWeight: 600, color: '#334155' }}>{f.label}</span>
                     <select value={f.lead_target || 'none'} onChange={(e) => {
                       const updated = fieldsConfig.map((item) => item.id === f.id ? { ...item, lead_target: e.target.value } : item);
                       setFieldsConfig(updated);
-                    }} style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '0.75rem' }}>
+                    }} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.75rem' }}>
                       <option value="none">Ignore</option>
                       <option value="first_name">Lead First Name</option>
                       <option value="last_name">Lead Last Name</option>
@@ -1517,13 +1632,56 @@ const generateUUID = () => {
           {/* PUBLISH MODE */}
           {workspaceMode === 'publish' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>Publish & Share</h3>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>Publish & Share Settings</h3>
+              
               <div style={{ background: '#f0fdf4', padding: 12, borderRadius: 8, border: '1px solid #bbf7d0', color: '#166534', fontSize: '0.8rem', fontWeight: 700 }}>
                 ✓ Public URL Active
               </div>
-              <input type="text" readOnly value={publicUrl} style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.8rem', background: '#f8fafc' }} />
-              <button type="button" onClick={handleCopyPublicLink} style={{ padding: '8px', borderRadius: 6, border: 'none', background: '#4f46e5', color: '#fff', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer', transition: 'transform 0.15s ease' }}>
-                {copiedLink ? 'Copied Link!' : 'Copy Link'}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Form Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setName(val);
+                    if (!slugManuallyEdited) {
+                      const autoSlug = val.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                      if (autoSlug) setSlug(autoSlug);
+                    }
+                  }}
+                  placeholder="e.g. Contact Us Form"
+                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', fontWeight: 700 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Customize Public URL Link (/forms/...)</label>
+                <div style={{ display: 'flex', alignItems: 'center', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 6, padding: '0 8px' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>/forms/</span>
+                  <input
+                    type="text"
+                    value={slug}
+                    onChange={(e) => {
+                      setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''));
+                      setSlugManuallyEdited(true);
+                    }}
+                    placeholder="custom-link-name"
+                    style={{ flex: 1, padding: '7px 4px', border: 'none', background: 'transparent', outline: 'none', fontSize: '0.82rem', fontWeight: 700, color: '#4f46e5' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: '0.76rem', color: '#475569', wordBreak: 'break-all' }}>
+                <strong style={{ color: '#0f172a' }}>Live Public URL:</strong><br />
+                <a href={publicUrl} target="_blank" rel="noreferrer" style={{ color: '#4f46e5', textDecoration: 'none', fontWeight: 700 }}>
+                  {publicUrl}
+                </a>
+              </div>
+
+              <button type="button" onClick={handleCopyPublicLink} style={{ padding: '9px', borderRadius: 8, border: 'none', background: '#4f46e5', color: '#fff', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer', transition: 'transform 0.15s ease' }}>
+                {copiedLink ? 'Copied Public Link!' : 'Copy Link'}
               </button>
             </div>
           )}
@@ -1625,7 +1783,7 @@ const generateUUID = () => {
 
                   {learnItems.length > 0 && (
                     <div id="learn" style={{ background: '#ffffff', borderRadius: borderRadius, padding: 18, border: '1px solid #e2e8f0', transition: 'all 0.25s ease' }}>
-                      <h4 style={{ margin: '0 0 10px', fontSize: '0.88rem', fontWeight: 800 }}>What You'll Learn</h4>
+                      <h4 style={{ margin: '0 0 10px', fontSize: '0.88rem', fontWeight: 800 }}>{learnItemsTitle || "What You'll Learn"}</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {learnItems.map((item, idx) => (
                           <div key={idx} style={{ display: 'flex', gap: 8, fontSize: '0.78rem', color: '#334155' }}>
@@ -1639,13 +1797,14 @@ const generateUUID = () => {
 
                   {speakers.length > 0 && (
                     <div id="speakers" style={{ background: '#ffffff', borderRadius: borderRadius, padding: 18, border: '1px solid #e2e8f0', transition: 'all 0.25s ease' }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a', marginBottom: 8 }}>Featured Speaker</div>
+                      <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a', marginBottom: 12 }}>{speakersTitle || 'Featured Speaker'}</div>
                       {speakers.map((spk, idx) => (
-                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <img src={spk.avatar_url} alt={spk.name} style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${primaryColor}` }} />
-                          <div>
+                        <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: idx < speakers.length - 1 ? 14 : 0 }}>
+                          <img src={spk.avatar_url} alt={spk.name} style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${primaryColor}`, flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>{spk.name}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{spk.title}, {spk.company}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b', margin: '1px 0 4px' }}>{spk.title}, {spk.company}</div>
+                            {spk.bio && <p style={{ margin: 0, fontSize: '0.74rem', color: '#475569', lineHeight: 1.5, textAlign: 'justify' }}>{spk.bio}</p>}
                           </div>
                         </div>
                       ))}
@@ -1663,7 +1822,7 @@ const generateUUID = () => {
                   }}
                 >
                   <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 800, color: '#0f172a', borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
-                    Register for the Event
+                    {formCardTitle || 'Register for the Event'}
                   </h3>
                   <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {fieldsConfig.map((f) => (
@@ -1786,7 +1945,7 @@ const generateUUID = () => {
                       onClick={() => { setSelectedSectionId('learn_items'); setWorkspaceMode('build'); }}
                       style={{ background: '#ffffff', borderRadius: borderRadius, padding: 20, border: selectedSectionId === 'learn_items' && workspaceMode === 'build' ? '2px solid #4f46e5' : '1px solid #e2e8f0', cursor: 'pointer' }}
                     >
-                      <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>What You'll Learn</h3>
+                      <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>{learnItemsTitle || "What You'll Learn"}</h3>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {learnItems.map((item, idx) => (
                           <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.82rem', color: '#334155', lineHeight: 1.5 }}>
@@ -1803,13 +1962,14 @@ const generateUUID = () => {
                         onClick={() => { setSelectedSectionId('speakers'); setWorkspaceMode('build'); }}
                         style={{ background: '#ffffff', borderRadius: borderRadius, padding: 20, border: selectedSectionId === 'speakers' && workspaceMode === 'build' ? '2px solid #4f46e5' : '1px solid #e2e8f0', cursor: 'pointer' }}
                       >
-                        <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>Featured Speaker</h3>
+                        <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>{speakersTitle || 'Featured Speaker'}</h3>
                         {speakers.map((spk, idx) => (
-                          <div key={spk.id || idx} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                            <img src={spk.avatar_url} alt={spk.name} style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${primaryColor}` }} />
-                            <div>
+                          <div key={spk.id || idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: idx < speakers.length - 1 ? 16 : 0 }}>
+                            <img src={spk.avatar_url} alt={spk.name} style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${primaryColor}`, flexShrink: 0 }} />
+                            <div style={{ flex: 1 }}>
                               <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a' }}>{spk.name}</div>
-                              <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{spk.title}, {spk.company}</div>
+                              <div style={{ fontSize: '0.78rem', color: '#64748b', margin: '2px 0 4px' }}>{spk.title}, {spk.company}</div>
+                              {spk.bio && <p style={{ margin: 0, fontSize: '0.78rem', color: '#475569', lineHeight: 1.5, textAlign: 'justify' }}>{spk.bio}</p>}
                             </div>
                           </div>
                         ))}
@@ -1826,7 +1986,7 @@ const generateUUID = () => {
                     }}
                   >
                     <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 800, color: '#0f172a', borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
-                      Register for the Event
+                      {formCardTitle || 'Register for the Event'}
                     </h3>
                     <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {fieldsConfig.map((f) => (
