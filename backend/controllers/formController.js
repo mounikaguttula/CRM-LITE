@@ -124,6 +124,33 @@ const formController = {
   },
 
   /**
+   * PATCH /api/forms/:id/submissions/attendance
+   * Update attendance_status for one or more form submissions
+   */
+  updateSubmissionAttendance: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const organizationId = req.user?.organization_id;
+      const { submission_ids, attendance_status } = req.body || {};
+
+      if (!submission_ids || !Array.isArray(submission_ids) || submission_ids.length === 0) {
+        return res.status(400).json({ success: false, message: 'submission_ids array is required.' });
+      }
+      if (!attendance_status) {
+        return res.status(400).json({ success: false, message: 'attendance_status is required.' });
+      }
+
+      const result = await formService.updateSubmissionAttendance(id, submission_ids, attendance_status, organizationId);
+      return res.status(200).json(result);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'Failed to update attendance status.',
+      });
+    }
+  },
+
+  /**
    * POST /api/forms/:id/email-registrants
    * Send email campaign to form registrants
    */
@@ -131,9 +158,9 @@ const formController = {
     try {
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
-      const { subject, body, targetAudience } = req.body || {};
+      const { subject, body, targetAudience, attendanceFilter } = req.body || {};
 
-      const result = await formService.sendFormRegistrantsEmail(id, { subject, body, targetAudience }, organizationId);
+      const result = await formService.sendFormRegistrantsEmail(id, { subject, body, targetAudience, attendanceFilter }, organizationId);
       return res.status(200).json(result);
     } catch (err) {
       return res.status(400).json({

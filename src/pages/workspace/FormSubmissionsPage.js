@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
-import { apiGet, apiPost, apiDelete } from '../../api/client';
+import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
 import {
   ArrowLeft, Users, Mail, Search, Download, Send, RefreshCw,
-  ExternalLink, CheckCircle, AlertCircle, FileText, Calendar, Filter, Trash2
+  ExternalLink, Trash2
 } from 'lucide-react';
 
 function FormSubmissionsPage() {
@@ -17,15 +18,21 @@ function FormSubmissionsPage() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [sourceFilter, setSourceFilter] = useState('ALL');
-  const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [attendanceFilter, setAttendanceFilter] = useState('ALL');
+  const [selectedSubmissions, setSelectedSubmissions] = useState(new Set());
+  const [updatingAttendance, setUpdatingAttendance] = useState(false);
 
   // Email Registrants Modal State
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const [targetAudience, setTargetAudience] = useState('unsent'); // 'unsent' | 'all'
+  const [emailAttendanceFilter, setEmailAttendanceFilter] = useState('ALL'); // 'ALL' | 'Registered' | 'Attended' | 'No Show' | 'Unknown'
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState(null);
+
+  const isWebinarForm = (form?.form_type || '').toLowerCase() === 'webinar_registration' ||
+    submissions.some((s) => s.attendance_status !== null && s.attendance_status !== undefined);
 
   const fetchData = async () => {
     setLoading(true);
@@ -59,10 +66,63 @@ function FormSubmissionsPage() {
     }
     try {
       await apiDelete(`/api/forms/${formId}/submissions/${submissionId}`);
+      setSelectedSubmissions((prev) => {
+        const next = new Set(prev);
+        next.delete(submissionId);
+        return next;
+      });
       await fetchData();
     } catch (err) {
       alert(`Failed to delete submission: ${err.message}`);
     }
+  };
+
+  const handleUpdateAttendance = async (submissionIds, newStatus) => {
+    if (!submissionIds || submissionIds.length === 0) return;
+    setUpdatingAttendance(true);
+    try {
+      await apiPatch(`/api/forms/${formId}/submissions/attendance`, {
+        submission_ids: submissionIds,
+        attendance_status: newStatus,
+      });
+      // Optimistically update local submissions state
+      setSubmissions((prev) =>
+        prev.map((sub) =>
+          submissionIds.includes(sub.id)
+            ? { ...sub, attendance_status: newStatus }
+            : sub
+        )
+      );
+      // Clear selection if bulk update
+      if (submissionIds.length > 1) {
+        setSelectedSubmissions(new Set());
+      }
+    } catch (err) {
+      alert(`Failed to update attendance status: ${err.message}`);
+    } finally {
+      setUpdatingAttendance(false);
+    }
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      const allFilteredIds = filteredSubmissions.map((s) => s.id);
+      setSelectedSubmissions(new Set(allFilteredIds));
+    } else {
+      setSelectedSubmissions(new Set());
+    }
+  };
+
+  const handleToggleSelectRow = (id) => {
+    setSelectedSubmissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   const handleExportCSV = () => {
@@ -71,7 +131,7 @@ function FormSubmissionsPage() {
       return;
     }
 
-    const headers = ['Submission ID', 'Registrant Name', 'Email', 'Company', 'Phone', 'Source', 'Submitted At', 'Email Sent'];
+    const headers = ['Submission ID', 'Registrant Name', 'Email', 'Company', 'Phone', 'Source', 'Attendance Status', 'Submitted At', 'Email Sent'];
     const rows = submissions.map((s) => [
       s.id,
       `"${s.name || ''}"`,
@@ -79,6 +139,7 @@ function FormSubmissionsPage() {
       `"${s.company || ''}"`,
       `"${s.phone || ''}"`,
       `"${s.source || ''}"`,
+      `"${s.attendance_status || (isWebinarForm ? 'Registered' : '—')}"`,
       `"${s.submitted_at || ''}"`,
       s.email_sent ? 'Yes' : 'No',
     ]);
@@ -111,6 +172,7 @@ function FormSubmissionsPage() {
         subject: emailSubject.trim(),
         body: emailBody.trim(),
         targetAudience,
+        attendanceFilter: emailAttendanceFilter !== 'ALL' ? emailAttendanceFilter : null,
       });
       setEmailResult(res);
       fetchData(); // Refresh submission email statuses
@@ -128,15 +190,53 @@ function FormSubmissionsPage() {
   const unsentCount = submissions.filter((s) => !s.email_sent && !s.data?.email_sent).length;
   const alreadySentCount = submissions.length - unsentCount;
 
+  const registeredCount = submissions.filter((s) => (s.attendance_status || (isWebinarForm ? 'Registered' : null)) === 'Registered').length;
+  const attendedCount = submissions.filter((s) => s.attendance_status === 'Attended').length;
+  const noShowCount = submissions.filter((s) => s.attendance_status === 'No Show').length;
+  const unknownCount = submissions.filter((s) => s.attendance_status === 'Unknown').length;
+
   const filteredSubmissions = submissions.filter((sub) => {
     const matchesSearch = (sub.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (sub.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (sub.company || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesSource = sourceFilter === 'ALL' || (sub.source || '').toLowerCase().includes(sourceFilter.toLowerCase());
-    return matchesSearch && matchesSource;
+    
+    let matchesAttendance = true;
+    if (attendanceFilter !== 'ALL') {
+      const effectiveAttendance = sub.attendance_status || (isWebinarForm ? 'Registered' : '');
+      matchesAttendance = effectiveAttendance === attendanceFilter;
+    }
+
+    return matchesSearch && matchesSource && matchesAttendance;
   });
 
   const uniqueSources = Array.from(new Set(submissions.map((s) => s.source).filter(Boolean)));
+
+  // Calculate target audience email count in modal based on combined filters
+  const getModalTargetCount = () => {
+    let pool = submissions;
+    if (emailAttendanceFilter !== 'ALL') {
+      pool = pool.filter((s) => (s.attendance_status || (isWebinarForm ? 'Registered' : '')) === emailAttendanceFilter);
+    }
+    if (targetAudience === 'unsent') {
+      pool = pool.filter((s) => !s.email_sent && !s.data?.email_sent);
+    }
+    return pool.length;
+  };
+
+  const getAttendanceBadgeStyle = (status) => {
+    switch (status) {
+      case 'Attended':
+        return { background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' };
+      case 'No Show':
+        return { background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' };
+      case 'Registered':
+        return { background: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' };
+      case 'Unknown':
+      default:
+        return { background: '#f8fafc', color: '#64748b', border: '1px solid #cbd5e1' };
+    }
+  };
 
   return (
     <div style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -161,6 +261,11 @@ function FormSubmissionsPage() {
             </h1>
             <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
               Public URL: <code style={{ color: '#4f46e5' }}>/forms/{form?.slug}</code>
+              {isWebinarForm && (
+                <span style={{ marginLeft: 10, background: '#e0e7ff', color: '#4338ca', padding: '2px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700 }}>
+                  🎓 Webinar Registration Form
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -181,7 +286,7 @@ function FormSubmissionsPage() {
 
           <button
             type="button"
-            onClick={() => { setShowEmailModal(true); setEmailResult(null); setTargetAudience('unsent'); }}
+            onClick={() => { setShowEmailModal(true); setEmailResult(null); setTargetAudience('unsent'); setEmailAttendanceFilter('ALL'); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px',
               borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
@@ -196,75 +301,159 @@ function FormSubmissionsPage() {
       </div>
 
       {/* Summary Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginBottom: 24 }}>
-        <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
             Total Registrants
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#0f172a' }}>{submissions.length}</div>
+          <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#0f172a' }}>{submissions.length}</div>
         </div>
 
-        <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.8rem', color: '#d97706', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+        {isWebinarForm && (
+          <>
+            <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.78rem', color: '#4f46e5', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+                Registered
+              </div>
+              <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#4f46e5' }}>{registeredCount}</div>
+            </div>
+
+            <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+                Attended
+              </div>
+              <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#059669' }}>{attendedCount}</div>
+            </div>
+
+            <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.78rem', color: '#dc2626', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+                No Show
+              </div>
+              <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#dc2626' }}>{noShowCount}</div>
+            </div>
+
+            {unknownCount > 0 && (
+              <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+                  Unknown
+                </div>
+                <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#64748b' }}>{unknownCount}</div>
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.78rem', color: '#d97706', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
             Unsent Registrants
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#d97706' }}>
-            {unsentCount}
-          </div>
+          <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#d97706' }}>{unsentCount}</div>
         </div>
 
-        <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.8rem', color: '#059669', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+        <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
             Emailed Registrants
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#059669' }}>
-            {alreadySentCount}
-          </div>
-        </div>
-
-        <div style={{ background: '#fff', padding: 20, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.8rem', color: '#4f46e5', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-            Leads Created in CRM
-          </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#4f46e5' }}>
-            {submissions.filter((s) => s.lead_id).length}
-          </div>
+          <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#059669' }}>{alreadySentCount}</div>
         </div>
       </div>
 
       {/* Controls Bar */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
         marginBottom: 20, background: '#fff', padding: '14px 20px',
         borderRadius: 12, border: '1px solid #e2e8f0'
       }}>
-        <div style={{ position: 'relative', width: 340 }}>
-          <Search size={16} style={{ position: 'absolute', left: 14, top: 11, color: '#94a3b8' }} />
-          <input
-            type="text"
-            placeholder="Search registrants by name, email, or company…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              width: '100%', padding: '8px 12px 8px 38px', borderRadius: 8,
-              border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none'
-            }}
-          />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', width: 300 }}>
+            <Search size={16} style={{ position: 'absolute', left: 14, top: 11, color: '#94a3b8' }} />
+            <input
+              type="text"
+              placeholder="Search registrants…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%', padding: '8px 12px 8px 38px', borderRadius: 8,
+                border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none'
+              }}
+            />
+          </div>
+
+          {isWebinarForm && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>Attendance:</span>
+              <select
+                value={attendanceFilter}
+                onChange={(e) => setAttendanceFilter(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 600 }}
+              >
+                <option value="ALL">All Attendance Statuses</option>
+                <option value="Registered">Registered</option>
+                <option value="Attended">Attended</option>
+                <option value="No Show">No Show</option>
+                <option value="Unknown">Unknown</option>
+              </select>
+            </div>
+          )}
+
+          {uniqueSources.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>Source:</span>
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+              >
+                <option value="ALL">All Sources</option>
+                {uniqueSources.map((src) => (
+                  <option key={src} value={src}>{src}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
-        {uniqueSources.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>Source:</span>
-            <select
-              value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value)}
-              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+        {/* Bulk Action Controls */}
+        {selectedSubmissions.size > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f8fafc', padding: '6px 14px', borderRadius: 8, border: '1px solid #cbd5e1' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#334155' }}>
+              {selectedSubmissions.size} Selected
+            </span>
+            <div style={{ height: 16, width: 1, background: '#cbd5e1' }} />
+            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>Mark as:</span>
+            <button
+              type="button"
+              disabled={updatingAttendance}
+              onClick={() => handleUpdateAttendance(Array.from(selectedSubmissions), 'Attended')}
+              style={{
+                padding: '4px 10px', borderRadius: 6, border: 'none', background: '#059669',
+                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer'
+              }}
             >
-              <option value="ALL">All Sources</option>
-              {uniqueSources.map((src) => (
-                <option key={src} value={src}>{src}</option>
-              ))}
-            </select>
+              ✓ Attended
+            </button>
+            <button
+              type="button"
+              disabled={updatingAttendance}
+              onClick={() => handleUpdateAttendance(Array.from(selectedSubmissions), 'No Show')}
+              style={{
+                padding: '4px 10px', borderRadius: 6, border: 'none', background: '#dc2626',
+                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer'
+              }}
+            >
+              ✕ No Show
+            </button>
+            <button
+              type="button"
+              disabled={updatingAttendance}
+              onClick={() => handleUpdateAttendance(Array.from(selectedSubmissions), 'Registered')}
+              style={{
+                padding: '4px 10px', borderRadius: 6, border: 'none', background: '#4f46e5',
+                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer'
+              }}
+            >
+              ● Registered
+            </button>
           </div>
         )}
       </div>
@@ -283,7 +472,7 @@ function FormSubmissionsPage() {
           <Users size={44} color="#94a3b8" style={{ marginBottom: 12 }} />
           <h3 style={{ margin: '0 0 6px', color: '#0f172a' }}>No Submissions Found</h3>
           <p style={{ margin: 0, color: '#64748b', fontSize: '0.88rem' }}>
-            No registrants match your search criteria. Share your public URL <code style={{ color: '#4f46e5' }}>/forms/{form?.slug}</code> to collect submissions.
+            No registrants match your filter criteria.
           </p>
         </div>
       ) : (
@@ -291,22 +480,40 @@ function FormSubmissionsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <th style={{ padding: '14px 16px', width: 40, textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={filteredSubmissions.length > 0 && selectedSubmissions.size === filteredSubmissions.length}
+                    onChange={handleSelectAll}
+                    style={{ cursor: 'pointer' }}
+                  />
+                </th>
                 <th style={{ padding: '14px 20px' }}>Registrant Name</th>
                 <th style={{ padding: '14px 20px' }}>Email Address</th>
                 <th style={{ padding: '14px 20px' }}>Company</th>
-                <th style={{ padding: '14px 20px' }}>Phone</th>
+                {isWebinarForm && <th style={{ padding: '14px 20px' }}>Attendance Status</th>}
                 <th style={{ padding: '14px 20px' }}>Submission Date</th>
                 <th style={{ padding: '14px 20px' }}>Email Status</th>
-                <th style={{ padding: '14px 20px' }}>Associated Lead</th>
+                <th style={{ padding: '14px 20px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredSubmissions.map((sub) => {
                 const isEmailed = sub.email_sent || sub.data?.email_sent;
                 const sentAt = sub.last_email_sent_at || sub.data?.last_email_sent_at;
+                const currentAttendance = sub.attendance_status || (isWebinarForm ? 'Registered' : '—');
+                const isSelected = selectedSubmissions.has(sub.id);
 
                 return (
-                  <tr key={sub.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <tr key={sub.id} style={{ borderBottom: '1px solid #f1f5f9', background: isSelected ? '#f8fafc' : '#fff' }}>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelectRow(sub.id)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </td>
                     <td style={{ padding: '14px 20px', fontWeight: 700, color: '#0f172a' }}>
                       {sub.name || 'Anonymous'}
                     </td>
@@ -316,9 +523,27 @@ function FormSubmissionsPage() {
                     <td style={{ padding: '14px 20px', color: '#334155' }}>
                       {sub.company || '—'}
                     </td>
-                    <td style={{ padding: '14px 20px', color: '#334155' }}>
-                      {sub.phone || '—'}
-                    </td>
+
+                    {/* Attendance Status Dropdown Select */}
+                    {isWebinarForm && (
+                      <td style={{ padding: '14px 20px' }}>
+                        <select
+                          value={currentAttendance}
+                          onChange={(e) => handleUpdateAttendance([sub.id], e.target.value)}
+                          style={{
+                            padding: '4px 10px', borderRadius: 8, fontSize: '0.8rem',
+                            fontWeight: 700, cursor: 'pointer', outline: 'none',
+                            ...getAttendanceBadgeStyle(currentAttendance)
+                          }}
+                        >
+                          <option value="Registered">Registered</option>
+                          <option value="Attended">Attended</option>
+                          <option value="No Show">No Show</option>
+                          <option value="Unknown">Unknown</option>
+                        </select>
+                      </td>
+                    )}
+
                     <td style={{ padding: '14px 20px', color: '#64748b', fontSize: '0.82rem' }}>
                       {new Date(sub.submitted_at).toLocaleString()}
                     </td>
@@ -383,15 +608,16 @@ function FormSubmissionsPage() {
       )}
 
       {/* EMAIL REGISTRANTS MODAL */}
-      {showEmailModal && (
+      {showEmailModal && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 24
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999, padding: 24
         }}>
           <div style={{
-            background: '#fff', borderRadius: 20, width: '100%', maxWidth: 700,
-            padding: 32, position: 'relative'
+            background: '#fff', borderRadius: 20, width: '100%', maxWidth: 720,
+            padding: 32, position: 'relative', maxHeight: '90vh', overflowY: 'auto',
+            boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)'
           }}>
             <button
               type="button"
@@ -417,7 +643,7 @@ function FormSubmissionsPage() {
                   Email Form Registrants
                 </h2>
                 <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
-                  Send email updates to registrants for "{form?.name}".
+                  Send targeted email updates to registrants for "{form?.name}".
                 </p>
               </div>
             </div>
@@ -441,10 +667,55 @@ function FormSubmissionsPage() {
               </div>
             )}
 
-            {/* Target Audience Selector */}
+            {/* Attendance Status Segment Selection (if Webinar Form) */}
+            {isWebinarForm && (
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 8 }}>
+                  Attendance Status Filter
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {[
+                    { id: 'ALL', label: 'All Statuses', count: submissions.length },
+                    { id: 'Registered', label: 'Registered', count: registeredCount },
+                    { id: 'Attended', label: 'Attended', count: attendedCount },
+                    { id: 'No Show', label: 'No Show', count: noShowCount },
+                    { id: 'Unknown', label: 'Unknown', count: unknownCount },
+                  ].map((item) => {
+                    const isSelected = emailAttendanceFilter === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setEmailAttendanceFilter(item.id)}
+                        style={{
+                          padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
+                          border: isSelected ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
+                          background: isSelected ? '#eef2ff' : '#ffffff',
+                          color: isSelected ? '#4f46e5' : '#475569',
+                          fontWeight: 700, fontSize: '0.82rem',
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <span>{item.label}</span>
+                        <span style={{
+                          background: isSelected ? '#4f46e5' : '#f1f5f9',
+                          color: isSelected ? '#ffffff' : '#64748b',
+                          borderRadius: 10, padding: '1px 7px', fontSize: '0.74rem', fontWeight: 800
+                        }}>
+                          {item.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Email Status Target Selector */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 8 }}>
-                Target Audience *
+                Email Delivery Status Filter
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div
@@ -457,20 +728,11 @@ function FormSubmissionsPage() {
                   }}
                 >
                   <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
-                    Unsent Registrants Only ({unsentCount})
+                    Unsent Only
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
-                    Send only to registrants who have not received an email yet.
+                  <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                    Send only to registrants who haven't received an email yet.
                   </div>
-                  {unsentCount > 0 ? (
-                    <div style={{ fontSize: '0.76rem', color: '#6366f1', fontWeight: 600 }}>
-                      ✓ {alreadySentCount} previously emailed registrants will be skipped.
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: '0.76rem', color: '#dc2626', fontWeight: 700 }}>
-                      No unsent registrants.
-                    </div>
-                  )}
                 </div>
 
                 <div
@@ -483,16 +745,31 @@ function FormSubmissionsPage() {
                   }}
                 >
                   <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
-                    All Registrants ({submissions.length})
+                    All Registrants (Include Previously Emailed)
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
-                    Send to everyone. Use for schedule, date/time, venue, or important updates.
-                  </div>
-                  <div style={{ fontSize: '0.76rem', color: '#d97706', fontWeight: 600 }}>
-                    ⚠️ Will send to all {submissions.length} registrants (includes previously emailed).
+                  <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                    Send to all matching registrants regardless of past email status.
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Combined Audience Summary Banner */}
+            <div style={{
+              padding: '12px 16px', borderRadius: 10, background: '#f8fafc',
+              border: '1px solid #e2e8f0', marginBottom: 20, display: 'flex',
+              alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                Target Recipients: <strong>{getModalTargetCount()} registrant(s)</strong>
+                {emailAttendanceFilter !== 'ALL' && ` [Attendance: ${emailAttendanceFilter}]`}
+                {` [Email Status: ${targetAudience === 'unsent' ? 'Unsent Only' : 'All'}]`}
+              </span>
+              {getModalTargetCount() === 0 && (
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#dc2626' }}>
+                  No matching registrants found.
+                </span>
+              )}
             </div>
 
             <div style={{ marginBottom: 16 }}>
@@ -552,16 +829,16 @@ function FormSubmissionsPage() {
               <button
                 type="button"
                 onClick={handleSendEmail}
-                disabled={sendingEmail || (targetAudience === 'unsent' && unsentCount === 0)}
+                disabled={sendingEmail || getModalTargetCount() === 0}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '10px 24px',
                   borderRadius: 10, border: 'none',
-                  background: (targetAudience === 'unsent' && unsentCount === 0)
+                  background: getModalTargetCount() === 0
                     ? '#cbd5e1'
                     : 'linear-gradient(135deg, #4f46e5, #6366f1)',
                   color: '#fff', fontWeight: 700,
-                  cursor: (targetAudience === 'unsent' && unsentCount === 0) ? 'not-allowed' : 'pointer',
-                  boxShadow: (targetAudience === 'unsent' && unsentCount === 0)
+                  cursor: getModalTargetCount() === 0 ? 'not-allowed' : 'pointer',
+                  boxShadow: getModalTargetCount() === 0
                     ? 'none'
                     : '0 4px 14px rgba(79, 70, 229, 0.3)'
                 }}
@@ -569,14 +846,13 @@ function FormSubmissionsPage() {
                 <Send size={16} />
                 {sendingEmail
                   ? 'Sending Emails…'
-                  : targetAudience === 'unsent'
-                    ? unsentCount > 0 ? `Send to ${unsentCount} Unsent Registrants` : 'No Unsent Registrants'
-                    : `Send to ${submissions.length} Registrants`
+                  : `Send to ${getModalTargetCount()} Registrants`
                 }
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

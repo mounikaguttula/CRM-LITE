@@ -18,6 +18,7 @@ router.delete('/api/forms/:id', authMiddleware, formController.deleteForm);
 // Form Submissions & Email Registrants
 router.get('/api/forms/:id/submissions', authMiddleware, formController.listSubmissions);
 router.delete('/api/forms/:id/submissions/:submissionId', authMiddleware, formController.deleteSubmission);
+router.patch('/api/forms/:id/submissions/attendance', authMiddleware, formController.updateSubmissionAttendance);
 router.post('/api/forms/:id/email-registrants', authMiddleware, formController.sendEmailRegistrants);
 
 module.exports = router;
