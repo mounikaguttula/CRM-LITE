@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
 import {
   ArrowLeft, Users, Mail, Search, Download, Send, RefreshCw,
-  ExternalLink, Trash2
+  ExternalLink, Trash2, CheckCircle2
 } from 'lucide-react';
 
 function FormSubmissionsPage() {
@@ -26,13 +26,15 @@ function FormSubmissionsPage() {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
-  const [targetAudience, setTargetAudience] = useState('unsent'); // 'unsent' | 'all'
+  const [targetAudience, setTargetAudience] = useState('unsent'); // 'selected' | 'unsent' | 'all'
   const [emailAttendanceFilter, setEmailAttendanceFilter] = useState('ALL'); // 'ALL' | 'Registered' | 'Attended' | 'No Show' | 'Unknown'
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState(null);
+  const modalRef = useRef(null);
 
-  const isWebinarForm = (form?.form_type || '').toLowerCase() === 'webinar_registration' ||
-    submissions.some((s) => s.attendance_status !== null && s.attendance_status !== undefined);
+  const presetLayout = (form?.appearance?.preset_layout || '').toLowerCase();
+  const formTypeVal = (form?.form_type || '').toLowerCase();
+  const isWebinarForm = formTypeVal === 'webinar_registration' || presetLayout === 'event_registration';
 
   const fetchData = async () => {
     setLoading(true);
@@ -168,14 +170,22 @@ function FormSubmissionsPage() {
     setEmailResult(null);
 
     try {
-      const res = await apiPost(`/api/forms/${formId}/email-registrants`, {
+      const payload = {
         subject: emailSubject.trim(),
         body: emailBody.trim(),
-        targetAudience,
+        targetAudience: targetAudience === 'selected' ? 'all' : targetAudience,
         attendanceFilter: emailAttendanceFilter !== 'ALL' ? emailAttendanceFilter : null,
-      });
+      };
+      // When targeting selected registrants, pass their IDs to the backend
+      if (targetAudience === 'selected' && selectedSubmissions.size > 0) {
+        payload.submission_ids = Array.from(selectedSubmissions);
+      }
+      const res = await apiPost(`/api/forms/${formId}/email-registrants`, payload);
       setEmailResult(res);
       fetchData(); // Refresh submission email statuses
+      if (modalRef.current) {
+        modalRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     } catch (err) {
       console.error('Error sending email to registrants:', err);
       setEmailResult({
@@ -215,6 +225,10 @@ function FormSubmissionsPage() {
   // Calculate target audience email count in modal based on combined filters
   const getModalTargetCount = () => {
     let pool = submissions;
+    // If targeting selected registrants, start with only selected ones
+    if (targetAudience === 'selected') {
+      pool = pool.filter((s) => selectedSubmissions.has(s.id));
+    }
     if (emailAttendanceFilter !== 'ALL') {
       pool = pool.filter((s) => (s.attendance_status || (isWebinarForm ? 'Registered' : '')) === emailAttendanceFilter);
     }
@@ -239,7 +253,7 @@ function FormSubmissionsPage() {
   };
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
+    <div style={{ padding: '24px 32px', width: '100%' }}>
       {/* Top Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -286,7 +300,7 @@ function FormSubmissionsPage() {
 
           <button
             type="button"
-            onClick={() => { setShowEmailModal(true); setEmailResult(null); setTargetAudience('unsent'); setEmailAttendanceFilter('ALL'); }}
+            onClick={() => { setShowEmailModal(true); setEmailResult(null); setTargetAudience('unsent'); setEmailAttendanceFilter('ALL'); setSelectedSubmissions(new Set()); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px',
               borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
@@ -301,7 +315,7 @@ function FormSubmissionsPage() {
       </div>
 
       {/* Summary Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
           <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
             Total Registrants
@@ -420,40 +434,28 @@ function FormSubmissionsPage() {
               {selectedSubmissions.size} Selected
             </span>
             <div style={{ height: 16, width: 1, background: '#cbd5e1' }} />
-            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>Mark as:</span>
+
+            {/* Email Selected Button — always visible */}
             <button
               type="button"
-              disabled={updatingAttendance}
-              onClick={() => handleUpdateAttendance(Array.from(selectedSubmissions), 'Attended')}
+              onClick={() => {
+                setShowEmailModal(true);
+                setEmailResult(null);
+                setTargetAudience('selected');
+                setEmailAttendanceFilter('ALL');
+              }}
               style={{
-                padding: '4px 10px', borderRadius: 6, border: 'none', background: '#059669',
-                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer'
+                padding: '5px 12px', borderRadius: 6, border: 'none',
+                background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 5,
+                boxShadow: '0 2px 8px rgba(79, 70, 229, 0.25)'
               }}
             >
-              ✓ Attended
+              <Mail size={13} />
+              Email Selected ({selectedSubmissions.size})
             </button>
-            <button
-              type="button"
-              disabled={updatingAttendance}
-              onClick={() => handleUpdateAttendance(Array.from(selectedSubmissions), 'No Show')}
-              style={{
-                padding: '4px 10px', borderRadius: 6, border: 'none', background: '#dc2626',
-                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer'
-              }}
-            >
-              ✕ No Show
-            </button>
-            <button
-              type="button"
-              disabled={updatingAttendance}
-              onClick={() => handleUpdateAttendance(Array.from(selectedSubmissions), 'Registered')}
-              style={{
-                padding: '4px 10px', borderRadius: 6, border: 'none', background: '#4f46e5',
-                color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer'
-              }}
-            >
-              ● Registered
-            </button>
+
           </div>
         )}
       </div>
@@ -614,7 +616,7 @@ function FormSubmissionsPage() {
           background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999, padding: 24
         }}>
-          <div style={{
+          <div ref={modalRef} style={{
             background: '#fff', borderRadius: 20, width: '100%', maxWidth: 720,
             padding: 32, position: 'relative', maxHeight: '90vh', overflowY: 'auto',
             boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)'
@@ -712,12 +714,33 @@ function FormSubmissionsPage() {
               </div>
             )}
 
-            {/* Email Status Target Selector */}
+            {/* Email Audience Target Selector */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 8 }}>
-                Email Delivery Status Filter
+                Who should receive this email?
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: selectedSubmissions.size > 0 ? '1fr 1fr 1fr' : '1fr 1fr', gap: 12 }}>
+                {/* Selected Only — show only when checkboxes are selected */}
+                {selectedSubmissions.size > 0 && (
+                  <div
+                    onClick={() => setTargetAudience('selected')}
+                    style={{
+                      padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                      border: targetAudience === 'selected' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
+                      background: targetAudience === 'selected' ? '#f5f3ff' : '#ffffff',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Users size={14} color="#7c3aed" />
+                      Selected Only
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                      Send to {selectedSubmissions.size} selected registrant{selectedSubmissions.size !== 1 ? 's' : ''} only.
+                    </div>
+                  </div>
+                )}
+
                 <div
                   onClick={() => setTargetAudience('unsent')}
                   style={{
@@ -745,10 +768,10 @@ function FormSubmissionsPage() {
                   }}
                 >
                   <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
-                    All Registrants (Include Previously Emailed)
+                    All Registrants
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#475569' }}>
-                    Send to all matching registrants regardless of past email status.
+                    Send to all registrants regardless of past email status.
                   </div>
                 </div>
               </div>
@@ -762,8 +785,9 @@ function FormSubmissionsPage() {
             }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
                 Target Recipients: <strong>{getModalTargetCount()} registrant(s)</strong>
+                {targetAudience === 'selected' && ` [Selected Only]`}
                 {emailAttendanceFilter !== 'ALL' && ` [Attendance: ${emailAttendanceFilter}]`}
-                {` [Email Status: ${targetAudience === 'unsent' ? 'Unsent Only' : 'All'}]`}
+                {targetAudience !== 'selected' && ` [Email Status: ${targetAudience === 'unsent' ? 'Unsent Only' : 'All'}]`}
               </span>
               {getModalTargetCount() === 0 && (
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#dc2626' }}>
@@ -815,40 +839,55 @@ function FormSubmissionsPage() {
               />
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-              <button
-                type="button"
-                onClick={() => setShowEmailModal(false)}
-                style={{
-                  padding: '10px 20px', borderRadius: 10, border: '1px solid #cbd5e1',
-                  background: '#fff', color: '#475569', fontWeight: 600, cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSendEmail}
-                disabled={sendingEmail || getModalTargetCount() === 0}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '10px 24px',
-                  borderRadius: 10, border: 'none',
-                  background: getModalTargetCount() === 0
-                    ? '#cbd5e1'
-                    : 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                  color: '#fff', fontWeight: 700,
-                  cursor: getModalTargetCount() === 0 ? 'not-allowed' : 'pointer',
-                  boxShadow: getModalTargetCount() === 0
-                    ? 'none'
-                    : '0 4px 14px rgba(79, 70, 229, 0.3)'
-                }}
-              >
-                <Send size={16} />
-                {sendingEmail
-                  ? 'Sending Emails…'
-                  : `Send to ${getModalTargetCount()} Registrants`
-                }
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              {emailResult && emailResult.success ? (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+                  borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0',
+                  color: '#15803d', fontWeight: 700, fontSize: '0.85rem'
+                }}>
+                  <CheckCircle2 size={18} color="#16a34a" />
+                  Email Sent Successfully! ({emailResult.sent} Dispatched)
+                </div>
+              ) : (
+                <div />
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEmailModal(false)}
+                  style={{
+                    padding: '10px 20px', borderRadius: 10, border: '1px solid #cbd5e1',
+                    background: '#fff', color: '#475569', fontWeight: 600, cursor: 'pointer'
+                  }}
+                >
+                  {emailResult && emailResult.success ? 'Close' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendEmail}
+                  disabled={sendingEmail || getModalTargetCount() === 0}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '10px 24px',
+                    borderRadius: 10, border: 'none',
+                    background: getModalTargetCount() === 0
+                      ? '#cbd5e1'
+                      : 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                    color: '#fff', fontWeight: 700,
+                    cursor: getModalTargetCount() === 0 ? 'not-allowed' : 'pointer',
+                    boxShadow: getModalTargetCount() === 0
+                      ? 'none'
+                      : '0 4px 14px rgba(79, 70, 229, 0.3)'
+                  }}
+                >
+                  <Send size={16} />
+                  {sendingEmail
+                    ? 'Sending Emails…'
+                    : `Send to ${getModalTargetCount()} Registrants`
+                  }
+                </button>
+              </div>
             </div>
           </div>
         </div>,

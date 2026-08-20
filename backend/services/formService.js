@@ -174,12 +174,18 @@ const formService = {
       // Do NOT fall back to stale stored row.data.total_submissions if live count is 0!
       const liveCount = typeof countsMap[row.id] === 'number' ? countsMap[row.id] : 0;
 
+      const presetLayout = (row.data?.appearance?.preset_layout || '').toLowerCase();
+      const formTypeVal = (normalized.form_type || row.data?.form_type || '').toLowerCase();
+      const isWebinar = formTypeVal === 'webinar_registration' || presetLayout === 'event_registration';
+      const formTypeResolved = isWebinar ? 'webinar_registration' : 'lead_capture';
+
       return {
         ...normalized,
         total_submissions: liveCount,
         slug: normalized.slug || row.data?.slug || '',
         status: normalized.status || row.status || 'Draft',
         description: normalized.description || row.data?.description || '',
+        form_type: formTypeResolved,
         fields_config: normalized.fields_config || row.data?.fields_config || [],
         appearance: normalized.appearance || row.data?.appearance || {},
         header_content: normalized.header_content || row.data?.header_content || {},
@@ -218,12 +224,18 @@ const formService = {
 
     const liveCount = typeof count === 'number' ? count : 0;
 
+    const presetLayout = (row.data?.appearance?.preset_layout || '').toLowerCase();
+    const formTypeVal = (normalized.form_type || row.data?.form_type || '').toLowerCase();
+    const isWebinar = formTypeVal === 'webinar_registration' || presetLayout === 'event_registration';
+    const formTypeResolved = isWebinar ? 'webinar_registration' : 'lead_capture';
+
     return {
       ...normalized,
       total_submissions: liveCount,
       slug: normalized.slug || row.data?.slug || '',
       status: normalized.status || row.status || 'Draft',
       description: normalized.description || row.data?.description || '',
+      form_type: formTypeResolved,
       fields_config: normalized.fields_config || row.data?.fields_config || [],
       appearance: normalized.appearance || row.data?.appearance || {},
       header_content: normalized.header_content || row.data?.header_content || {},
@@ -318,6 +330,7 @@ const formService = {
       name,
       slug,
       status,
+      form_type: payload.form_type || null,
       description: payload.description || '',
       header_content: payload.header_content || {
         title: name,
@@ -614,8 +627,10 @@ const formService = {
     const { submissionDefId } = await formService.ensureFormObjectTypes(organizationId);
     const submissionId = crypto.randomUUID();
 
-    // Determine if this is a webinar registration form using existing form_type field
-    const isWebinarForm = (form.form_type || '').toLowerCase() === 'webinar_registration';
+    // Determine if this is a webinar/event registration form based on template selection
+    const formTypeLower = (form.form_type || '').toLowerCase();
+    const presetLayoutLower = (form.appearance?.preset_layout || '').toLowerCase();
+    const isWebinarForm = formTypeLower === 'webinar_registration' || presetLayoutLower === 'event_registration';
 
     const submissionData = {
       id: submissionId,
@@ -851,7 +866,7 @@ const formService = {
    * Dispatches personalized emails to form registrants with audience targeting ('unsent' | 'all')
    * Tracks email_sent and last_email_sent_at per submission to prevent duplicate spamming
    */
-  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent', attendanceFilter = null }, organizationId) => {
+  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent', attendanceFilter = null, submission_ids = null }, organizationId) => {
     if (!subject || !subject.trim()) {
       throw new Error('Email subject is required.');
     }
@@ -876,6 +891,15 @@ const formService = {
 
     let targetSubmissions = allSubmissions;
     let skippedCount = 0;
+
+    // Filter to specific submission IDs if provided (for "Email Selected" feature)
+    if (Array.isArray(submission_ids) && submission_ids.length > 0) {
+      const idsSet = new Set(submission_ids);
+      targetSubmissions = targetSubmissions.filter((sub) => idsSet.has(sub.id));
+      if (targetSubmissions.length === 0) {
+        throw new Error('None of the selected submissions were found.');
+      }
+    }
 
     // Apply attendance_status filter first (if specified)
     if (attendanceFilter) {
