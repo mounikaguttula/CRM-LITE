@@ -164,7 +164,7 @@ function FormBuilderPage() {
   // FORM DATA STATE
   const [name, setName] = useState('Untitled Form');
   const [description, setDescription] = useState('');
-  const [formType, setFormType] = useState('webinar_registration');
+  const [formType, setFormType] = useState('lead_capture');
   const [slug, setSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [status, setStatus] = useState('Active');
@@ -227,11 +227,11 @@ function FormBuilderPage() {
   ]);
 
   // DESIGN & STYLING
-  const [presetLayout, setPresetLayout] = useState('event_registration');
+  const [presetLayout, setPresetLayout] = useState('split_layout');
   const [primaryColor, setPrimaryColor] = useState('#4f46e5');
   const [bgColor, setBgColor] = useState('#0f172a');
   const [textColor, setTextColor] = useState('#ffffff');
-  const [submitBtnText, setSubmitBtnText] = useState('Register Now');
+  const [submitBtnText, setSubmitBtnText] = useState('Submit Inquiry');
   const [buttonStyle, setButtonStyle] = useState('solid');
   const [borderRadius, setBorderRadius] = useState('12px');
   const [fontFamily, setFontFamily] = useState('Plus Jakarta Sans');
@@ -288,7 +288,8 @@ const generateUUID = () => {
       const form = await apiGet(`/api/forms/${formId}`);
       setName(form.name || '');
       setDescription(form.description || '');
-      setFormType(form.form_type || 'custom');
+      const loadedPreset = form.appearance?.preset_layout || 'split_layout';
+      setFormType(form.form_type || (loadedPreset === 'event_registration' ? 'webinar_registration' : 'lead_capture'));
       setSlug(form.slug || '');
       setSlugManuallyEdited(false);
       setStatus(form.status || 'Active');
@@ -329,7 +330,7 @@ const generateUUID = () => {
       }
       if (form.appearance) {
         const d = form.appearance;
-        setPresetLayout(d.preset_layout || 'event_registration');
+        setPresetLayout(d.preset_layout || 'split_layout');
         setPrimaryColor(d.primary_color || '#4f46e5');
         setBgColor(d.background_color || '#0f172a');
         setTextColor(d.text_color || '#ffffff');
@@ -1578,6 +1579,30 @@ const generateUUID = () => {
                     placeholder="e.g. Contact Us Form"
                     style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', fontWeight: 700 }}
                   />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Form Type & Template Purpose</label>
+                  <select
+                    value={formType}
+                    onChange={(e) => {
+                      const selectedType = e.target.value;
+                      setFormType(selectedType);
+                      if (selectedType === 'webinar_registration') {
+                        setPresetLayout('event_registration');
+                        setFormCardTitle('Register for the Event');
+                        setSubmitBtnText('Register Now');
+                      } else {
+                        setPresetLayout('split_layout');
+                        setFormCardTitle('Submit Request');
+                        setSubmitBtnText('Submit Inquiry');
+                      }
+                    }}
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', fontWeight: 700, background: '#ffffff', cursor: 'pointer' }}
+                  >
+                    <option value="lead_capture">🎯 Standard Lead Capture Form (No Attendance Tracking)</option>
+                    <option value="webinar_registration">🎓 Webinar & Event Registration (Includes Attendance Tracking)</option>
+                  </select>
                 </div>
 
                 <div>
