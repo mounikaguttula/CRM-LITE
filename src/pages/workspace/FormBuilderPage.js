@@ -565,7 +565,7 @@ const generateUUID = () => {
   };
 
   const handleAddFaq = () => {
-    setFaqs((prev) => [...prev, { question: 'Frequently asked question?', answer: 'Detailed answer response.' }]);
+    setFaqs((prev) => [...prev, { question: '', answer: '' }]);
   };
 
   const handleRemoveFaq = (index) => {
@@ -1500,8 +1500,8 @@ const generateUUID = () => {
                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Q{idx + 1}</span>
                         <Trash2 size={14} color="#ef4444" onClick={() => handleRemoveFaq(idx)} style={{ cursor: 'pointer' }} />
                       </div>
-                      <input type="text" value={faq.question} onChange={(e) => { const updated = [...faqs]; updated[idx].question = e.target.value; setFaqs(updated); }} placeholder="Question" style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 700 }} />
-                      <textarea rows={2} value={faq.answer} onChange={(e) => { const updated = [...faqs]; updated[idx].answer = e.target.value; setFaqs(updated); }} placeholder="Answer" style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '0.75rem' }} />
+                      <input type="text" value={faq.question} onChange={(e) => { const updated = [...faqs]; updated[idx].question = e.target.value; setFaqs(updated); }} placeholder="Enter your question" style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 700 }} />
+                      <textarea rows={2} value={faq.answer} onChange={(e) => { const updated = [...faqs]; updated[idx].answer = e.target.value; setFaqs(updated); }} placeholder="Enter the answer" style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '0.75rem' }} />
                     </div>
                   ))}
                 </div>

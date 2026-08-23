@@ -176,7 +176,7 @@ const getTransporter = () => {
 
 const emailService = {
 
-  sendEmail: async ({ to, subject, html, text }) => {
+  sendEmail: async ({ to, subject, html, text, replyTo }) => {
     try {
       const fromEmail = process.env.SMTP_FROM || 'CRM Lite <noreply@crmplatform.io>';
 
@@ -186,18 +186,28 @@ const emailService = {
         const m = fromEmail.match(/(.*)<(.*)>/);
         if (m) { fromName = m[1].trim(); fromAddress = m[2].trim(); }
         const toArray = Array.isArray(to) ? to : [to];
+
+        const sgBody = {
+          personalizations: [{ to: toArray.map(e => ({ email: e.trim() })) }],
+          from: { email: fromAddress, name: fromName },
+          subject,
+          content: [{ type: 'text/html', value: html }],
+        };
+
+        if (replyTo) {
+          let rAddress = replyTo, rName = 'Support Team';
+          const rm = replyTo.match(/(.*)<(.*)>/);
+          if (rm) { rName = rm[1].trim(); rAddress = rm[2].trim(); }
+          sgBody.reply_to = { email: rAddress, name: rName };
+        }
+
         const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${process.env.SENDGRID_API_KEY.trim()}`,
           },
-          body: JSON.stringify({
-            personalizations: [{ to: toArray.map(e => ({ email: e.trim() })) }],
-            from: { email: fromAddress, name: fromName },
-            subject,
-            content: [{ type: 'text/html', value: html }],
-          }),
+          body: JSON.stringify(sgBody),
         });
         if (!res.ok) { const err = await res.text(); console.error('❌ SendGrid error:', err); return null; }
         console.log(`✅ [SENDGRID] Sent to ${to}`);
@@ -206,10 +216,20 @@ const emailService = {
 
       // ── Resend ────────────────────────────────────────────────────────────
       if (process.env.RESEND_API_KEY) {
+        const resendPayload = {
+          from: fromEmail,
+          to: Array.isArray(to) ? to : [to],
+          subject,
+          html,
+        };
+        if (replyTo) {
+          resendPayload.reply_to = replyTo;
+        }
+
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
-          body: JSON.stringify({ from: fromEmail, to: Array.isArray(to) ? to : [to], subject, html }),
+          body: JSON.stringify(resendPayload),
         });
         const data = await res.json();
         if (!res.ok) { console.error('❌ Resend error:', data); return null; }
@@ -219,10 +239,18 @@ const emailService = {
 
       // ── SMTP ──────────────────────────────────────────────────────────────
       const transporter = getTransporter();
-      const info = await transporter.sendMail({
-        from: fromEmail, to, subject, html,
+      const mailOpts = {
+        from: fromEmail,
+        to,
+        subject,
+        html,
         text: text || html.replace(/<[^>]*>?/gm, ''),
-      });
+      };
+      if (replyTo) {
+        mailOpts.replyTo = replyTo;
+      }
+
+      const info = await transporter.sendMail(mailOpts);
       console.log(`✅ [SMTP] Sent to ${to}`);
       return info;
 

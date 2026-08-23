@@ -5,10 +5,20 @@
     <!-- 🛡️ Global 3rd-Party reCAPTCHA Timeout Shield -->
     <script>
       (function() {
+        function isRecaptchaError(errObj, msg, url) {
+          var str = String(msg || '') + ' ' + String(url || '') + ' ' + String(errObj || '');
+          if (errObj && errObj.message) str += ' ' + String(errObj.message);
+          if (errObj && errObj.stack) str += ' ' + String(errObj.stack);
+          return (
+            str.indexOf('reCAPTCHA') !== -1 ||
+            str.indexOf('recaptcha') !== -1 ||
+            str.indexOf('gstatic.com') !== -1
+          );
+        }
+
         var origOnError = window.onerror;
         window.onerror = function(msg, url, line, col, error) {
-          var errStr = String(msg || '') + ' ' + String(url || '') + ' ' + String(error || '');
-          if (errStr.indexOf('reCAPTCHA') !== -1 || errStr.indexOf('recaptcha') !== -1 || errStr.indexOf('gstatic.com') !== -1) {
+          if (isRecaptchaError(error, msg, url)) {
             console.warn('[reCAPTCHA Shield] Intercepted 3rd-party reCAPTCHA timeout:', msg);
             return true;
           }
@@ -18,12 +28,21 @@
           return false;
         };
 
-        window.addEventListener('unhandledrejection', function(event) {
-          var reason = String(event && event.reason && (event.reason.message || event.reason) || '');
-          if (reason.indexOf('reCAPTCHA') !== -1 || reason.indexOf('recaptcha') !== -1) {
-            console.warn('[reCAPTCHA Shield] Intercepted 3rd-party reCAPTCHA promise rejection:', reason);
+        window.addEventListener('error', function(event) {
+          if (isRecaptchaError(event.error, event.message, event.filename)) {
+            console.warn('[reCAPTCHA Shield] Suppressed error event:', event.message);
             event.preventDefault();
-            event.stopPropagation();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event && event.reason;
+          var reasonStr = String(reason && (reason.message || reason.stack || reason) || '');
+          if (isRecaptchaError(reason, reasonStr, '')) {
+            console.warn('[reCAPTCHA Shield] Intercepted 3rd-party reCAPTCHA promise rejection:', reasonStr);
+            event.preventDefault();
+            event.stopImmediatePropagation();
           }
         }, true);
       })();

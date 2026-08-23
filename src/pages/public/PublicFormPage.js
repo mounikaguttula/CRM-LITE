@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { apiGet, apiPost } from '../../api/client';
-import { CheckCircle2, AlertTriangle, Calendar, Clock, Sparkles, Send, Globe } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Calendar, Clock, Sparkles, Send, Globe, HelpCircle } from 'lucide-react';
 
 const LinkedinIcon = ({ size = 18, color = 'currentColor' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -39,6 +39,15 @@ function PublicFormPage() {
 
   // Dynamic field responses state
   const [fieldValues, setFieldValues] = useState({});
+
+  // Visitor Inquiry State (for Webinar / Event forms)
+  const [inquiryName, setInquiryName] = useState('');
+  const [inquiryEmail, setInquiryEmail] = useState('');
+  const [inquiryQuestion, setInquiryQuestion] = useState('');
+  const [inquirySubmitting, setInquirySubmitting] = useState(false);
+  const [inquirySubmitted, setInquirySubmitted] = useState(false);
+  const [inquiryMessage, setInquiryMessage] = useState('');
+  const [inquiryErrors, setInquiryErrors] = useState({});
 
   useEffect(() => {
     fetchPublicForm();
@@ -144,6 +153,55 @@ function PublicFormPage() {
     }
   };
 
+  const handleInquirySubmit = async (e) => {
+    e.preventDefault();
+    const errors = {};
+    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+
+    if (!inquiryName.trim()) {
+      errors.name = 'Name is required.';
+    }
+    if (!inquiryEmail.trim()) {
+      errors.email = 'Email address is required.';
+    } else if (!EMAIL_REGEX.test(inquiryEmail.trim())) {
+      errors.email = 'Please enter a valid email address.';
+    }
+    if (!inquiryQuestion.trim()) {
+      errors.question = 'Question is required.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setInquiryErrors(errors);
+      return;
+    }
+
+    setInquiryErrors({});
+    setInquirySubmitting(true);
+
+    try {
+      const res = await apiPost(`/api/public/forms/${slug}/inquiries`, {
+        name: inquiryName.trim(),
+        email: inquiryEmail.trim(),
+        question: inquiryQuestion.trim(),
+      });
+
+      if (res.success) {
+        setInquirySubmitted(true);
+        setInquiryMessage(res.message || 'Your question has been submitted. Our team will get back to you.');
+        setInquiryName('');
+        setInquiryEmail('');
+        setInquiryQuestion('');
+      } else {
+        alert(res.message || 'Failed to submit question. Please try again.');
+      }
+    } catch (err) {
+      console.error('Inquiry submission error:', err);
+      alert(err.message || 'An error occurred while submitting your question.');
+    } finally {
+      setInquirySubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{
@@ -189,6 +247,9 @@ function PublicFormPage() {
   const faqs = headerContent.faqs || [];
   const footer = headerContent.footer || {};
   const presetLayout = appearance.preset_layout || 'event_registration';
+  const formTypeVal = (form.form_type || '').toLowerCase();
+  const presetLayoutVal = (appearance.preset_layout || '').toLowerCase();
+  const isWebinarForm = formTypeVal === 'webinar_registration' || presetLayoutVal === 'event_registration';
   const primaryColor = appearance.primary_color || '#4f46e5';
   const fontFamily = appearance.font_family || 'Inter';
   const borderRadius = appearance.border_radius || '12px';
@@ -517,6 +578,122 @@ function PublicFormPage() {
                     </div>
                     {productBlock.image_url && (
                       <img src={productBlock.image_url} alt="Product" style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 10 }} />
+                    )}
+                  </div>
+                )}
+
+                {faqs.length > 0 && (
+                  <div
+                    id="faq"
+                    style={{ background: '#ffffff', borderRadius: borderRadius, padding: 28, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', transition: 'all 0.25s ease' }}
+                  >
+                    <h3 style={{ margin: '0 0 18px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>Frequently Asked Questions</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {faqs.map((faq, fIdx) => (
+                        <div key={fIdx} style={{ borderBottom: fIdx < faqs.length - 1 ? '1px solid #f1f5f9' : 'none', paddingBottom: fIdx < faqs.length - 1 ? 16 : 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a', marginBottom: 6 }}>Q: {faq.question}</div>
+                          <div style={{ fontSize: '0.88rem', color: '#475569', lineHeight: 1.6 }}>{faq.answer}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {isWebinarForm && (
+                  <div
+                    id="inquiry"
+                    style={{ background: '#ffffff', borderRadius: borderRadius, padding: 28, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                      <HelpCircle size={20} color={primaryColor} />
+                      <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>Still have a question?</h3>
+                    </div>
+                    <p style={{ margin: '0 0 18px', color: '#64748b', fontSize: '0.85rem' }}>
+                      Can't find the answer in our FAQs? Ask us about the webinar.
+                    </p>
+
+                    {inquirySubmitted ? (
+                      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 18, textAlign: 'center' }}>
+                        <CheckCircle2 size={36} color="#16a34a" style={{ marginBottom: 8, display: 'inline-block' }} />
+                        <div style={{ fontWeight: 800, color: '#166534', fontSize: '0.95rem', marginBottom: 4 }}>Question Received!</div>
+                        <div style={{ color: '#15803d', fontSize: '0.85rem' }}>{inquiryMessage}</div>
+                        <button
+                          type="button"
+                          onClick={() => setInquirySubmitted(false)}
+                          style={{ marginTop: 12, border: 'none', background: 'transparent', color: primaryColor, fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
+                        >
+                          Ask another question
+                        </button>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleInquirySubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div>
+                          <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.82rem', marginBottom: 4 }}>
+                            Your Name <span style={{ color: '#ef4444' }}>*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="John Doe"
+                            value={inquiryName}
+                            onChange={(e) => { setInquiryName(e.target.value); if (inquiryErrors.name) setInquiryErrors(prev => ({ ...prev, name: null })); }}
+                            style={{
+                              width: '100%', padding: '9px 12px', borderRadius: 8,
+                              border: inquiryErrors.name ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                              fontSize: '0.88rem', outline: 'none', background: '#fff'
+                            }}
+                          />
+                          {inquiryErrors.name && <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 3 }}>{inquiryErrors.name}</div>}
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.82rem', marginBottom: 4 }}>
+                            Your Email <span style={{ color: '#ef4444' }}>*</span>
+                          </label>
+                          <input
+                            type="email"
+                            placeholder="john@example.com"
+                            value={inquiryEmail}
+                            onChange={(e) => { setInquiryEmail(e.target.value); if (inquiryErrors.email) setInquiryErrors(prev => ({ ...prev, email: null })); }}
+                            style={{
+                              width: '100%', padding: '9px 12px', borderRadius: 8,
+                              border: inquiryErrors.email ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                              fontSize: '0.88rem', outline: 'none', background: '#fff'
+                            }}
+                          />
+                          {inquiryErrors.email && <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 3 }}>{inquiryErrors.email}</div>}
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.82rem', marginBottom: 4 }}>
+                            Your Question <span style={{ color: '#ef4444' }}>*</span>
+                          </label>
+                          <textarea
+                            rows={3}
+                            placeholder="Type your question about the webinar here…"
+                            value={inquiryQuestion}
+                            onChange={(e) => { setInquiryQuestion(e.target.value); if (inquiryErrors.question) setInquiryErrors(prev => ({ ...prev, question: null })); }}
+                            style={{
+                              width: '100%', padding: '9px 12px', borderRadius: 8,
+                              border: inquiryErrors.question ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                              fontSize: '0.88rem', outline: 'none', background: '#fff'
+                            }}
+                          />
+                          {inquiryErrors.question && <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 3 }}>{inquiryErrors.question}</div>}
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={inquirySubmitting}
+                          style={{
+                            padding: '10px 18px', borderRadius: 8, border: 'none',
+                            background: primaryColor, color: '#ffffff', fontWeight: 700, fontSize: '0.85rem',
+                            cursor: inquirySubmitting ? 'not-allowed' : 'pointer', alignSelf: 'flex-start',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {inquirySubmitting ? 'Submitting…' : 'Submit Question'}
+                        </button>
+                      </form>
                     )}
                   </div>
                 )}

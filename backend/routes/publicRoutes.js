@@ -11,6 +11,7 @@ router.get('/track/open', campaignController.trackOpen);
 // Public Forms Engine endpoints
 router.get('/forms/:slug', publicFormController.getPublicFormBySlug);
 router.post('/forms/:slug/submit', publicFormController.submitPublicForm);
+router.post('/forms/:slug/inquiries', publicFormController.submitPublicInquiry);
 
 module.exports = router;
 
