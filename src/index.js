@@ -4,28 +4,27 @@ import App from './App';
 
 // Global error handler to catch 3rd-party script timeouts (e.g. Google reCAPTCHA) and prevent app runtime crashes
 if (typeof window !== 'undefined') {
+  const isRecaptchaError = (errObj, msg, filename) => {
+    const str = `${String(msg || '')} ${String(filename || '')} ${String(errObj?.message || '')} ${String(errObj?.stack || '')} ${String(errObj || '')}`;
+    return str.includes('reCAPTCHA') || str.includes('recaptcha') || str.includes('gstatic.com');
+  };
+
   window.addEventListener('error', (event) => {
-    const msg = String(event?.message || event?.error?.message || '');
-    const filename = String(event?.filename || '');
-    if (
-      msg.includes('reCAPTCHA') ||
-      msg.includes('recaptcha') ||
-      filename.includes('gstatic.com') ||
-      filename.includes('recaptcha')
-    ) {
-      console.warn('[Production Resilience] Suppressed 3rd-party reCAPTCHA timeout error:', msg);
+    if (isRecaptchaError(event?.error, event?.message, event?.filename)) {
+      console.warn('[Production Resilience] Suppressed 3rd-party reCAPTCHA error:', event.message);
       event.preventDefault();
       event.stopImmediatePropagation();
     }
-  });
+  }, true);
 
   window.addEventListener('unhandledrejection', (event) => {
-    const reason = String(event?.reason?.message || event?.reason || '');
-    if (reason.includes('reCAPTCHA') || reason.includes('recaptcha')) {
-      console.warn('[Production Resilience] Suppressed 3rd-party reCAPTCHA promise rejection:', reason);
+    const reasonStr = String(event?.reason?.message || event?.reason?.stack || event?.reason || '');
+    if (isRecaptchaError(event?.reason, reasonStr, '')) {
+      console.warn('[Production Resilience] Suppressed 3rd-party reCAPTCHA promise rejection:', reasonStr);
       event.preventDefault();
+      event.stopImmediatePropagation();
     }
-  });
+  }, true);
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

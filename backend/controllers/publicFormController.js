@@ -70,6 +70,27 @@ const publicFormController = {
       });
     }
   },
+
+  /**
+   * POST /api/public/forms/:slug/inquiries
+   * Unauthenticated endpoint to submit a webinar question inquiry
+   */
+  submitPublicInquiry: async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const { name, email, question } = req.body || {};
+
+      const result = await formService.submitPublicInquiry(slug, { name, email, question });
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error('[PublicFormController] Submit inquiry error:', err.message || err);
+      const statusCode = err.statusCode || 400;
+      return res.status(statusCode).json({
+        success: false,
+        message: err.message || 'Failed to submit question.',
+      });
+    }
+  },
 };
 
 module.exports = publicFormController;
