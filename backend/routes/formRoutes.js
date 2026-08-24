@@ -21,9 +21,5 @@ router.delete('/api/forms/:id/submissions/:submissionId', authMiddleware, formCo
 router.patch('/api/forms/:id/submissions/attendance', authMiddleware, formController.updateSubmissionAttendance);
 router.post('/api/forms/:id/email-registrants', authMiddleware, formController.sendEmailRegistrants);
 
-// Form Inquiries & Admin Reply
-router.get('/api/forms/:id/inquiries', authMiddleware, formController.listInquiries);
-router.post('/api/forms/:id/inquiries/:inquiryId/reply', authMiddleware, formController.replyToInquiry);
-
 module.exports = router;
 

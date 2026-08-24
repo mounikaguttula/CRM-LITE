@@ -1257,8 +1257,7 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
     if (record?.created_by_name) return record.created_by_name;
     if (record?.owner_name) return record.owner_name;
     if (record?.owner?.name) return record.owner.name;
-    const cName = currentUser?.name || (`${currentUser?.first_name || ''} ${currentUser?.last_name || ''}`.trim()) || currentUser?.email || 'Admin User';
-    return cName;
+    return 'Unassigned';
   }
 
   if (!val) return '—';

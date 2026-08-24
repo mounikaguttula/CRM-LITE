@@ -14,7 +14,6 @@ const formService = {
   ensureFormObjectTypes: async (organizationId) => {
     let formDefId = null;
     let submissionDefId = null;
-    let inquiryDefId = null;
 
     try {
       const { data: defs, error: fetchErr } = await supabase
@@ -28,7 +27,6 @@ const formService = {
 
       const formDef = (defs || []).find((d) => (d.api_name === 'form' || d.api_name === 'forms') && d.organization_id === null);
       const submissionDef = (defs || []).find((d) => (d.api_name === 'form_submission' || d.api_name === 'form_submissions') && d.organization_id === null);
-      const inquiryDef = (defs || []).find((d) => (d.api_name === 'form_inquiry' || d.api_name === 'form_inquiries') && d.organization_id === null);
 
       if (formDef) {
         formDefId = formDef.id;
@@ -75,41 +73,17 @@ const formService = {
           submissionDefId = newSubDef.id;
         }
       }
-
-      if (inquiryDef) {
-        inquiryDefId = inquiryDef.id;
-      } else {
-        const { data: newInqDef, error: inqInsertErr } = await supabase
-          .from('object_type_definitions')
-          .upsert([{
-            id: 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a47',
-            organization_id: null,
-            api_name: 'form_inquiry',
-            display_name: 'Form Inquiries',
-            description: 'Webinar and form visitor inquiries and questions',
-            is_system: true,
-          }], { onConflict: 'id' })
-          .select('id')
-          .single();
-
-        if (inqInsertErr) {
-          console.error('[FormService] Failed to create canonical form_inquiry object type:', inqInsertErr.message);
-        } else if (newInqDef) {
-          inquiryDefId = newInqDef.id;
-        }
-      }
     } catch (err) {
       console.error('[FormService] Unexpected error ensuring form object types:', err.message);
     }
 
-    if (!formDefId || !submissionDefId || !inquiryDefId) {
-      throw new Error(`Failed to resolve canonical form object types (form: ${formDefId || 'unresolved'}, submission: ${submissionDefId || 'unresolved'}, inquiry: ${inquiryDefId || 'unresolved'}).`);
+    if (!formDefId || !submissionDefId) {
+      throw new Error(`Failed to resolve canonical form object types (form: ${formDefId || 'unresolved'}, submission: ${submissionDefId || 'unresolved'}).`);
     }
 
     return {
       formDefId,
       submissionDefId,
-      inquiryDefId,
     };
   },
 
@@ -815,7 +789,7 @@ const formService = {
    * Validates: allowed status values, submission ownership (form + org).
    */
   updateSubmissionAttendance: async (formId, submissionIds, attendanceStatus, organizationId) => {
-    const VALID_STATUSES = ['Registered', 'Attended', 'No Show', 'Unknown'];
+    const VALID_STATUSES = ['Registered', 'Attended', 'Not Attended', 'No Show'];
     if (!VALID_STATUSES.includes(attendanceStatus)) {
       throw new Error(`Invalid attendance_status '${attendanceStatus}'. Allowed values: ${VALID_STATUSES.join(', ')}`);
     }
@@ -1217,268 +1191,6 @@ const formService = {
     };
   },
 
-  /**
-   * Public Webinar Inquiry Handler:
-   * 1. Resolves form by slug & checks active status
-   * 2. Verifies form is a Webinar/Event form
-   * 3. Validates visitor name, email, and question
-   * 4. Checks if an existing Lead exists for the email in the organization (without creating a new Lead)
-   * 5. Creates a form_inquiry record in universal_table with status = 'Open'
-   */
-  submitPublicInquiry: async (slug, inquiryPayload) => {
-    const form = await formService.getFormBySlug(slug);
-    if (!form) {
-      throw { statusCode: 404, message: 'Form not found or is currently inactive.' };
-    }
-
-    const formTypeLower = (form.form_type || '').toLowerCase();
-    const presetLayoutLower = (form.appearance?.preset_layout || '').toLowerCase();
-    const isWebinarForm = formTypeLower === 'webinar_registration' || presetLayoutLower === 'event_registration';
-
-    if (!isWebinarForm) {
-      throw { statusCode: 400, message: 'Question submissions are only available for Webinar and Event forms.' };
-    }
-
-    const organizationId = form.organization_id;
-    if (!organizationId) {
-      throw { statusCode: 400, message: 'Invalid form configuration: missing organization owner.' };
-    }
-
-    const { name, email, question } = inquiryPayload || {};
-
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      throw { statusCode: 400, message: 'Name is required.' };
-    }
-
-    if (!email || typeof email !== 'string' || !email.trim()) {
-      throw { statusCode: 400, message: 'A valid email address is required.' };
-    }
-
-    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
-    const cleanEmail = email.trim().toLowerCase();
-    if (!EMAIL_REGEX.test(cleanEmail)) {
-      throw { statusCode: 400, message: 'Please enter a valid email address.' };
-    }
-
-    if (!question || typeof question !== 'string' || !question.trim()) {
-      throw { statusCode: 400, message: 'Question is required.' };
-    }
-
-    // Search for existing Lead in the same organization by email
-    let leadId = null;
-    try {
-      const { data: existingLeads } = await supabase
-        .from('universal_table')
-        .select('id')
-        .eq('organization_id', organizationId)
-        .eq('is_deleted', false)
-        .ilike('data->>email', cleanEmail)
-        .limit(1);
-
-      if (existingLeads && existingLeads.length > 0) {
-        leadId = existingLeads[0].id;
-      }
-    } catch (e) {
-      console.warn('[FormService] Lead lookup note for inquiry:', e.message);
-    }
-
-    const { inquiryDefId } = await formService.ensureFormObjectTypes(organizationId);
-    const inquiryId = crypto.randomUUID();
-
-    const inquiryData = {
-      id: inquiryId,
-      form_id: form.id,
-      form_name: form.name,
-      form_slug: form.slug,
-      lead_id: leadId,
-      name: name.trim(),
-      email: cleanEmail,
-      question: question.trim(),
-      source: 'webinar_form',
-      status: 'Open',
-      submitted_at: new Date().toISOString(),
-      replied_at: null,
-      reply_message: null,
-      replied_by: null,
-    };
-
-    const newInquiryRow = {
-      id: inquiryId,
-      organization_id: organizationId,
-      object_type_id: inquiryDefId,
-      name: `${name.trim()} - Question`,
-      status: 'Open',
-      parent_id: form.id,
-      secondary_parent_id: leadId,
-      data: inquiryData,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: inserted, error: insertErr } = await supabase
-      .from('universal_table')
-      .insert([newInquiryRow])
-      .select()
-      .single();
-
-    if (insertErr) {
-      console.error('[FormService] Error creating form_inquiry record:', insertErr.message);
-      throw { statusCode: 500, message: `Failed to record inquiry: ${insertErr.message}` };
-    }
-
-    return {
-      success: true,
-      message: 'Your question has been submitted. Our team will get back to you.',
-      inquiry_id: inquiryId,
-    };
-  },
-
-  /**
-   * List all inquiries for a given form inside an organization
-   */
-  listInquiries: async (formId, organizationId) => {
-    const { inquiryDefId } = await formService.ensureFormObjectTypes(organizationId);
-
-    const { data: rows, error } = await supabase
-      .from('universal_table')
-      .select('*')
-      .eq('organization_id', organizationId)
-      .eq('object_type_id', inquiryDefId)
-      .eq('parent_id', formId)
-      .eq('is_deleted', false)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[FormService] Error fetching inquiries:', error.message);
-      throw new Error(`Failed to fetch inquiries: ${error.message}`);
-    }
-
-    return (rows || []).map((row) => {
-      const normalized = objectService.normalizeRecord(row);
-      return {
-        id: row.id,
-        form_id: row.parent_id || normalized.form_id,
-        lead_id: row.secondary_parent_id || normalized.lead_id,
-        name: normalized.name || row.data?.name || '',
-        email: normalized.email || row.data?.email || '',
-        question: normalized.question || row.data?.question || '',
-        status: normalized.status || row.status || 'Open',
-        submitted_at: normalized.submitted_at || row.created_at,
-        replied_at: normalized.replied_at || row.data?.replied_at || null,
-        reply_message: normalized.reply_message || row.data?.reply_message || null,
-        replied_by: normalized.replied_by || row.data?.replied_by || null,
-        created_at: row.created_at,
-      };
-    });
-  },
-
-  /**
-   * Admin Reply to a Webinar Form Inquiry
-   */
-  replyToInquiry: async (formId, inquiryId, { message, replyTo }, organizationId, userId) => {
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      throw new Error('Reply message body is required.');
-    }
-
-    const { inquiryDefId } = await formService.ensureFormObjectTypes(organizationId);
-
-    // Fetch inquiry row & verify form + org ownership
-    const { data: row, error: fetchErr } = await supabase
-      .from('universal_table')
-      .select('*')
-      .eq('id', inquiryId)
-      .eq('organization_id', organizationId)
-      .eq('object_type_id', inquiryDefId)
-      .eq('parent_id', formId)
-      .eq('is_deleted', false)
-      .single();
-
-    if (fetchErr || !row) {
-      throw new Error('Inquiry record not found or access unauthorized.');
-    }
-
-    const form = await formService.getFormById(formId, organizationId);
-    const visitorEmail = (row.data?.email || '').trim();
-    const visitorQuestion = row.data?.question || '';
-
-    if (!visitorEmail) {
-      throw new Error('No valid visitor email address found on this inquiry.');
-    }
-
-    const effectiveReplyTo = replyTo || process.env.SMTP_REPLY_TO || process.env.WEBINAR_REPLY_TO || null;
-    const emailSubject = `Re: Your question regarding ${form.name}`;
-    const emailHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head><meta charset="UTF-8"/></head>
-      <body style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:32px;margin:0;">
-        <table width="100%" cellpadding="0" cellspacing="0">
-          <tr>
-            <td align="center">
-              <table width="580" style="background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0;box-shadow:0 4px 12px rgba(0,0,0,0.05);">
-                <tr>
-                  <td>
-                    <div style="font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">
-                      ${form.name}
-                    </div>
-                    <h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">Response to Your Question</h2>
-                    <div style="background:#f1f5f9;border-left:4px solid #6366f1;padding:12px 16px;border-radius:0 8px 8px 0;margin-bottom:20px;">
-                      <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Your Question:</div>
-                      <div style="color:#334155;font-size:14px;font-style:italic;">"${visitorQuestion}"</div>
-                    </div>
-                    <div style="color:#334155;font-size:15px;line-height:1.7;white-space:pre-wrap;">${message.trim()}</div>
-                    <hr style="border:none;border-top:1px solid #f1f5f9;margin:28px 0 20px;"/>
-                    <p style="margin:0;color:#94a3b8;font-size:12px;">Sent via CRM Lite Webinar Support</p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </body>
-      </html>
-    `;
-
-    const dispatchResult = await emailService.sendEmail({
-      to: visitorEmail,
-      subject: emailSubject,
-      html: emailHtml,
-      text: message.trim(),
-      replyTo: effectiveReplyTo,
-    });
-
-    if (!dispatchResult) {
-      throw new Error('Failed to dispatch email reply. Please check email service configuration.');
-    }
-
-    const updatedData = {
-      ...(row.data || {}),
-      status: 'Replied',
-      replied_at: new Date().toISOString(),
-      reply_message: message.trim(),
-      replied_by: userId || null,
-    };
-
-    const { error: updateErr } = await supabase
-      .from('universal_table')
-      .update({
-        status: 'Replied',
-        data: updatedData,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', inquiryId);
-
-    if (updateErr) {
-      console.error('[FormService] Error updating inquiry reply status:', updateErr.message);
-      throw new Error(`Email sent, but failed to update inquiry status: ${updateErr.message}`);
-    }
-
-    return {
-      success: true,
-      message: 'Reply sent successfully.',
-      inquiry_id: inquiryId,
-    };
-  },
 };
 
 module.exports = formService;
