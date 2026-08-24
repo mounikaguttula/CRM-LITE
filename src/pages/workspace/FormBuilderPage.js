@@ -218,6 +218,7 @@ function FormBuilderPage() {
   const [speakers, setSpeakers] = useState([]);
   const [productBlock, setProductBlock] = useState({ enabled: false, title: '', description: '', image_url: '', cta_text: '', cta_url: '' });
   const [faqs, setFaqs] = useState([]);
+  const [webinarContactEmail, setWebinarContactEmail] = useState('webinars@company.com');
 
   // FIELDS
   const [fieldsConfig, setFieldsConfig] = useState([
@@ -317,6 +318,7 @@ const generateUUID = () => {
         if (Array.isArray(form.header_content.speakers)) setSpeakers(form.header_content.speakers);
         if (form.header_content.product_block) setProductBlock(form.header_content.product_block);
         if (Array.isArray(form.header_content.faqs)) setFaqs(form.header_content.faqs);
+        setWebinarContactEmail(form.header_content.webinar_contact_email || form.webinar_contact_email || 'webinars@company.com');
 
         if (form.header_content.footer) {
           const ft = form.header_content.footer;
@@ -623,6 +625,7 @@ const generateUUID = () => {
         speakers,
         product_block: productBlock,
         faqs,
+        webinar_contact_email: webinarContactEmail.trim(),
         footer: {
           copyright_text: copyrightText,
           privacy_url: privacyUrl,
@@ -1267,6 +1270,11 @@ const generateUUID = () => {
                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Event Type Badge</label>
                     <input type="text" value={eventBadge} onChange={(e) => setEventBadge(e.target.value)} placeholder="Live Interactive Webinar" style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }} />
                   </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Webinar Contact Email</label>
+                    <input type="email" value={webinarContactEmail} onChange={(e) => setWebinarContactEmail(e.target.value)} placeholder="webinars@company.com" style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }} />
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 3 }}>Displayed to visitors on public webinar form if they need help.</div>
+                  </div>
                 </div>
               )}
 
@@ -1504,6 +1512,11 @@ const generateUUID = () => {
                       <textarea rows={2} value={faq.answer} onChange={(e) => { const updated = [...faqs]; updated[idx].answer = e.target.value; setFaqs(updated); }} placeholder="Enter the answer" style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '0.75rem' }} />
                     </div>
                   ))}
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0' }}>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Webinar Support Contact Email</label>
+                    <input type="email" value={webinarContactEmail} onChange={(e) => setWebinarContactEmail(e.target.value)} placeholder="webinars@company.com" style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }} />
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 3 }}>Displayed under FAQs as a clickable mailto: link for visitors.</div>
+                  </div>
                 </div>
               )}
             </div>

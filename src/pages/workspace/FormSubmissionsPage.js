@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
 import {
   ArrowLeft, Users, Mail, Search, Download, Send, RefreshCw,
-  ExternalLink, Trash2, CheckCircle2, HelpCircle
+  ExternalLink, Trash2
 } from 'lucide-react';
 
 function FormSubmissionsPage() {
@@ -32,36 +32,9 @@ function FormSubmissionsPage() {
   const [emailResult, setEmailResult] = useState(null);
   const modalRef = useRef(null);
 
-  // Tab & Inquiries State
-  const [activeTab, setActiveTab] = useState('registrations'); // 'registrations' | 'inquiries'
-  const [inquiries, setInquiries] = useState([]);
-  const [inquiriesLoading, setInquiriesLoading] = useState(false);
-  const [inquirySearchTerm, setInquirySearchTerm] = useState('');
-  const [inquiryStatusFilter, setInquiryStatusFilter] = useState('ALL'); // 'ALL' | 'Open' | 'Replied'
-
-  // Inquiry Reply Modal State
-  const [activeInquiry, setActiveInquiry] = useState(null);
-  const [replyMessage, setReplyMessage] = useState('');
-  const [replyToAddress, setReplyToAddress] = useState('');
-  const [sendingReply, setSendingReply] = useState(false);
-  const [replyResult, setReplyResult] = useState(null);
-
   const presetLayout = (form?.appearance?.preset_layout || '').toLowerCase();
   const formTypeVal = (form?.form_type || '').toLowerCase();
   const isWebinarForm = formTypeVal === 'webinar_registration' || presetLayout === 'event_registration';
-
-  const fetchInquiries = async () => {
-    if (!formId) return;
-    setInquiriesLoading(true);
-    try {
-      const res = await apiGet(`/api/forms/${formId}/inquiries`);
-      setInquiries(Array.isArray(res) ? res : res.data || []);
-    } catch (err) {
-      console.error('Error fetching inquiries:', err);
-    } finally {
-      setInquiriesLoading(false);
-    }
-  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -76,13 +49,6 @@ function FormSubmissionsPage() {
       if (formData?.name) {
         setEmailSubject(`Important Update: ${formData.name}`);
         setEmailBody(`Hi {{FirstName}},\n\nThank you for registering for ${formData.name}.\n\nBest regards,\nThe Team`);
-      }
-
-      // Pre-fetch inquiries if webinar form
-      const loadedPreset = (formData?.appearance?.preset_layout || '').toLowerCase();
-      const loadedFormType = (formData?.form_type || '').toLowerCase();
-      if (loadedFormType === 'webinar_registration' || loadedPreset === 'event_registration') {
-        fetchInquiries();
       }
     } catch (err) {
       console.error('Error fetching submissions:', err);
@@ -231,44 +197,12 @@ function FormSubmissionsPage() {
     }
   };
 
-  const handleSendReply = async () => {
-    if (!activeInquiry) return;
-    if (!replyMessage.trim()) {
-      alert('Please enter a reply message.');
-      return;
-    }
-
-    setSendingReply(true);
-    setReplyResult(null);
-
-    try {
-      const res = await apiPost(`/api/forms/${formId}/inquiries/${activeInquiry.id}/reply`, {
-        message: replyMessage.trim(),
-        replyTo: replyToAddress.trim() || undefined,
-      });
-
-      setReplyResult({ success: true, message: res.message || 'Reply sent successfully.' });
-      fetchInquiries();
-      setTimeout(() => {
-        setActiveInquiry(null);
-        setReplyMessage('');
-        setReplyResult(null);
-      }, 1200);
-    } catch (err) {
-      console.error('Error sending reply:', err);
-      setReplyResult({ success: false, message: err.message || 'Failed to send reply.' });
-    } finally {
-      setSendingReply(false);
-    }
-  };
-
   const unsentCount = submissions.filter((s) => !s.email_sent && !s.data?.email_sent).length;
   const alreadySentCount = submissions.length - unsentCount;
 
   const registeredCount = submissions.filter((s) => (s.attendance_status || (isWebinarForm ? 'Registered' : null)) === 'Registered').length;
   const attendedCount = submissions.filter((s) => s.attendance_status === 'Attended').length;
-  const noShowCount = submissions.filter((s) => s.attendance_status === 'No Show').length;
-  const unknownCount = submissions.filter((s) => s.attendance_status === 'Unknown').length;
+  const notAttendedCount = submissions.filter((s) => s.attendance_status === 'Not Attended' || s.attendance_status === 'No Show').length;
 
   const filteredSubmissions = submissions.filter((sub) => {
     const matchesSearch = (sub.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -278,22 +212,15 @@ function FormSubmissionsPage() {
     
     let matchesAttendance = true;
     if (attendanceFilter !== 'ALL') {
-      const effectiveAttendance = sub.attendance_status || (isWebinarForm ? 'Registered' : '');
+      const rawAtt = sub.attendance_status || (isWebinarForm ? 'Registered' : '');
+      const effectiveAttendance = rawAtt === 'No Show' ? 'Not Attended' : rawAtt;
       matchesAttendance = effectiveAttendance === attendanceFilter;
     }
 
     return matchesSearch && matchesSource && matchesAttendance;
   });
 
-  const filteredInquiries = inquiries.filter((inq) => {
-    const matchesSearch = (inq.name || '').toLowerCase().includes(inquirySearchTerm.toLowerCase()) ||
-                          (inq.email || '').toLowerCase().includes(inquirySearchTerm.toLowerCase()) ||
-                          (inq.question || '').toLowerCase().includes(inquirySearchTerm.toLowerCase());
-    const matchesStatus = inquiryStatusFilter === 'ALL' || inq.status === inquiryStatusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
-  const uniqueSources = Array.from(new Set(submissions.map((s) => s.source).filter(Boolean)));
+  const uniqueSources = Array.from(new Set(submissions.map((s) => s.source || s.data?.source).filter(Boolean)));
 
   // Calculate target audience email count in modal based on combined filters
   const getModalTargetCount = () => {
@@ -315,13 +242,12 @@ function FormSubmissionsPage() {
     switch (status) {
       case 'Attended':
         return { background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' };
+      case 'Not Attended':
       case 'No Show':
         return { background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' };
       case 'Registered':
-        return { background: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' };
-      case 'Unknown':
       default:
-        return { background: '#f8fafc', color: '#64748b', border: '1px solid #cbd5e1' };
+        return { background: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' };
     }
   };
 
@@ -387,48 +313,6 @@ function FormSubmissionsPage() {
         </div>
       </div>
 
-      {/* Webinar Form Section Tab Toggle */}
-      {isWebinarForm && (
-        <div style={{ display: 'flex', gap: 12, marginBottom: 20, borderBottom: '1px solid #e2e8f0', paddingBottom: 12 }}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('registrations')}
-            style={{
-              padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: '0.88rem',
-              border: activeTab === 'registrations' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
-              background: activeTab === 'registrations' ? '#eef2ff' : '#ffffff',
-              color: activeTab === 'registrations' ? '#4f46e5' : '#475569',
-              display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.15s ease'
-            }}
-          >
-            <Users size={16} />
-            Registrations ({submissions.length})
-          </button>
-
-          <button
-            type="button"
-            onClick={() => { setActiveTab('inquiries'); fetchInquiries(); }}
-            style={{
-              padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: '0.88rem',
-              border: activeTab === 'inquiries' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
-              background: activeTab === 'inquiries' ? '#eef2ff' : '#ffffff',
-              color: activeTab === 'inquiries' ? '#4f46e5' : '#475569',
-              display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.15s ease'
-            }}
-          >
-            <HelpCircle size={16} />
-            Questions & Inquiries ({inquiries.length})
-            {inquiries.filter(i => i.status === 'Open').length > 0 && (
-              <span style={{ background: '#d97706', color: '#ffffff', padding: '2px 8px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 800 }}>
-                {inquiries.filter(i => i.status === 'Open').length} Open
-              </span>
-            )}
-          </button>
-        </div>
-      )}
-
-      {activeTab === 'registrations' ? (
-      <>
       {/* Summary Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
@@ -456,19 +340,10 @@ function FormSubmissionsPage() {
 
             <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
               <div style={{ fontSize: '0.78rem', color: '#dc2626', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-                No Show
+                Not Attended
               </div>
-              <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#dc2626' }}>{noShowCount}</div>
+              <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#dc2626' }}>{notAttendedCount}</div>
             </div>
-
-            {unknownCount > 0 && (
-              <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-                  Unknown
-                </div>
-                <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#64748b' }}>{unknownCount}</div>
-              </div>
-            )}
           </>
         )}
 
@@ -519,8 +394,7 @@ function FormSubmissionsPage() {
                 <option value="ALL">All Attendance Statuses</option>
                 <option value="Registered">Registered</option>
                 <option value="Attended">Attended</option>
-                <option value="No Show">No Show</option>
-                <option value="Unknown">Unknown</option>
+                <option value="Not Attended">Not Attended</option>
               </select>
             </div>
           )}
@@ -645,7 +519,7 @@ function FormSubmissionsPage() {
                     {isWebinarForm && (
                       <td style={{ padding: '14px 20px' }}>
                         <select
-                          value={currentAttendance}
+                          value={currentAttendance === 'No Show' ? 'Not Attended' : currentAttendance}
                           onChange={(e) => handleUpdateAttendance([sub.id], e.target.value)}
                           style={{
                             padding: '4px 10px', borderRadius: 8, fontSize: '0.8rem',
@@ -655,8 +529,7 @@ function FormSubmissionsPage() {
                         >
                           <option value="Registered">Registered</option>
                           <option value="Attended">Attended</option>
-                          <option value="No Show">No Show</option>
-                          <option value="Unknown">Unknown</option>
+                          <option value="Not Attended">Not Attended</option>
                         </select>
                       </td>
                     )}
@@ -724,191 +597,6 @@ function FormSubmissionsPage() {
             </tbody>
           </table>
         </div>
-      )}
-      </>
-      ) : (
-      /* QUESTIONS & INQUIRIES VIEW */
-      <>
-        {/* Inquiry Stat Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
-          <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-              Total Inquiries
-            </div>
-            <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#0f172a' }}>{inquiries.length}</div>
-          </div>
-
-          <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '0.78rem', color: '#d97706', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-              Open Questions
-            </div>
-            <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#d97706' }}>
-              {inquiries.filter(i => i.status === 'Open').length}
-            </div>
-          </div>
-
-          <div style={{ background: '#fff', padding: 18, borderRadius: 14, border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
-              Replied Questions
-            </div>
-            <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#059669' }}>
-              {inquiries.filter(i => i.status === 'Replied').length}
-            </div>
-          </div>
-        </div>
-
-        {/* Inquiry Controls Bar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
-          marginBottom: 20, background: '#fff', padding: '14px 20px',
-          borderRadius: 12, border: '1px solid #e2e8f0'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', width: 300 }}>
-              <Search size={16} style={{ position: 'absolute', left: 14, top: 11, color: '#94a3b8' }} />
-              <input
-                type="text"
-                placeholder="Search questions or visitors…"
-                value={inquirySearchTerm}
-                onChange={(e) => setInquirySearchTerm(e.target.value)}
-                style={{
-                  width: '100%', padding: '8px 12px 8px 38px', borderRadius: 8,
-                  border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none'
-                }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>Status:</span>
-              <select
-                value={inquiryStatusFilter}
-                onChange={(e) => setInquiryStatusFilter(e.target.value)}
-                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 600 }}
-              >
-                <option value="ALL">All Statuses</option>
-                <option value="Open">Open</option>
-                <option value="Replied">Replied</option>
-              </select>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={fetchInquiries}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-              borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff',
-              color: '#334155', fontWeight: 600, fontSize: '0.82rem', cursor: 'pointer'
-            }}
-          >
-            <RefreshCw size={14} className={inquiriesLoading ? "spin" : ""} />
-            Refresh
-          </button>
-        </div>
-
-        {/* Inquiry Table */}
-        {inquiriesLoading ? (
-          <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
-            <RefreshCw size={24} className="spin" style={{ marginBottom: 12 }} />
-            <div>Loading Visitor Inquiries…</div>
-          </div>
-        ) : filteredInquiries.length === 0 ? (
-          <div style={{
-            textAlign: 'center', padding: '60px 24px', background: '#fff',
-            borderRadius: 16, border: '1px dashed #cbd5e1'
-          }}>
-            <HelpCircle size={44} color="#94a3b8" style={{ marginBottom: 12 }} />
-            <h3 style={{ margin: '0 0 6px', color: '#0f172a' }}>No Questions Found</h3>
-            <p style={{ margin: 0, color: '#64748b', fontSize: '0.88rem' }}>
-              No visitor questions match your filter criteria.
-            </p>
-          </div>
-        ) : (
-          <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  <th style={{ padding: '14px 20px' }}>Visitor Name</th>
-                  <th style={{ padding: '14px 20px' }}>Email Address</th>
-                  <th style={{ padding: '14px 20px', width: '35%' }}>Question</th>
-                  <th style={{ padding: '14px 20px' }}>Submitted Date</th>
-                  <th style={{ padding: '14px 20px' }}>Status</th>
-                  <th style={{ padding: '14px 20px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInquiries.map((inq) => {
-                  const isReplied = inq.status === 'Replied';
-                  return (
-                    <tr key={inq.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '14px 20px', fontWeight: 700, color: '#0f172a' }}>
-                        {inq.name || 'Anonymous'}
-                      </td>
-                      <td style={{ padding: '14px 20px', color: '#4f46e5', fontWeight: 600 }}>
-                        {inq.email}
-                      </td>
-                      <td style={{ padding: '14px 20px', color: '#334155', lineHeight: 1.4 }}>
-                        <div style={{
-                          overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
-                          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', fontStyle: 'italic'
-                        }}>
-                          "{inq.question}"
-                        </div>
-                      </td>
-                      <td style={{ padding: '14px 20px', color: '#64748b', fontSize: '0.82rem' }}>
-                        {new Date(inq.submitted_at).toLocaleString()}
-                      </td>
-                      <td style={{ padding: '14px 20px', whiteSpace: 'nowrap' }}>
-                        {isReplied ? (
-                          <span
-                            title={inq.replied_at ? `Replied on ${new Date(inq.replied_at).toLocaleString()}` : 'Replied'}
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
-                              padding: '4px 10px', borderRadius: 6, background: '#ecfdf5',
-                              fontSize: '0.75rem', fontWeight: 700, color: '#059669', border: '1px solid #a7f3d0'
-                            }}
-                          >
-                            ✓ Replied
-                          </span>
-                        ) : (
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
-                            padding: '4px 10px', borderRadius: 6, background: '#fff7ed',
-                            fontSize: '0.75rem', fontWeight: 700, color: '#c2410c', border: '1px solid #ffedd5'
-                          }}>
-                            ● Open
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '14px 20px' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveInquiry(inq);
-                            setReplyMessage(inq.reply_message || '');
-                            setReplyToAddress('');
-                            setReplyResult(null);
-                          }}
-                          style={{
-                            border: 'none',
-                            background: isReplied ? '#f1f5f9' : 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                            color: isReplied ? '#475569' : '#ffffff',
-                            borderRadius: 6, padding: '5px 12px', fontSize: '0.78rem',
-                            fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer'
-                          }}
-                        >
-                          <Send size={13} />
-                          {isReplied ? 'View / Reply' : 'Reply'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </>
       )}
 
       {/* EMAIL REGISTRANTS MODAL */}
@@ -982,8 +670,7 @@ function FormSubmissionsPage() {
                     { id: 'ALL', label: 'All Statuses', count: submissions.length },
                     { id: 'Registered', label: 'Registered', count: registeredCount },
                     { id: 'Attended', label: 'Attended', count: attendedCount },
-                    { id: 'No Show', label: 'No Show', count: noShowCount },
-                    { id: 'Unknown', label: 'Unknown', count: unknownCount },
+                    { id: 'Not Attended', label: 'Not Attended', count: notAttendedCount },
                   ].map((item) => {
                     const isSelected = emailAttendanceFilter === item.id;
                     return (
@@ -994,21 +681,13 @@ function FormSubmissionsPage() {
                         style={{
                           padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
                           border: isSelected ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
-                          background: isSelected ? '#eef2ff' : '#ffffff',
+                          background: isSelected ? '#eef2ff' : '#f8fafc',
                           color: isSelected ? '#4f46e5' : '#475569',
-                          fontWeight: 700, fontSize: '0.82rem',
-                          display: 'inline-flex', alignItems: 'center', gap: 6,
-                          transition: 'all 0.15s ease'
+                          fontSize: '0.78rem', fontWeight: 700,
+                          display: 'flex', alignItems: 'center', gap: 6
                         }}
                       >
-                        <span>{item.label}</span>
-                        <span style={{
-                          background: isSelected ? '#4f46e5' : '#f1f5f9',
-                          color: isSelected ? '#ffffff' : '#64748b',
-                          borderRadius: 10, padding: '1px 7px', fontSize: '0.74rem', fontWeight: 800
-                        }}>
-                          {item.count}
-                        </span>
+                        {item.label} ({item.count})
                       </button>
                     );
                   })}
@@ -1016,13 +695,11 @@ function FormSubmissionsPage() {
               </div>
             )}
 
-            {/* Email Audience Target Selector */}
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 18 }}>
               <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 8 }}>
                 Who should receive this email?
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: selectedSubmissions.size > 0 ? '1fr 1fr 1fr' : '1fr 1fr', gap: 12 }}>
-                {/* Selected Only — show only when checkboxes are selected */}
                 {selectedSubmissions.size > 0 && (
                   <div
                     onClick={() => setTargetAudience('selected')}
@@ -1030,7 +707,6 @@ function FormSubmissionsPage() {
                       padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                       border: targetAudience === 'selected' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
                       background: targetAudience === 'selected' ? '#f5f3ff' : '#ffffff',
-                      transition: 'all 0.15s ease'
                     }}
                   >
                     <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1049,7 +725,6 @@ function FormSubmissionsPage() {
                     padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                     border: targetAudience === 'unsent' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
                     background: targetAudience === 'unsent' ? '#eef2ff' : '#ffffff',
-                    transition: 'all 0.15s ease'
                   }}
                 >
                   <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
@@ -1066,7 +741,6 @@ function FormSubmissionsPage() {
                     padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                     border: targetAudience === 'all' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
                     background: targetAudience === 'all' ? '#eef2ff' : '#ffffff',
-                    transition: 'all 0.15s ease'
                   }}
                 >
                   <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
@@ -1079,7 +753,6 @@ function FormSubmissionsPage() {
               </div>
             </div>
 
-            {/* Combined Audience Summary Banner */}
             <div style={{
               padding: '12px 16px', borderRadius: 10, background: '#f8fafc',
               border: '1px solid #e2e8f0', marginBottom: 20, display: 'flex',
@@ -1091,259 +764,59 @@ function FormSubmissionsPage() {
                 {emailAttendanceFilter !== 'ALL' && ` [Attendance: ${emailAttendanceFilter}]`}
                 {targetAudience !== 'selected' && ` [Email Status: ${targetAudience === 'unsent' ? 'Unsent Only' : 'All'}]`}
               </span>
-              {getModalTargetCount() === 0 && (
-                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#dc2626' }}>
-                  No matching registrants found.
-                </span>
-              )}
             </div>
 
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 6 }}>
-                Subject Line *
+                Email Subject
               </label>
               <input
                 type="text"
                 value={emailSubject}
                 onChange={(e) => setEmailSubject(e.target.value)}
-                placeholder="Reminder - Tomorrow's Event"
-                style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
+                placeholder="e.g. Important Webinar Update"
+                style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none' }}
               />
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <label style={{ fontWeight: 700, color: '#334155', fontSize: '0.85rem' }}>
-                  Email Message Body *
-                </label>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {['{{FirstName}}', '{{LastName}}', '{{FormName}}'].map((tag) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => setEmailBody((prev) => `${prev} ${tag}`)}
-                      style={{
-                        border: '1px solid #cbd5e1', background: '#f8fafc',
-                        color: '#4f46e5', fontSize: '0.72rem', fontWeight: 700,
-                        padding: '3px 8px', borderRadius: 6, cursor: 'pointer'
-                      }}
-                    >
-                      + {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 6 }}>
+                Email Body
+              </label>
               <textarea
-                rows={8}
+                rows={6}
                 value={emailBody}
                 onChange={(e) => setEmailBody(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.9rem', lineHeight: 1.6 }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              {emailResult && emailResult.success ? (
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px',
-                  borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0',
-                  color: '#15803d', fontWeight: 700, fontSize: '0.85rem'
-                }}>
-                  <CheckCircle2 size={18} color="#16a34a" />
-                  Email Sent Successfully! ({emailResult.sent} Dispatched)
-                </div>
-              ) : (
-                <div />
-              )}
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEmailModal(false)}
-                  style={{
-                    padding: '10px 20px', borderRadius: 10, border: '1px solid #cbd5e1',
-                    background: '#fff', color: '#475569', fontWeight: 600, cursor: 'pointer'
-                  }}
-                >
-                  {emailResult && emailResult.success ? 'Close' : 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSendEmail}
-                  disabled={sendingEmail || getModalTargetCount() === 0}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '10px 24px',
-                    borderRadius: 10, border: 'none',
-                    background: getModalTargetCount() === 0
-                      ? '#cbd5e1'
-                      : 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                    color: '#fff', fontWeight: 700,
-                    cursor: getModalTargetCount() === 0 ? 'not-allowed' : 'pointer',
-                    boxShadow: getModalTargetCount() === 0
-                      ? 'none'
-                      : '0 4px 14px rgba(79, 70, 229, 0.3)'
-                  }}
-                >
-                  <Send size={16} />
-                  {sendingEmail
-                    ? 'Sending Emails…'
-                    : `Send to ${getModalTargetCount()} Registrants`
-                  }
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-      {/* INQUIRY REPLY MODAL */}
-      {activeInquiry && ReactDOM.createPortal(
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999, padding: 24
-        }}>
-          <div style={{
-            background: '#fff', borderRadius: 20, width: '100%', maxWidth: 640,
-            padding: 32, position: 'relative', maxHeight: '90vh', overflowY: 'auto',
-            boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)'
-          }}>
-            <button
-              type="button"
-              onClick={() => { setActiveInquiry(null); setReplyResult(null); }}
-              style={{
-                position: 'absolute', top: 20, right: 20, border: 'none',
-                background: '#f1f5f9', color: '#475569', borderRadius: 20,
-                width: 36, height: 36, fontWeight: 700, cursor: 'pointer'
-              }}
-            >
-              ✕
-            </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <div style={{
-                width: 40, height: 40, borderRadius: 10, background: '#eef2ff',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5'
-              }}>
-                <HelpCircle size={22} />
-              </div>
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>
-                  Inquiry Details & Reply
-                </h2>
-                <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
-                  Visitor question for "{form?.name}"
-                </p>
-              </div>
-            </div>
-
-            {replyResult && (
-              <div style={{
-                padding: 14, borderRadius: 10, marginBottom: 16,
-                background: replyResult.success ? '#f0fdf4' : '#fef2f2',
-                border: replyResult.success ? '1px solid #bbf7d0' : '1px solid #fecaca',
-                color: replyResult.success ? '#166534' : '#991b1b',
-                fontSize: '0.88rem', fontWeight: 600
-              }}>
-                {replyResult.message}
-              </div>
-            )}
-
-            {/* Visitor details card */}
-            <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', marginBottom: 20 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12, fontSize: '0.85rem' }}>
-                <div>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Visitor Name:</span>
-                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{activeInquiry.name || 'Anonymous'}</div>
-                </div>
-                <div>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Visitor Email:</span>
-                  <div style={{ fontWeight: 700, color: '#4f46e5' }}>{activeInquiry.email}</div>
-                </div>
-              </div>
-              <div style={{ fontSize: '0.85rem', marginBottom: 12 }}>
-                <span style={{ color: '#64748b', fontWeight: 600 }}>Submitted At:</span>
-                <div style={{ color: '#334155' }}>{new Date(activeInquiry.submitted_at).toLocaleString()}</div>
-              </div>
-
-              <div style={{ background: '#ffffff', borderRadius: 8, padding: 12, border: '1px solid #cbd5e1' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', marginBottom: 4 }}>Question:</div>
-                <div style={{ color: '#0f172a', fontSize: '0.9rem', lineHeight: 1.5, fontStyle: 'italic' }}>
-                  "{activeInquiry.question}"
-                </div>
-              </div>
-
-              {activeInquiry.status === 'Replied' && (
-                <div style={{ marginTop: 14, background: '#f0fdf4', borderRadius: 8, padding: 12, border: '1px solid #bbf7d0' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#166534', textTransform: 'uppercase', marginBottom: 4 }}>
-                    Previous Reply ({new Date(activeInquiry.replied_at).toLocaleString()}):
-                  </div>
-                  <div style={{ color: '#15803d', fontSize: '0.88rem', whiteSpace: 'pre-wrap' }}>
-                    {activeInquiry.reply_message}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Reply input section */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 6 }}>
-                Reply Message <span style={{ color: '#ef4444' }}>*</span>
-              </label>
-              <textarea
-                rows={4}
-                placeholder="Type your response to the visitor here…"
-                value={replyMessage}
-                onChange={(e) => setReplyMessage(e.target.value)}
-                style={{
-                  width: '100%', padding: '10px 14px', borderRadius: 8,
-                  border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none'
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.82rem', marginBottom: 4 }}>
-                Reply-To Address (Monitored Inbox)
-              </label>
-              <input
-                type="email"
-                placeholder="e.g. webinars@techmantranow.com (Optional)"
-                value={replyToAddress}
-                onChange={(e) => setReplyToAddress(e.target.value)}
-                style={{
-                  width: '100%', padding: '8px 12px', borderRadius: 8,
-                  border: '1px solid #cbd5e1', fontSize: '0.85rem', outline: 'none'
-                }}
+                placeholder="Type your email content here..."
+                style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none' }}
               />
               <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 4 }}>
-                If visitor clicks "Reply" in their mail app, their message will be directed to this monitored address.
+                Variables supported: <code>{"{{FirstName}}"}</code>, <code>{"{{FormName}}"}</code>
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <button
                 type="button"
-                onClick={() => { setActiveInquiry(null); setReplyResult(null); }}
-                style={{
-                  padding: '10px 18px', borderRadius: 8, border: '1px solid #cbd5e1',
-                  background: '#fff', color: '#475569', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer'
-                }}
+                onClick={() => setShowEmailModal(false)}
+                style={{ padding: '10px 18px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer' }}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={sendingReply}
-                onClick={handleSendReply}
+                disabled={sendingEmail || getModalTargetCount() === 0}
+                onClick={handleSendEmail}
                 style={{
                   padding: '10px 20px', borderRadius: 8, border: 'none',
-                  background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                  color: '#fff', fontWeight: 700, fontSize: '0.88rem', cursor: sendingReply ? 'not-allowed' : 'pointer',
+                  background: getModalTargetCount() === 0 ? '#cbd5e1' : 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                  color: '#fff', fontWeight: 700, fontSize: '0.88rem',
+                  cursor: sendingEmail || getModalTargetCount() === 0 ? 'not-allowed' : 'pointer',
                   display: 'flex', alignItems: 'center', gap: 6
                 }}
               >
                 <Send size={15} />
-                {sendingReply ? 'Sending Reply…' : 'Send Reply'}
+                {sendingEmail ? 'Sending...' : `Send to ${getModalTargetCount()} Registrants`}
               </button>
             </div>
           </div>

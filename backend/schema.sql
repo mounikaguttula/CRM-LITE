@@ -276,8 +276,7 @@ VALUES
   ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'contacts', 'Contacts', true),
   ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'companies', 'Companies', true),
   ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', NULL, 'form', 'Forms', true),
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a46', NULL, 'form_submission', 'Form Submissions', true),
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a47', NULL, 'form_inquiry', 'Form Inquiries', true)
+  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a46', NULL, 'form_submission', 'Form Submissions', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Field Definitions for Leads, Deals, Contacts, Companies

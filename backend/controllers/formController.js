@@ -272,49 +272,6 @@ const formController = {
       });
     }
   },
-
-  /**
-   * GET /api/forms/:id/inquiries
-   * List all visitor question inquiries for a form
-   */
-  listInquiries: async (req, res, next) => {
-    try {
-      const { id } = req.params;
-      const organizationId = req.user?.organization_id;
-      if (!organizationId) {
-        return res.status(400).json({ message: 'Organization ID is required.' });
-      }
-      const inquiries = await formService.listInquiries(id, organizationId);
-      return res.status(200).json(inquiries);
-    } catch (err) {
-      next(err);
-    }
-  },
-
-  /**
-   * POST /api/forms/:id/inquiries/:inquiryId/reply
-   * Send admin reply email to a visitor inquiry
-   */
-  replyToInquiry: async (req, res, next) => {
-    try {
-      const { id, inquiryId } = req.params;
-      const organizationId = req.user?.organization_id;
-      const userId = req.user?.id;
-      const { message, replyTo } = req.body || {};
-
-      if (!organizationId) {
-        return res.status(400).json({ message: 'Organization ID is required.' });
-      }
-
-      const result = await formService.replyToInquiry(id, inquiryId, { message, replyTo }, organizationId, userId);
-      return res.status(200).json(result);
-    } catch (err) {
-      return res.status(400).json({
-        success: false,
-        message: err.message || 'Failed to send reply to inquiry.',
-      });
-    }
-  },
 };
 
 module.exports = formController;

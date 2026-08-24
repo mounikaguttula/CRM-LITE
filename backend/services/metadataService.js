@@ -126,7 +126,7 @@ const metadataService = {
     }
 
 
-    return objectDefs || [];
+    return (objectDefs || []).filter((o) => o.api_name !== 'form_inquiry' && o.api_name !== 'form_inquiries' && o.id !== 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a47');
   },
 
 
@@ -693,7 +693,7 @@ const metadataService = {
     if (metaRes?.error) {
       console.error('Failed to fetch platform metadata:', metaRes.error.message);
     }
-    const availableObjects = metaRes?.data || [];
+    const availableObjects = (metaRes?.data || []).filter((o) => o.api_name !== 'form_inquiry' && o.api_name !== 'form_inquiries' && o.id !== 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a47');
 
     // Measure Navigation query execution time
     const tNavStart = Date.now();
