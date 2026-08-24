@@ -74,11 +74,58 @@ function PublicFormPage() {
     }
   };
 
+  const validateEmailAddress = (emailStr) => {
+    if (!emailStr || typeof emailStr !== 'string') {
+      return { valid: false, message: 'Email address is required.' };
+    }
+    const cleanEmail = emailStr.trim().toLowerCase();
+    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      return { valid: false, message: 'Please enter a valid email address (e.g. name@company.com).' };
+    }
+    const parts = cleanEmail.split('@');
+    if (parts.length !== 2) return { valid: false, message: 'Invalid email format.' };
+    const [username, domain] = parts;
+
+    const TYPO_MAP = {
+      'gmil.com': 'gmail.com', 'gamil.com': 'gmail.com', 'gmai.com': 'gmail.com',
+      'gmial.com': 'gmail.com', 'gmaill.com': 'gmail.com', 'gmeil.com': 'gmail.com',
+      'gmail.c': 'gmail.com', 'gmail.cm': 'gmail.com', 'gmail.co': 'gmail.com', 'gmail.comm': 'gmail.com',
+      'yaho.com': 'yahoo.com', 'yahooo.com': 'yahoo.com', 'yaho.co': 'yahoo.com',
+      'hotmial.com': 'hotmail.com', 'hotmai.com': 'hotmail.com',
+      'outlok.com': 'outlook.com', 'outloo.com': 'outlook.com', 'outloook.com': 'outlook.com',
+      'redifmail.com': 'rediffmail.com', 'redif.com': 'rediffmail.com'
+    };
+
+    if (TYPO_MAP[domain]) {
+      return { valid: false, message: `Invalid email domain. Did you mean @${TYPO_MAP[domain]}?` };
+    }
+
+    const DISPOSABLE_DOMAINS = new Set([
+      'yopmail.com', 'mailinator.com', 'tempmail.com', 'dispostable.com',
+      'guerrillamail.com', '10minutemail.com', 'trashmail.com', 'sharklasers.com',
+      'getnada.com', 'binkmail.com', 'safetymail.info', 'maildrop.cc',
+      'temp-mail.org', 'fakeinbox.com', 'throwawaymail.com', 'generator.email',
+      'example.com', 'test.com', 'fake.com', 'dummy.com', 'invalid.com',
+      'sample.com', 'asdf.com', 'qwerty.com'
+    ]);
+
+    if (DISPOSABLE_DOMAINS.has(domain)) {
+      return { valid: false, message: 'Disposable or temporary email addresses are not allowed.' };
+    }
+
+    const DUMMY_USERNAMES = new Set(['test', 'asdf', 'qwer', '123', '1234', 'dummy', 'fake', 'noemail', 'abc', 'xyz', 'none', 'testing']);
+    if (DUMMY_USERNAMES.has(username)) {
+      return { valid: false, message: 'Please enter a genuine, active email address.' };
+    }
+
+    return { valid: true };
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form) return;
 
-    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
     const errors = {};
     (form.fields_config || []).forEach((f) => {
       const val = fieldValues[f.api_name];
@@ -86,8 +133,9 @@ function PublicFormPage() {
       if (f.required && !strVal) {
         errors[f.api_name] = `${f.label || f.api_name} is required.`;
       } else if (strVal && (f.type === 'email' || (f.api_name || '').toLowerCase().includes('email') || (f.label || '').toLowerCase().includes('email'))) {
-        if (!EMAIL_REGEX.test(strVal)) {
-          errors[f.api_name] = `Please enter a valid email address for ${f.label || f.api_name} (e.g. user@company.com).`;
+        const validation = validateEmailAddress(strVal);
+        if (!validation.valid) {
+          errors[f.api_name] = validation.message;
         }
       }
     });
@@ -192,7 +240,7 @@ function PublicFormPage() {
   const formTypeVal = (form.form_type || '').toLowerCase();
   const presetLayoutVal = (appearance.preset_layout || '').toLowerCase();
   const isWebinarForm = formTypeVal === 'webinar_registration' || presetLayoutVal === 'event_registration';
-  const webinarContactEmail = headerContent.webinar_contact_email || form.webinar_contact_email || 'webinars@company.com';
+  const webinarContactEmail = headerContent.webinar_contact_email || form.webinar_contact_email || form.data?.webinar_contact_email || form.data?.header_content?.webinar_contact_email || 'mounika@csnow.io';
   const primaryColor = appearance.primary_color || '#4f46e5';
   const fontFamily = appearance.font_family || 'Inter';
   const borderRadius = appearance.border_radius || '12px';
@@ -302,6 +350,51 @@ function PublicFormPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {faqs.length > 0 && (
+                <div
+                  id="faq"
+                  style={{ background: '#ffffff', borderRadius: borderRadius, padding: 24, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
+                >
+                  <h3 style={{ margin: '0 0 16px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>Frequently Asked Questions</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {faqs.map((faq, fIdx) => (
+                      <div key={fIdx} style={{ borderBottom: fIdx < faqs.length - 1 ? '1px solid #f1f5f9' : 'none', paddingBottom: fIdx < faqs.length - 1 ? 14 : 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>Q: {faq.question}</div>
+                        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 }}>{faq.answer}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Boolean(webinarContactEmail) && (
+                <div
+                  id="inquiry"
+                  style={{ background: '#ffffff', borderRadius: borderRadius, padding: 24, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <HelpCircle size={20} color={primaryColor} />
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>Still have a question?</h3>
+                  </div>
+                  <p style={{ margin: '0 0 12px', color: '#64748b', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                    Can't find the answer in our FAQs? Contact us and our team will be happy to help.
+                  </p>
+                  <div>
+                    <a
+                      href={`mailto:${webinarContactEmail}`}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                        color: primaryColor, fontWeight: 700, fontSize: '0.92rem',
+                        textDecoration: 'underline', transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <Mail size={16} />
+                      {webinarContactEmail}
+                    </a>
+                  </div>
                 </div>
               )}
             </div>
@@ -542,7 +635,7 @@ function PublicFormPage() {
                   </div>
                 )}
 
-                {isWebinarForm && (
+                {(isWebinarForm || Boolean(webinarContactEmail)) && (
                   <div
                     id="inquiry"
                     style={{ background: '#ffffff', borderRadius: borderRadius, padding: 28, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
