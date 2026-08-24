@@ -156,6 +156,23 @@ function FormSubmissionsPage() {
     document.body.removeChild(link);
   };
 
+  const openEmailModal = (audience = 'unsent') => {
+    setShowEmailModal(true);
+    setEmailResult(null);
+    setTargetAudience(audience);
+    setEmailAttendanceFilter('ALL');
+    if (audience === 'unsent') {
+      setSelectedSubmissions(new Set());
+    }
+    const contactEmail = form?.header_content?.webinar_contact_email || form?.data?.header_content?.webinar_contact_email || 'mounika@csnow.io';
+    if (!emailSubject) {
+      setEmailSubject(`Important Update regarding ${form?.name || 'Webinar'}`);
+    }
+    if (!emailBody) {
+      setEmailBody(`Hi {{FirstName}},\n\nThank you for registering for ${form?.name || 'our webinar'}.\n\nIf you have any further questions, please contact us at ${contactEmail}.\n\nBest regards,\nEvent Team`);
+    }
+  };
+
   const handleSendEmail = async () => {
     if (!emailSubject.trim()) {
       alert('Please enter an email subject.');
@@ -299,7 +316,7 @@ function FormSubmissionsPage() {
 
           <button
             type="button"
-            onClick={() => { setShowEmailModal(true); setEmailResult(null); setTargetAudience('unsent'); setEmailAttendanceFilter('ALL'); setSelectedSubmissions(new Set()); }}
+            onClick={() => openEmailModal('unsent')}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px',
               borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
@@ -427,12 +444,7 @@ function FormSubmissionsPage() {
             {/* Email Selected Button — always visible */}
             <button
               type="button"
-              onClick={() => {
-                setShowEmailModal(true);
-                setEmailResult(null);
-                setTargetAudience('selected');
-                setEmailAttendanceFilter('ALL');
-              }}
+              onClick={() => openEmailModal('selected')}
               style={{
                 padding: '5px 12px', borderRadius: 6, border: 'none',
                 background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
@@ -791,7 +803,7 @@ function FormSubmissionsPage() {
                 style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none' }}
               />
               <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 4 }}>
-                Variables supported: <code>{"{{FirstName}}"}</code>, <code>{"{{FormName}}"}</code>
+                Variables supported: <code>{"{{FirstName}}"}</code>, <code>{"{{LastName}}"}</code>, <code>{"{{FormName}}"}</code>, <code>{"{{ContactEmail}}"}</code>
               </div>
             </div>
 

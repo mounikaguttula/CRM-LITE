@@ -105,11 +105,35 @@ const infoRow = (rowIconSvg, label, value, isLink = false) => `
     </td>
   </tr>`;
 
+/** Clean compact "Need help?" UI component matching modern email design */
+const needHelpSection = (customContactEmail = null) => {
+  const rawEmail = customContactEmail || process.env.SUPPORT_EMAIL || 'mounika@csnow.io';
+  const cleanEmail = rawEmail.includes('<') ? rawEmail.match(/<(.*)>/)[1].trim() : rawEmail.trim();
+
+  return `
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 12px;border-top:1px solid #f1f5f9;padding-top:16px;border-collapse:collapse;">
+    <tr>
+      <td width="36" valign="middle" style="padding-right:10px;">
+        <table cellpadding="0" cellspacing="0" style="width:32px;height:32px;border-radius:50%;background:#eef2ff;border-collapse:collapse;" bgcolor="#eef2ff">
+          <tr>
+            <td align="center" valign="middle" style="height:32px;text-align:center;font-size:15px;color:#6366f1;line-height:1;font-family:Arial,sans-serif;">
+              ✉
+            </td>
+          </tr>
+        </table>
+      </td>
+      <td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#475569;line-height:1.5;">
+        Have queries? Contact us: <a href="mailto:${cleanEmail}" style="color:#4f46e5;font-weight:700;text-decoration:none;">${cleanEmail}</a>
+      </td>
+    </tr>
+  </table>`;
+};
+
 /** Email footer */
 const emailFooter = () => `
-  <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f1f5f9;margin-top:24px;border-collapse:collapse;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f1f5f9;margin-top:16px;border-collapse:collapse;">
     <tr>
-      <td align="center" style="padding:16px 0 10px;">
+      <td align="center" style="padding:14px 0 10px;">
         <span style="font-size:12.5px;color:#94a3b8;font-family:Arial,Helvetica,sans-serif;">
           <b style="color:#6366f1;font-family:Arial,Helvetica,sans-serif;">CRM Lite</b>
           &nbsp;&bull;&nbsp; Powered by TechMantra Now
@@ -119,7 +143,11 @@ const emailFooter = () => `
   </table>`;
 
 /** Wraps body HTML in white card on light background */
-const wrapEmail = (bodyHtml, waveSvg = 'wave-purple.svg') => `
+const wrapEmail = (bodyHtml, waveSvg = 'wave-purple.svg', customContactEmail = null) => {
+  const hasNeedHelp = bodyHtml.includes('Have queries?') || bodyHtml.includes('Need help?') || bodyHtml.includes('Need help') || bodyHtml.includes('mounika@csnow.io');
+  const helpHtml = hasNeedHelp ? '' : needHelpSection(customContactEmail);
+
+  return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -136,6 +164,7 @@ const wrapEmail = (bodyHtml, waveSvg = 'wave-purple.svg') => `
             <td style="padding:0 36px 24px;border-radius:20px;">
               ${emailHeader(waveSvg)}
               ${bodyHtml}
+              ${helpHtml}
               ${emailFooter()}
             </td>
           </tr>
@@ -145,15 +174,16 @@ const wrapEmail = (bodyHtml, waveSvg = 'wave-purple.svg') => `
   </table>
 </body>
 </html>`;
+};
 
 // ─── SMTP / SendGrid / Resend transporter ────────────────────────────────────
 
 const getTransporter = () => {
-  const host    = process.env.SMTP_HOST;
-  const port    = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user    = process.env.SMTP_USER;
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const user = process.env.SMTP_USER;
   const rawPass = process.env.SMTP_PASS;
-  const pass    = rawPass ? rawPass.replace(/\s+/g, '') : '';
+  const pass = rawPass ? rawPass.replace(/\s+/g, '') : '';
 
   if (!host || !user || !pass) {
     return {
@@ -284,12 +314,12 @@ const emailService = {
   // ─── 2. NEW ACCESS REQUEST → Admin Action Email ──────────────────────────
 
   sendAdminNewRequestNotification: async (adminEmail, requesterName, requesterEmail, orgName, actionToken) => {
-    const baseUrl    = (process.env.BACKEND_URL || 'http://localhost:5000').replace(/\/$/, '');
-    const clientUrl  = (process.env.CLIENT_URL  || 'http://localhost:3000').replace(/\/$/, '');
+    const baseUrl = (process.env.BACKEND_URL || 'http://localhost:5000').replace(/\/$/, '');
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
     const approveUrl = `${baseUrl}/auth/access-requests/action?token=${actionToken}&action=approve`;
-    const rejectUrl  = `${baseUrl}/auth/access-requests/action?token=${actionToken}&action=reject`;
+    const rejectUrl = `${baseUrl}/auth/access-requests/action?token=${actionToken}&action=reject`;
 
-    const now     = new Date();
+    const now = new Date();
     const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
@@ -313,10 +343,10 @@ const emailService = {
       </table>
 
       <table cellpadding="0" cellspacing="0" width="100%" style="border:1px solid #e8e7f5;border-radius:12px;overflow:hidden;margin-bottom:20px;border-collapse:collapse;">
-        ${infoRow('row-user.svg',     'Full Name',     requesterName)}
-        ${infoRow('row-mail.svg',     'Email Address', `<a href="mailto:${requesterEmail}" style="color:#6366f1;text-decoration:none;font-family:Arial,Helvetica,sans-serif;">${requesterEmail}</a>`, true)}
-        ${infoRow('row-monitor.svg',  'Organization',  orgName)}
-        ${infoRow('row-calendar.svg', 'Requested On',  `${dateStr} &nbsp;&bull;&nbsp; ${timeStr}`)}
+        ${infoRow('row-user.svg', 'Full Name', requesterName)}
+        ${infoRow('row-mail.svg', 'Email Address', `<a href="mailto:${requesterEmail}" style="color:#6366f1;text-decoration:none;font-family:Arial,Helvetica,sans-serif;">${requesterEmail}</a>`, true)}
+        ${infoRow('row-monitor.svg', 'Organization', orgName)}
+        ${infoRow('row-calendar.svg', 'Requested On', `${dateStr} &nbsp;&bull;&nbsp; ${timeStr}`)}
       </table>
 
       <p style="font-size:13.5px;color:#64748b;margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;">Review the request and choose an action.</p>
@@ -358,7 +388,7 @@ const emailService = {
 
   sendAccessRequestApprovedEmail: async (toEmail, firstName, orgName) => {
     const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
-    const loginUrl  = `${clientUrl}/login`;
+    const loginUrl = `${clientUrl}/login`;
 
     console.log('\n==================================================');
     console.log(`📧 [APPROVAL EMAIL] Sent to: ${toEmail}`);
@@ -386,7 +416,7 @@ const emailService = {
   // ─── 4. ACCESS DECLINED → Applicant Email ───────────────────────────────
 
   sendAccessRequestRejectedEmail: async (toEmail, firstName, orgName, reviewReason) => {
-    const clientUrl  = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
     const contactUrl = `${clientUrl}/contact`;
 
     const body = `
@@ -412,7 +442,7 @@ const emailService = {
 
   sendPasswordResetEmail: async (toEmail, firstName, orgName, token) => {
     const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
-    const resetUrl  = `${clientUrl}/login?resetToken=${token}`;
+    const resetUrl = `${clientUrl}/login?resetToken=${token}`;
 
     console.log('\n==================================================');
     console.log(`📧 [PASSWORD RESET EMAIL] Sent to: ${toEmail}`);
@@ -421,15 +451,17 @@ const emailService = {
 
     const body = `
       ${badgeRow('badge-lock.svg')}
-      <h2 style="text-align:center;margin:12px 0 6px;font-size:24px;color:#1e1b4b;font-weight:800;font-family:Arial,Helvetica,sans-serif;letter-spacing:-0.4px;">Password Reset</h2>
-      <p style="text-align:center;margin:0 0 22px;font-size:14px;color:#64748b;font-family:Arial,Helvetica,sans-serif;">We received a request to reset your password.</p>
+      <h2 style="text-align:center;margin:12px 0 6px;font-size:24px;color:#1e1b4b;font-weight:800;font-family:Arial,Helvetica,sans-serif;letter-spacing:-0.4px;">Reset Your Password</h2>
+      <div style="width:36px;height:3px;background:#6366f1;border-radius:2px;margin:8px auto 20px;"></div>
       <p style="font-size:15px;color:#1e293b;margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;">Hi <b style="color:#6366f1;font-family:Arial,Helvetica,sans-serif;">${firstName || 'User'}</b>,</p>
       <p style="font-size:14.5px;color:#475569;line-height:1.65;margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;">
-        Click the button below to set a new password for your CRM account.<br/>
-        This link will expire in <b style="color:#6366f1;font-family:Arial,Helvetica,sans-serif;">15 minutes</b>.
+        We received a request to reset your password.<br/>
+        Click the button below to set a new password for your CRM account.
       </p>
       ${primaryBtn('Reset Password', resetUrl, '#4f46e5')}
-      ${noticeBox('icon-shield.svg', "If you didn't request this, you can safely ignore this email. Your password won't change.", '#f0f4ff', '#334155')}`;
+      <p style="text-align:center;font-size:13px;color:#64748b;margin:16px 0 20px;font-family:Arial,Helvetica,sans-serif;">
+        This link will expire in <b style="color:#6366f1;">15 minutes</b>.
+      </p>`;
 
     return emailService.sendEmail({
       to: toEmail,

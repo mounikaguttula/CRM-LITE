@@ -534,6 +534,46 @@ const formService = {
     const lastName = extractedTargets.last_name || String(submittedFields[mapping.last_name] || getValueForKeys(['last_name', 'lname'])).trim();
     const email = extractedTargets.email || String(submittedFields[mapping.email] || getValueForKeys(['email', 'work_email', 'email_address'])).trim();
 
+    // Guard: Validate Email Format, Typos, and Disposable Domains
+    if (email) {
+      const cleanEmail = email.trim().toLowerCase();
+      const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!EMAIL_REGEX.test(cleanEmail)) {
+        throw { statusCode: 400, message: 'Please enter a valid email address (e.g. name@company.com).' };
+      }
+      const parts = cleanEmail.split('@');
+      if (parts.length === 2) {
+        const [username, domain] = parts;
+        const TYPO_MAP = {
+          'gmil.com': 'gmail.com', 'gamil.com': 'gmail.com', 'gmai.com': 'gmail.com',
+          'gmial.com': 'gmail.com', 'gmaill.com': 'gmail.com', 'gmeil.com': 'gmail.com',
+          'gmail.c': 'gmail.com', 'gmail.cm': 'gmail.com', 'gmail.co': 'gmail.com', 'gmail.comm': 'gmail.com',
+          'yaho.com': 'yahoo.com', 'yahooo.com': 'yahoo.com', 'yaho.co': 'yahoo.com',
+          'hotmial.com': 'hotmail.com', 'hotmai.com': 'hotmail.com',
+          'outlok.com': 'outlook.com', 'outloo.com': 'outlook.com', 'outloook.com': 'outlook.com',
+          'redifmail.com': 'rediffmail.com', 'redif.com': 'rediffmail.com'
+        };
+        if (TYPO_MAP[domain]) {
+          throw { statusCode: 400, message: `Invalid email domain. Did you mean @${TYPO_MAP[domain]}?` };
+        }
+        const DISPOSABLE_DOMAINS = new Set([
+          'yopmail.com', 'mailinator.com', 'tempmail.com', 'dispostable.com',
+          'guerrillamail.com', '10minutemail.com', 'trashmail.com', 'sharklasers.com',
+          'getnada.com', 'binkmail.com', 'safetymail.info', 'maildrop.cc',
+          'temp-mail.org', 'fakeinbox.com', 'throwawaymail.com', 'generator.email',
+          'example.com', 'test.com', 'fake.com', 'dummy.com', 'invalid.com',
+          'sample.com', 'asdf.com', 'qwerty.com'
+        ]);
+        if (DISPOSABLE_DOMAINS.has(domain)) {
+          throw { statusCode: 400, message: 'Disposable or temporary email addresses are not allowed.' };
+        }
+        const DUMMY_USERNAMES = new Set(['test', 'asdf', 'qwer', '123', '1234', 'dummy', 'fake', 'noemail', 'abc', 'xyz', 'none', 'testing']);
+        if (DUMMY_USERNAMES.has(username)) {
+          throw { statusCode: 400, message: 'Please enter a genuine, active email address.' };
+        }
+      }
+    }
+
     // Guard: Prevent Duplicate Submissions for the Same Form by Email
     if (email) {
       const emailLower = email.toLowerCase().trim();
@@ -877,7 +917,7 @@ const formService = {
       throw new Error("Invalid targetAudience parameter. Must be 'unsent' or 'all'.");
     }
 
-    const VALID_ATTENDANCE_VALUES = ['Registered', 'Attended', 'No Show', 'Unknown'];
+    const VALID_ATTENDANCE_VALUES = ['Registered', 'Attended', 'Not Attended'];
     if (attendanceFilter && !VALID_ATTENDANCE_VALUES.includes(attendanceFilter)) {
       throw new Error(`Invalid attendanceFilter. Must be one of: ${VALID_ATTENDANCE_VALUES.join(', ')}`);
     }
@@ -956,14 +996,17 @@ const formService = {
     let sentCount = 0;
     let failedCount = 0;
 
+    const contactEmail = form.header_content?.webinar_contact_email || form.data?.header_content?.webinar_contact_email || form.webinar_contact_email || form.data?.webinar_contact_email || 'mounika@csnow.io';
+
     // Send emails individually to avoid exposing CC
     for (const recipient of validRecipients) {
-      // Personalize placeholders {{FirstName}}, {{LastName}}, {{FormName}}
+      // Personalize placeholders {{FirstName}}, {{LastName}}, {{FullName}}, {{FormName}}, {{ContactEmail}}
       let personalizedBody = body
         .replace(/\{\{\s*FirstName\s*\}\}/gi, recipient.firstName)
         .replace(/\{\{\s*LastName\s*\}\}/gi, recipient.lastName)
         .replace(/\{\{\s*FullName\s*\}\}/gi, recipient.fullName)
-        .replace(/\{\{\s*FormName\s*\}\}/gi, form.name);
+        .replace(/\{\{\s*FormName\s*\}\}/gi, form.name)
+        .replace(/\{\{\s*ContactEmail\s*\}\}/gi, contactEmail);
 
       const emailHtml = `
         <!DOCTYPE html>
@@ -976,12 +1019,32 @@ const formService = {
                 <table width="580" style="background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0;box-shadow:0 4px 12px rgba(0,0,0,0.05);">
                   <tr>
                     <td>
-                      <div style="font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">
+                      <div style="font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
                         ${form.name}
                       </div>
-                      <h2 style="margin:0 0 20px;color:#0f172a;font-size:22px;">${subject}</h2>
+                      <h2 style="margin:0 0 8px;color:#0f172a;font-size:22px;">${subject}</h2>
+                      <div style="width:36px;height:3px;background:#6366f1;border-radius:2px;margin-bottom:20px;"></div>
                       <div style="color:#334155;font-size:15px;line-height:1.7;white-space:pre-wrap;">${personalizedBody}</div>
-                      <hr style="border:none;border-top:1px solid #f1f5f9;margin:28px 0 20px;"/>
+                      
+                      <!-- Clean Compact Need help? Section -->
+                      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 12px;border-top:1px solid #f1f5f9;padding-top:16px;border-collapse:collapse;">
+                        <tr>
+                          <td width="36" valign="middle" style="padding-right:10px;">
+                            <table cellpadding="0" cellspacing="0" style="width:32px;height:32px;border-radius:50%;background:#eef2ff;border-collapse:collapse;" bgcolor="#eef2ff">
+                              <tr>
+                                <td align="center" valign="middle" style="height:32px;text-align:center;font-size:15px;color:#6366f1;line-height:1;font-family:Arial,sans-serif;">
+                                  ✉
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                          <td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#475569;">
+                            Have queries? Contact us: <a href="mailto:${contactEmail}" style="color:#4f46e5;font-weight:700;text-decoration:none;">${contactEmail}</a>
+                          </td>
+                        </tr>
+                      </table>
+
+                      <hr style="border:none;border-top:1px solid #f1f5f9;margin:20px 0 16px;"/>
                       <p style="margin:0;color:#94a3b8;font-size:12px;">Sent via CRM Lite Forms Engine</p>
                     </td>
                   </tr>
@@ -998,6 +1061,7 @@ const formService = {
         subject: subject.trim(),
         html: emailHtml,
         text: personalizedBody,
+        replyTo: contactEmail,
       });
 
       if (dispatchResult) {
