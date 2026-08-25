@@ -3,8 +3,8 @@ const cors = require('cors');
 require('dotenv').config();
 
 
-// Redis Initialization (Commented out for testing)
-// require('./config/redis');
+// Valkey (Redis-compatible) Cache Initialization
+const { connectValkey, isValkeyReady } = require('./config/valkey');
 
 
 const errorHandler = require('./middleware/errorHandler');
@@ -61,6 +61,10 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    valkey: {
+      connected: isValkeyReady(),
+      mode: isValkeyReady() ? 'cache-active' : 'supabase-only',
+    },
   });
 });
 
@@ -86,11 +90,17 @@ app.use('/', objectRoutes);
 app.use(errorHandler);
 
 
-// Start Express Server
-app.listen(PORT, () => {
-  console.log(`🚀 CRM Lite Metadata Platform Engine running on http://localhost:${PORT}`);
-  console.log(`📡 Health Check: http://localhost:${PORT}/health`);
-});
+// Start Express Server with Valkey initialization
+(async () => {
+  // Connect to Valkey cache (non-blocking — server starts even if Valkey is unavailable)
+  await connectValkey();
+
+  app.listen(PORT, () => {
+    console.log(`🚀 CRM Lite Metadata Platform Engine running on http://localhost:${PORT}`);
+    console.log(`📡 Health Check: http://localhost:${PORT}/health`);
+    console.log(`💾 Valkey Cache: ${isValkeyReady() ? '🟢 Active' : '🟡 Inactive (Supabase-only mode)'}`);
+  });
+})();
 
 
 

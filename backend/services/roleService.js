@@ -1,10 +1,11 @@
 const supabase = require('../config/supabase');
-const redisClient = require('../config/redis');
+const { getClient, isValkeyReady } = require('../config/valkey');
 
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
 const invalidateMetadataCache = async (organizationId) => {
-  if (!redisClient || !redisClient.isOpen) return;
+  if (!isValkeyReady()) return;
+  const redisClient = getClient();
   try {
     // Clear both metadata and permissions cache keys so record APIs and
     // workspace context both pick up fresh data after a permission save.

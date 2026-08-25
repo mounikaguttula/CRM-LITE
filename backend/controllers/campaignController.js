@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const objectService = require('../services/objectService');
 const emailService = require('../services/emailService');
 const supabase = require('../config/supabase');
+const cacheService = require('../services/cacheService');
 
 // ─── TEMPLATE 1: Welcome Email ───────────────────────────────────────────────
 const welcomeTemplate = (name, body, formLink) => `
@@ -243,6 +244,12 @@ const campaignController = {
     try {
       const organizationId = req.user?.organization_id;
 
+      // ── Cache-aside: Check Valkey first ──
+      const cached = await cacheService.getCampaignListCache(organizationId);
+      if (cached) {
+        return res.status(200).json(cached);
+      }
+
       // 1. Resolve object_type_id for 'campaign'
       const { data: defs } = await supabase
         .from('object_type_definitions')
@@ -275,6 +282,9 @@ const campaignController = {
         opened_count: r.opened_count || r.data?.opened_count || 0,
         tracking: r.tracking || r.data?.tracking || [],
       }));
+
+      // ── Store in Valkey cache ──
+      await cacheService.setCampaignListCache(organizationId, records);
 
       return res.status(200).json(records);
     } catch (err) {
@@ -430,6 +440,9 @@ const campaignController = {
 
       const record = objectService.normalizeRecord(row);
 
+      // ── Invalidate campaign list cache ──
+      await cacheService.invalidateCampaignList(organizationId);
+
       return res.status(201).json({
         success: true,
         message: `Campaign "${name}" sent to ${recipientList.length} recipient(s).`,
@@ -459,6 +472,9 @@ const campaignController = {
         return res.status(500).json({ message: `Failed to delete campaign: ${error.message}` });
       }
 
+      // ── Invalidate campaign caches ──
+      await cacheService.invalidateCampaign(organizationId, id);
+
       return res.status(200).json({ success: true, message: 'Campaign deleted successfully.' });
     } catch (err) {
       next(err);
@@ -474,6 +490,12 @@ const campaignController = {
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
 
+      // ── Cache-aside: Check Valkey first ──
+      const cachedTracking = await cacheService.getCampaignTrackingCache(organizationId, id);
+      if (cachedTracking) {
+        return res.status(200).json(cachedTracking);
+      }
+
       const { data: row } = await supabase
         .from('universal_table')
         .select('*')
@@ -487,13 +509,17 @@ const campaignController = {
 
       const campaign = objectService.normalizeRecord(row);
 
-      return res.status(200).json({
+      // ── Store tracking in cache ──
+      const trackingResult = {
         campaign_name: campaign.name,
         status: campaign.status || row.status || 'Sent',
         total_sent: campaign.total_sent || row.total_sent || campaign.target_emails?.length || 0,
         opened_count: campaign.opened_count || row.opened_count || 0,
         tracking: campaign.tracking || row.tracking || row.data?.tracking || [],
-      });
+      };
+      await cacheService.setCampaignTrackingCache(organizationId, id, trackingResult);
+
+      return res.status(200).json(trackingResult);
     } catch (err) {
       next(err);
     }
@@ -567,6 +593,9 @@ const campaignController = {
               updated_at: new Date().toISOString(),
             })
             .eq('id', campaign.id);
+
+          // ── Invalidate campaign caches after tracking update ──
+          await cacheService.invalidateCampaign(campaign.organization_id || '', campaign.id);
 
           console.log(`[Tracking Pixel] Updated campaign '${campaign.name}' status to '${newStatus}', opened_count=${openedCount}`);
         }

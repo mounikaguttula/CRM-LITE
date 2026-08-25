@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const redisClient = require('../config/redis');
+const { getClient, isValkeyReady } = require('../config/valkey');
 
 
 // UUID format validator helper to prevent PostgreSQL syntax errors when non-UUID strings are passed
@@ -22,7 +22,8 @@ const PLATFORM_FIELDS = [
  * Also clears permissions cache so record APIs pick up fresh role data.
  */
 const invalidateMetadataCache = async (organizationId) => {
-  if (!redisClient || !redisClient.isOpen) return;
+  if (!isValkeyReady()) return;
+  const redisClient = getClient();
 
 
   try {
@@ -531,8 +532,9 @@ const metadataService = {
     let cachedData = null;
 
 
-    if (redisClient && redisClient.isOpen && isUuid(orgId) && !forceRefresh) {
+    if (isValkeyReady() && isUuid(orgId) && !forceRefresh) {
       try {
+        const redisClient = getClient();
         cachedData = await redisClient.get(cacheKey);
       } catch (err) {
         console.error('❌ Redis GET Error:', err.message);
@@ -868,10 +870,11 @@ const metadataService = {
 
     // Store in Redis with TTL of 24 hours (86,400s)
     let redisSetStart = Date.now();
-    if (redisClient && redisClient.isOpen) {
+    if (isValkeyReady()) {
       try {
+        const redisClient = getClient();
         const ttl = 300;
-        await redisClient.setEx(cacheKey, ttl, JSON.stringify(finalMetadata));
+        await redisClient.setex(cacheKey, ttl, JSON.stringify(finalMetadata));
       } catch (err) {
         console.error('❌ Redis SET Error:', err.message);
       }

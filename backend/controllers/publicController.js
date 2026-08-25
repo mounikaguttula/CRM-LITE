@@ -1,5 +1,6 @@
 const objectService = require('../services/objectService');
 const supabase = require('../config/supabase');
+const cacheService = require('../services/cacheService');
 
 /**
  * Public Controller (No authentication required)
@@ -111,6 +112,9 @@ const publicController = {
               .eq('id', campaign.id);
 
             console.log(`[Public Form] Successfully updated campaign '${campaign.name}' tracking to 'Form Submitted' for ${targetEmail}`);
+
+            // ── Invalidate campaign caches after tracking update ──
+            await cacheService.invalidateCampaign(org_id, campaign.id);
           }
         } catch (e) {
           console.warn('[Public Form] Note updating campaign tracking status:', e.message);

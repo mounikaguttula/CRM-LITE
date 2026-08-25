@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const metadataService = require('./metadataService');
 const validationRuleService = require('./validationRuleService');
+const cacheService = require('./cacheService');
 
 // Helper to validate UUID format to prevent PostgreSQL syntax errors
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
@@ -8,6 +9,7 @@ const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-
 /**
  * Generic Object Service
  * Executes dynamic CRUD operations against Supabase universal_table.
+ * Integrates Valkey cache-aside pattern for reads, with invalidation on writes.
  * ZERO object-specific code, ZERO hardcoded switch statements.
  */
 const objectService = {
@@ -32,6 +34,7 @@ const objectService = {
 
   /**
    * List records from universal_table for any objectType.
+   * Cache-aside: check Valkey first → on miss, query Supabase → store in cache.
    */
   listRecords: async (objectKey, organizationId) => {
     if (!objectKey || typeof objectKey !== 'string' || objectKey.includes('📁') || objectKey.trim() === '') {
@@ -40,19 +43,30 @@ const objectService = {
 
     const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
 
+    // Resolve object_type_id for cache key
+    let objectTypeId = null;
+    if (objDef && objDef.id) {
+      objectTypeId = objDef.id;
+    } else if (isUuid(objectKey)) {
+      objectTypeId = objectKey;
+    } else {
+      return [];
+    }
+
+    // ── Cache-aside: Check Valkey first ──
+    const cached = await cacheService.getListCache(organizationId, objectTypeId);
+    if (cached) {
+      return cached;
+    }
+
+    // ── Cache miss: Query Supabase ──
     let query = supabase
       .from('universal_table')
       .select('*')
       .eq('is_deleted', false)
       .order('created_at', { ascending: false });
 
-    if (objDef && objDef.id) {
-      query = query.eq('object_type_id', objDef.id);
-    } else if (isUuid(objectKey)) {
-      query = query.eq('object_type_id', objectKey);
-    } else {
-      return [];
-    }
+    query = query.eq('object_type_id', objectTypeId);
 
     if (organizationId) {
       query = query.eq('organization_id', organizationId);
@@ -64,13 +78,26 @@ const objectService = {
       throw { statusCode: 500, message: `Failed to fetch records for '${objectKey}': ${error.message}` };
     }
 
-    return (rows || []).map(objectService.normalizeRecord);
+    const records = (rows || []).map(objectService.normalizeRecord);
+
+    // ── Store in cache ──
+    await cacheService.setListCache(organizationId, objectTypeId, records);
+
+    return records;
   },
 
   /**
    * Fetch single record by ID from universal_table.
+   * Cache-aside: check Valkey first → on miss, query Supabase → store in cache.
    */
   getRecordById: async (objectKey, id, organizationId) => {
+    // ── Cache-aside: Check Valkey first ──
+    const cached = await cacheService.getRecordCache(organizationId, id);
+    if (cached) {
+      return cached;
+    }
+
+    // ── Cache miss: Query Supabase ──
     let query = supabase
       .from('universal_table')
       .select('*')
@@ -87,11 +114,17 @@ const objectService = {
       throw { statusCode: 404, message: `Record '${id}' not found in '${objectKey}'.` };
     }
 
-    return objectService.normalizeRecord(row);
+    const record = objectService.normalizeRecord(row);
+
+    // ── Store in cache ──
+    await cacheService.setRecordCache(organizationId, id, record);
+
+    return record;
   },
 
   /**
    * Create record for any objectType in universal_table.
+   * After insert → invalidate list cache for that org+objectType.
    */
   createRecord: async (objectKey, payload, organizationId, userId) => {
     const { definition: objDef, fields } = await metadataService.getObjectDefinition(objectKey, organizationId);
@@ -146,11 +179,15 @@ const objectService = {
       throw { statusCode: 400, message: `Failed to create ${objectKey} record: ${error.message}` };
     }
 
+    // ── Invalidate list cache so next list fetch gets fresh data ──
+    await cacheService.invalidateList(organizationId, objDef.id);
+
     return objectService.normalizeRecord(row);
   },
 
   /**
    * Update record in universal_table.
+   * After update → invalidate both single record and list caches.
    */
   updateRecord: async (objectKey, id, payload, organizationId, userId) => {
     const existing = await objectService.getRecordById(objectKey, id, organizationId);
@@ -197,11 +234,17 @@ const objectService = {
       throw { statusCode: 400, message: `Failed to update ${objectKey} record: ${error.message}` };
     }
 
+    // ── Invalidate both record and list caches ──
+    const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
+    const objectTypeId = objDef?.id || null;
+    await cacheService.invalidateAll(organizationId, objectTypeId, id);
+
     return objectService.normalizeRecord(row);
   },
 
   /**
    * Soft delete record in universal_table.
+   * After delete → invalidate both record and list caches.
    */
   deleteRecord: async (objectKey, id, organizationId, userId) => {
     const { error } = await supabase
@@ -218,9 +261,13 @@ const objectService = {
       throw { statusCode: 400, message: `Failed to delete ${objectKey} record: ${error.message}` };
     }
 
+    // ── Invalidate both record and list caches ──
+    const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
+    const objectTypeId = objDef?.id || null;
+    await cacheService.invalidateAll(organizationId, objectTypeId, id);
+
     return { success: true, message: `Record '${id}' deleted successfully.` };
   },
 };
 
 module.exports = objectService;
-
