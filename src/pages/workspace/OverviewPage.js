@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { useAuth } from '../../context/AuthContext';
 import { apiGet, apiPost, apiDelete } from '../../api/client';
+import AccessDenied from '../../components/AccessDenied';
 import {
   Users,
   Columns3,
@@ -37,6 +39,8 @@ import {
   ArrowRight,
   CheckSquare,
   Trash2,
+  PlusCircle,
+  Clock,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -264,23 +268,35 @@ function useDCount(target, dur = 1400) {
 }
 
 /* ─── Dashboard revenue chart with custom colours ─── */
-const DRevenueChart = () => (
-  <div style={{ height: 180 }}>
+const DRevenueChart = ({ data = [] }) => (
+  <div style={{ height: 210 }}>
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={revenueData} margin={{ top: 6, right: 4, left: -24, bottom: 0 }}>
+      <AreaChart data={data.length > 0 ? data : revenueData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
         <defs>
           <linearGradient id="dRevFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={D.jade} stopOpacity={0.35} />
             <stop offset="100%" stopColor={D.jade} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <XAxis dataKey="m" tick={{ fill: '#9ca3af', fontSize: 11, fontFamily: 'Inter' }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: '#9ca3af', fontSize: 11, fontFamily: 'Inter' }} axisLine={false} tickLine={false} width={28} tickFormatter={(v) => `${v}k`} />
+        <XAxis
+          dataKey="m"
+          tick={{ fill: '#9ca3af', fontSize: 11, fontFamily: 'Inter' }}
+          axisLine={false}
+          tickLine={false}
+          interval={data.length > 15 ? 4 : 'preserveStartEnd'}
+        />
+        <YAxis
+          tick={{ fill: '#9ca3af', fontSize: 11, fontFamily: 'Inter' }}
+          axisLine={false}
+          tickLine={false}
+          width={40}
+          tickFormatter={(v) => (v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`)}
+        />
         <Tooltip
           contentStyle={{ background: '#fff', border: `1px solid ${D.jade}25`, borderRadius: 10, fontSize: 12, boxShadow: `0 8px 24px -6px ${D.jade}30`, fontFamily: 'Inter' }}
           labelStyle={{ color: '#111827', fontWeight: 600 }}
           itemStyle={{ color: D.jade }}
-          formatter={(v) => [`$${v}k`, 'Revenue']}
+          formatter={(v) => [`$${Number(v).toLocaleString()}`, 'Revenue']}
         />
         <Area type="monotone" dataKey="v" stroke={D.jade} strokeWidth={2.5} fill="url(#dRevFill)" />
       </AreaChart>
@@ -319,15 +335,118 @@ const DGoalRing = ({ percent = 68, size = 130 }) => {
 };
 
 function DashboardContent() {
-  const { loading, company, currentUser } = useWorkspace();
+  const { loading, company, currentUser, objectTypes } = useWorkspace();
+  const { user } = useAuth();
   const [mounted, setMounted] = React.useState(false);
   const [barLoaded, setBarLoaded] = React.useState(false);
+  const [userDeals, setUserDeals] = React.useState([]);
+  const [userLeads, setUserLeads] = React.useState([]);
+  const [userContacts, setUserContacts] = React.useState([]);
+  const [userCompanies, setUserCompanies] = React.useState([]);
+
+  const currentUserId = currentUser?.id || currentUser?.user_id || user?.id || user?.user_id;
 
   React.useEffect(() => {
     const t1 = setTimeout(() => setMounted(true), 80);
     const t2 = setTimeout(() => setBarLoaded(true), 500);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    async function fetchUserMetrics() {
+      try {
+        const [dealsRes, leadsRes, contactsRes, companiesRes] = await Promise.all([
+          apiGet('/objects/deal?scope=user').catch(() => apiGet('/objects/deals?scope=user')).catch(() => []),
+          apiGet('/objects/lead?scope=user').catch(() => apiGet('/objects/leads?scope=user')).catch(() => []),
+          apiGet('/objects/contact?scope=user').catch(() => apiGet('/objects/contacts?scope=user')).catch(() => []),
+          apiGet('/objects/company?scope=user').catch(() => apiGet('/objects/companies?scope=user')).catch(() => []),
+        ]);
+
+        if (!isMounted) return;
+
+        const dealsData = Array.isArray(dealsRes) ? dealsRes : (dealsRes?.data || []);
+        const leadsData = Array.isArray(leadsRes) ? leadsRes : (leadsRes?.data || []);
+        const contactsData = Array.isArray(contactsRes) ? contactsRes : (contactsRes?.data || []);
+        const companiesData = Array.isArray(companiesRes) ? companiesRes : (companiesRes?.data || []);
+
+        setUserDeals(dealsData);
+        setUserLeads(leadsData);
+        setUserContacts(contactsData);
+        setUserCompanies(companiesData);
+      } catch (err) {
+        console.warn('Dashboard user metrics fetch error:', err.message);
+      }
+    }
+
+    if (currentUserId) {
+      fetchUserMetrics();
+    }
+    return () => { isMounted = false; };
+  }, [currentUserId]);
+
+  const formatRelativeTime = (ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (sec < 60) return 'Just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hrs = Math.floor(min / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return 'Yesterday';
+    if (days < 30) return `${days}d ago`;
+    const mos = Math.floor(days / 30);
+    if (mos < 12) return `${mos}mo ago`;
+    return `${Math.floor(mos / 12)}y ago`;
+  };
+
+  const derivedActivities = useMemo(() => {
+    const rawItems = [
+      ...userLeads.map((r) => ({ ...r, _objType: 'Lead' })),
+      ...userDeals.map((r) => ({ ...r, _objType: 'Deal' })),
+      ...userContacts.map((r) => ({ ...r, _objType: 'Contact' })),
+      ...userCompanies.map((r) => ({ ...r, _objType: 'Company' })),
+    ];
+
+    const list = [];
+
+    rawItems.forEach((r) => {
+      const objType = r._objType || 'Record';
+      let name = r.name || r.title || r.lead_name || r.contact_name || r.company_name || r.first_name || (r.data && (r.data.name || r.data.first_name)) || '';
+      if (!name || name.trim() === '') name = 'Untitled Record';
+      else name = String(name).trim();
+
+      const createdStr = r.created_at || (r.data && r.data.created_at);
+      const updatedStr = r.updated_at || (r.data && r.data.updated_at);
+
+      const createdMs = createdStr ? Date.parse(createdStr) : 0;
+      const updatedMs = updatedStr ? Date.parse(updatedStr) : 0;
+
+      if (!isNaN(updatedMs) && updatedMs > 0 && updatedMs - createdMs > 60000) {
+        list.push({
+          id: `${r.id || Math.random()}-updated`,
+          type: 'updated',
+          text: `${objType} updated — ${name}`,
+          timestamp: updatedStr,
+          timeMs: updatedMs,
+        });
+      } else if (!isNaN(createdMs) && createdMs > 0) {
+        list.push({
+          id: `${r.id || Math.random()}-created`,
+          type: 'created',
+          text: `New ${objType} created — ${name}`,
+          timestamp: createdStr,
+          timeMs: createdMs,
+        });
+      }
+    });
+
+    list.sort((a, b) => b.timeMs - a.timeMs);
+    return list.slice(0, 5);
+  }, [userLeads, userDeals, userContacts, userCompanies]);
 
   if (loading) {
     return (
@@ -339,31 +458,149 @@ function DashboardContent() {
   }
 
   const orgName = company?.name || company?.organization_name || company?.company_name || 'Your Organization';
-  const userName = currentUser?.name || 'User';
+  const userName = currentUser?.name || user?.name || 'User';
   const firstName = userName.split(' ')[0];
 
+  // 1. My Deals (COUNT of user's Deals using owner_id)
+  const totalMyDeals = userDeals.length;
+
+  // 2. My Open Deals (user deals where stage/status is not Closed Won/Won/Closed Lost/Lost)
+  const isDealOpen = (d) => {
+    const s = String(d.stage || d.status || '').trim().toLowerCase();
+    return s !== 'closed won' && s !== 'won' && s !== 'closed lost' && s !== 'lost' && s !== 'closedwon' && s !== 'closedlost';
+  };
+  const totalMyOpenDeals = userDeals.filter(isDealOpen).length;
+
+  // 3. My Active Leads (user leads where status is not Converted/Not Qualified)
+  const isLeadActive = (l) => {
+    const s = String(l.status || '').trim().toLowerCase();
+    return s !== 'converted' && s !== 'not qualified' && s !== 'unqualified';
+  };
+  const totalMyActiveLeads = userLeads.filter(isLeadActive).length;
+
   const kpiCards = [
-    { label: 'Total Revenue', raw: 487, prefix: '$', suffix: 'k', delta: '+18.4%', up: true, color: '#10b981', glow: '#10b981', icon: TrendingUp, gradient: 'linear-gradient(135deg, #10b981, #34d399)' },
-    { label: 'Open Deals', raw: 42, prefix: '', suffix: '', delta: '+6.1%', up: true, color: '#f59e0b', glow: '#f59e0b', icon: Columns3, gradient: 'linear-gradient(135deg, #f59e0b, #fbbf24)' },
-    { label: 'Active Leads', raw: 128, prefix: '', suffix: '', delta: '-2.3%', up: false, color: '#f43f5e', glow: '#f43f5e', icon: Users, gradient: 'linear-gradient(135deg, #f43f5e, #fb7185)' },
+    { label: 'My Deals', raw: totalMyDeals, prefix: '', suffix: '', delta: '+18.4%', up: true, color: '#10b981', glow: '#10b981', icon: Columns3, gradient: 'linear-gradient(135deg, #10b981, #34d399)' },
+    { label: 'My Open Deals', raw: totalMyOpenDeals, prefix: '', suffix: '', delta: '+6.1%', up: true, color: '#f59e0b', glow: '#f59e0b', icon: Columns3, gradient: 'linear-gradient(135deg, #f59e0b, #fbbf24)' },
+    { label: 'My Active Leads', raw: totalMyActiveLeads, prefix: '', suffix: '', delta: '-2.3%', up: false, color: '#f43f5e', glow: '#f43f5e', icon: Users, gradient: 'linear-gradient(135deg, #f43f5e, #fb7185)' },
     { label: 'Win Rate', raw: 34, prefix: '', suffix: '.8%', delta: '+3.7%', up: true, color: '#a855f7', glow: '#a855f7', icon: TrendingUp, gradient: 'linear-gradient(135deg, #a855f7, #c084fc)' },
   ];
 
-  const pipelineStages = [
-    { stage: 'Lead', total: 25000, count: 1, color: '#38bdf8', gradient: 'linear-gradient(90deg, #38bdf8cc, #38bdf8)' },
-    { stage: 'Qualified', total: 41200, count: 1, color: '#a855f7', gradient: 'linear-gradient(90deg, #a855f7cc, #a855f7)' },
-    { stage: 'Proposal', total: 49600, count: 2, color: '#f59e0b', gradient: 'linear-gradient(90deg, #f59e0bcc, #f59e0b)' },
-    { stage: 'Negotiation', total: 132000, count: 1, color: '#f43f5e', gradient: 'linear-gradient(90deg, #f43f5ecc, #f43f5e)' },
-    { stage: 'Won', total: 62000, count: 1, color: '#10b981', gradient: 'linear-gradient(90deg, #10b981cc, #10b981)' },
-  ];
-  const maxPipeline = Math.max(...pipelineStages.map(s => s.total));
+  // Generate 30-day daily aggregated revenue data for user's closed-won deals
+  const generate30DayChartData = () => {
+    const dateMap = new Map();
+    const now = new Date();
 
-  const activities = [
-    { initials: 'MR', color: '#10b981', text: 'Maya Rodriguez signed the annual renewal', time: '18 minutes ago' },
-    { initials: 'TW', color: '#f59e0b', text: 'Deal moved to Negotiation — Ledger & Vale', time: '2 hours ago' },
-    { initials: 'IC', color: '#f43f5e', text: 'Ines Callahan replied to your proposal email', time: '5 hours ago' },
-    { initials: 'SO', color: '#a855f7', text: 'New lead captured from website form', time: 'Yesterday' },
-  ];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateKey = `${y}-${m}-${day}`;
+      const monthLabel = d.toLocaleDateString('en-US', { month: 'short' });
+      const displayLabel = `${monthLabel} ${d.getDate()}`;
+      dateMap.set(dateKey, { m: displayLabel, v: 0 });
+    }
+
+    const closedWonDeals = userDeals.filter((d) => {
+      const stg = String(d.stage || d.status || '').trim().toLowerCase();
+      return stg === 'closed won' || stg === 'won' || stg === 'closedwon';
+    });
+
+    closedWonDeals.forEach((deal) => {
+      const dateVal = deal.updated_at || deal.created_at || deal.close_date || deal.expected_close_date;
+      if (dateVal) {
+        const d = new Date(dateVal);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const dateKey = `${y}-${m}-${day}`;
+          if (dateMap.has(dateKey)) {
+            const amt = parseFloat(String(deal.amount || deal.value || 0).replace(/[^0-9.]/g, '')) || 0;
+            dateMap.get(dateKey).v += amt;
+          }
+        }
+      }
+    });
+
+    return Array.from(dateMap.values());
+  };
+
+  const chartData = generate30DayChartData();
+
+  // Calculate dynamic user performance metrics from userDeals
+  const userClosedWonDeals = userDeals.filter((d) => {
+    const stg = String(d.stage || d.status || '').trim().toLowerCase();
+    return stg === 'closed won' || stg === 'won' || stg === 'closedwon';
+  });
+
+  const dealsWonCount = userClosedWonDeals.length;
+
+  const totalRevenueClosed = userClosedWonDeals.reduce((sum, d) => {
+    const amt = parseFloat(String(d.amount || d.value || 0).replace(/[^0-9.]/g, '')) || 0;
+    return sum + amt;
+  }, 0);
+
+  const avgDealSize = dealsWonCount > 0 ? (totalRevenueClosed / dealsWonCount) : 0;
+
+  // Generate dynamic pipeline stages calculated directly from userDeals using backend field definition picklist
+  const generatePipelineStages = () => {
+    const dealMeta = objectTypes?.deal || objectTypes?.deals;
+    const stageField = dealMeta?.fields?.find(f => (f.name || f.api_name || '').toLowerCase() === 'stage');
+    const backendPicklist = stageField?.picklist_values || stageField?.picklistValues || stageField?.options;
+
+    const defaultNames = Array.isArray(backendPicklist) && backendPicklist.length > 0
+      ? backendPicklist.map(String)
+      : ['Qualification', 'Discovery', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
+
+    const colors = ['#38bdf8', '#a855f7', '#f59e0b', '#f43f5e', '#10b981', '#64748b'];
+
+    const stageMap = new Map();
+    defaultNames.forEach((name, idx) => {
+      const col = colors[idx % colors.length];
+      stageMap.set(name.toLowerCase(), {
+        stage: name,
+        total: 0,
+        count: 0,
+        color: col,
+        gradient: `linear-gradient(90deg, ${col}cc, ${col})`,
+      });
+    });
+
+    userDeals.forEach((deal) => {
+      const rawStage = String(deal.stage || deal.status || '').trim();
+      if (!rawStage) return;
+
+      let key = rawStage.toLowerCase();
+      if (key === 'closed won' || key === 'closedwon' || key === 'won') key = 'closed won';
+      if (key === 'closed lost' || key === 'closedlost' || key === 'lost') key = 'closed lost';
+      if (key === 'qualification' || key === 'qualified') key = 'qualification';
+      if (key === 'discovery') key = 'discovery';
+
+      const amt = parseFloat(String(deal.amount || deal.value || 0).replace(/[^0-9.]/g, '')) || 0;
+
+      if (stageMap.has(key)) {
+        const item = stageMap.get(key);
+        item.count += 1;
+        item.total += amt;
+      } else {
+        stageMap.set(key, {
+          stage: rawStage,
+          total: amt,
+          count: 1,
+          color: '#6366f1',
+          gradient: 'linear-gradient(90deg, #6366f1cc, #6366f1)',
+        });
+      }
+    });
+
+    return Array.from(stageMap.values());
+  };
+
+  const pipelineStages = generatePipelineStages();
+  const maxPipeline = Math.max(...pipelineStages.map((s) => s.total), 0);
+
+
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 18, fontFamily: 'Inter, sans-serif' }}>
@@ -474,27 +711,62 @@ function DashboardContent() {
         ))}
       </div>
 
-      {/* REVENUE CHART + GOAL RING */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
+      {/* TWO-COLUMN ANALYTICS ROW: REVENUE TREND + MY PERFORMANCE */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 16 }}>
         <div className="db-card" style={{ padding: '22px 26px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>Revenue Trend</div>
-              <div style={{ fontSize: '0.72rem', color: '#8990ac', marginTop: 2 }}>Last 6 months · closed-won deals</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>My Revenue Trend</div>
+              <div style={{ fontSize: '0.72rem', color: '#8990ac', marginTop: 2 }}>Last 30 days · closed-won deals</div>
             </div>
             <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', padding: '4px 10px', borderRadius: 8 }}>+38% growth</span>
           </div>
-          <DRevenueChart />
+          <DRevenueChart data={chartData} />
         </div>
 
-        <div className="db-card" style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '100%', marginBottom: 8 }}>
-            <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>Quarterly Target</div>
-            <div style={{ fontSize: '0.72rem', color: '#8990ac', marginTop: 2 }}>$720k goal · Q3 2026</div>
+        <div className="db-card" style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>My Performance</div>
+              <Sparkles size={17} style={{ color: '#10b981' }} />
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#8990ac', marginBottom: 16 }}>Personal deal achievements</div>
           </div>
-          <DGoalRing percent={68} />
-          <div style={{ fontSize: '0.74rem', color: '#6b7280', marginTop: 6 }}>
-            <span style={{ color: '#0d1117', fontWeight: 800 }}>$489.6k</span> closed so far
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, justifyContent: 'center' }}>
+            <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(16,185,129,0.04)', border: '1px solid rgba(16,185,129,0.12)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deals Won</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0d1117', marginTop: 2 }}>{dealsWonCount}</div>
+              </div>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(16,185,129,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981' }}>
+                <CheckCircle2 size={18} />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.12)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Revenue Closed</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0d1117', marginTop: 2 }}>
+                  ${totalRevenueClosed >= 1000 ? `${(totalRevenueClosed / 1000).toFixed(1)}k` : totalRevenueClosed.toLocaleString()}
+                </div>
+              </div>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(56,189,248,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0284c7' }}>
+                <TrendingUp size={18} />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Average Deal Size</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0d1117', marginTop: 2 }}>
+                  ${avgDealSize >= 1000 ? `${(avgDealSize / 1000).toFixed(1)}k` : (dealsWonCount === 0 ? '0' : avgDealSize.toFixed(0))}
+                </div>
+              </div>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(168,85,247,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9333ea' }}>
+                <Columns3 size={18} />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -504,51 +776,96 @@ function DashboardContent() {
         <div className="db-card" style={{ padding: '22px 26px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
             <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>Pipeline by Stage</div>
-            <span style={{ fontSize: '0.65rem', fontWeight: 600, color: '#8990ac', background: 'rgba(0,0,0,0.04)', padding: '3px 8px', borderRadius: 6 }}>5 stages</span>
+            <span style={{ fontSize: '0.65rem', fontWeight: 600, color: '#8990ac', background: 'rgba(0,0,0,0.04)', padding: '3px 8px', borderRadius: 6 }}>
+              {pipelineStages.length} stages
+            </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {pipelineStages.map((s, i) => (
-              <div key={s.stage}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, color: '#374151' }}>
-                    {s.stage} <span style={{ color: '#9ca3af', fontWeight: 400 }}>· {s.count}</span>
-                  </span>
-                  <span style={{ fontWeight: 700, color: '#111827' }}>${(s.total / 1000).toFixed(1)}k</span>
+            {pipelineStages.map((s, i) => {
+              const pct = maxPipeline > 0 && s.total > 0 ? Math.max((s.total / maxPipeline) * 100, 3) : 0;
+              return (
+                <div key={s.stage}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 600, color: '#374151' }}>
+                      {s.stage} <span style={{ color: '#9ca3af', fontWeight: 400 }}>· {s.count}</span>
+                    </span>
+                    <span style={{ fontWeight: 700, color: '#111827' }}>
+                      ${s.total >= 1000 ? `${(s.total / 1000).toFixed(1)}k` : s.total.toLocaleString()}
+                    </span>
+                  </div>
+                  <div style={{ height: 7, borderRadius: 6, background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 6,
+                      background: s.gradient,
+                      width: barLoaded ? `${pct}%` : '0%',
+                      transition: `width 0.8s cubic-bezier(0.22,1,0.36,1) ${i * 80}ms`,
+                    }} />
+                  </div>
                 </div>
-                <div style={{ height: 7, borderRadius: 6, background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', borderRadius: 6,
-                    background: s.gradient,
-                    width: barLoaded ? `${Math.max((s.total / maxPipeline) * 100, 5)}%` : '0%',
-                    transition: `width 0.8s cubic-bezier(0.22,1,0.36,1) ${i * 80}ms`,
-                  }} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         <div className="db-card" style={{ padding: '22px 26px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>Recent Activity</div>
-            <span style={{ fontSize: '0.65rem', fontWeight: 600, color: '#8990ac', background: 'rgba(0,0,0,0.04)', padding: '3px 8px', borderRadius: 6 }}>Today</span>
+            <span style={{ fontSize: '0.65rem', fontWeight: 600, color: '#8990ac', background: 'rgba(0,0,0,0.04)', padding: '3px 8px', borderRadius: 6 }}>Latest Updates</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {activities.map((a, i) => (
-              <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '11px 0', borderBottom: i < activities.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none' }}>
-                <div style={{
-                  width: 34, height: 34, borderRadius: 11, flexShrink: 0,
-                  background: `${a.color}12`, border: `1.5px solid ${a.color}25`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '0.68rem', fontWeight: 800, color: a.color,
-                }}>{a.initials}</div>
-                <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-                  <div style={{ fontSize: '0.82rem', color: '#0f1330', lineHeight: 1.5 }}>{a.text}</div>
-                  <div style={{ fontSize: '0.7rem', color: '#8990ac', marginTop: 2 }}>{a.time}</div>
-                </div>
+          {derivedActivities.length === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 210, textAlign: 'center', padding: '16px 0' }}>
+              <div style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(99,102,241,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366f1', marginBottom: 10 }}>
+                <RefreshCw size={20} />
               </div>
-            ))}
-          </div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1e293b' }}>No recent activity</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {derivedActivities.map((act) => {
+                const isCreated = act.type === 'created';
+                const color = isCreated ? '#10b981' : '#6366f1';
+                const bg = isCreated ? 'rgba(16,185,129,0.08)' : 'rgba(99,102,241,0.08)';
+                return (
+                  <div
+                    key={act.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      borderRadius: 12,
+                      background: 'rgba(0,0,0,0.02)',
+                      border: '1px solid rgba(0,0,0,0.04)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          background: bg,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: color,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isCreated ? <PlusCircle size={15} /> : <Clock size={15} />}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {act.text}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 500, color: '#8990ac', flexShrink: 0, marginLeft: 8 }}>
+                      {formatRelativeTime(act.timestamp)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1359,6 +1676,10 @@ function ObjectListContent({ objectTypeId }) {
   };
 
   const cleanObjKey = String(objectTypeId || '').toLowerCase();
+  const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
+  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
+  const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
+
   const canDeleteRecord = permissions?.canDelete !== false && permissions?.[objectTypeId]?.canDelete !== false && permissions?.[cleanObjKey]?.canDelete !== false;
 
   const [deleteModalRecord, setDeleteModalRecord] = useState(null);
@@ -1396,6 +1717,7 @@ function ObjectListContent({ objectTypeId }) {
   };
 
   const humanize = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+  const isDealObjList = cleanObjKey.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441' || (rawMeta && String(rawMeta.api_name || '').toLowerCase() === 'deal');
 
   // 1. Map backend metadata fields to column definitions ({ key, label, type })
   const allColumns = useMemo(() => {
@@ -1404,6 +1726,7 @@ function ObjectListContent({ objectTypeId }) {
       .filter((f) => {
         const fname = f.name || f.api_name;
         if (!fname) return false;
+        if (isDealObjList && String(fname).toLowerCase() === 'status') return false;
         if (fname === 'owner_id' || fname === 'owner') return true;
         return !/^id$|^_id$|organization_id|created_by|updated_by|deleted_by|is_deleted|object_type_id/i.test(fname);
       })
@@ -1420,25 +1743,27 @@ function ObjectListContent({ objectTypeId }) {
           isTitle: idx === 0 || f.isTitle || ['name', 'title', 'deal_name'].includes(fname),
         };
       });
-  }, [backendFields, rawMeta, meta]);
+  }, [backendFields, rawMeta, meta, isDealObjList]);
 
   // 2. Select columns specified by backend defaultColumns (rawMeta.views.defaultColumns)
   const columns = useMemo(() => {
+    let cols = [];
     const metaDefaultCols = rawMeta?.views?.defaultColumns || rawMeta?.views?.default_columns;
     if (Array.isArray(metaDefaultCols) && metaDefaultCols.length > 0) {
       const matched = allColumns.filter((c) => metaDefaultCols.includes(c.key));
       if (matched.length > 0) {
         if (matched[0]) matched[0].isTitle = true;
-        return matched;
+        cols = matched;
       }
     }
-    if (allColumns.length > 0) return allColumns.slice(0, 6);
+    if (cols.length === 0 && allColumns.length > 0) {
+      cols = allColumns.slice(0, 6);
+    }
 
-    // Fallback: Dynamically inspect record attributes directly from backend records
-    if (records && records.length > 0) {
+    if (cols.length === 0 && records && records.length > 0) {
       const sample = records[0];
       const allKeys = Object.keys({ ...(sample || {}), ...(sample.data || {}) });
-      return allKeys
+      cols = allKeys
         .filter((k) => !/^id$|_id$|organization_id|created_by|updated_by|deleted_by|is_deleted|data/i.test(k))
         .slice(0, 6)
         .map((k, idx) => ({
@@ -1448,8 +1773,21 @@ function ObjectListContent({ objectTypeId }) {
           isTitle: idx === 0,
         }));
     }
-    return [];
-  }, [rawMeta, allColumns, records]);
+
+    if (isDealObjList) {
+      cols = cols.filter((c) => String(c.key).toLowerCase() !== 'status');
+      cols = cols.filter((c) => String(c.key).toLowerCase() !== 'stage');
+      const stageCol = allColumns.find((c) => String(c.key).toLowerCase() === 'stage') || {
+        key: 'stage',
+        label: 'STAGE',
+        type: 'dropdown',
+        isTitle: false,
+      };
+      cols.splice(1, 0, stageCol);
+    }
+
+    return cols;
+  }, [rawMeta, allColumns, records, isDealObjList]);
 
   const filteredRecords = records.filter((r) => {
     if (!query) return true;
@@ -1478,8 +1816,15 @@ function ObjectListContent({ objectTypeId }) {
     Customer: COLOR.success,
     Active: COLOR.cyan,
     Lead: COLOR.warning,
+    Qualification: COLOR.cyan,
+    Discovery: COLOR.violet,
     Qualified: COLOR.violet,
-    Proposal: COLOR.indigo,
+    Proposal: COLOR.warning,
+    Negotiation: COLOR.danger,
+    'Closed Won': COLOR.success,
+    'Closed Lost': '#64748b',
+    Won: COLOR.success,
+    Lost: '#64748b',
     New: COLOR.cyan,
     Working: COLOR.warning,
   };
@@ -1729,6 +2074,10 @@ function ObjectListContent({ objectTypeId }) {
     }
   };
 
+  if (permissions && (!objPerm || objPerm.canRead !== true)) {
+    return <AccessDenied moduleName={rawMeta?.pluralDisplayName || rawMeta?.displayName || objectTypeId} />;
+  }
+
   return (
     <div className="fade-in" style={{ padding: '0 32px 32px' }}>
       {/* Top Title Bar */}
@@ -1976,23 +2325,57 @@ function ObjectListContent({ objectTypeId }) {
                           );
                         }
 
+                        if (keyLower.includes('stage') || (isDealObjList && (keyLower.includes('stage') || keyLower.includes('status')))) {
+                          const stageVal = r.stage || (r.data && r.data.stage) || null;
+                          const v = stageVal && String(stageVal).trim() !== '' ? String(stageVal) : '—';
+                          return (
+                            <td key={col.key} style={{ padding: '14px 18px', textAlign: 'left', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', marginLeft: '-10px' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    color: statusColor[v] || COLOR.indigo,
+                                    background: `${statusColor[v] || COLOR.indigo}15`,
+                                    border: `1px solid ${statusColor[v] || COLOR.indigo}30`,
+                                    padding: '3px 10px',
+                                    borderRadius: 12,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {v}
+                                </span>
+                              </div>
+                            </td>
+                          );
+                        }
+
                         if (keyLower.includes('status')) {
                           const v = raw || statusVal;
                           return (
-                            <td key={col.key} style={{ padding: '14px 18px' }}>
-                              <span
-                                style={{
-                                  fontSize: 11.5,
-                                  fontWeight: 600,
-                                  color: statusColor[v] || COLOR.indigo,
-                                  background: `${statusColor[v] || COLOR.indigo}15`,
-                                  border: `1px solid ${statusColor[v] || COLOR.indigo}30`,
-                                  padding: '3px 10px',
-                                  borderRadius: 12,
-                                }}
-                              >
-                                {String(v)}
-                              </span>
+                            <td key={col.key} style={{ padding: '14px 18px', textAlign: 'left', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', marginLeft: '-10px' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    color: statusColor[v] || COLOR.indigo,
+                                    background: `${statusColor[v] || COLOR.indigo}15`,
+                                    border: `1px solid ${statusColor[v] || COLOR.indigo}30`,
+                                    padding: '3px 10px',
+                                    borderRadius: 12,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {String(v)}
+                                </span>
+                              </div>
                             </td>
                           );
                         }

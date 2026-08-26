@@ -429,7 +429,7 @@ const metadataService = {
   /**
    * Get dynamic navigation items.
    */
-  getNavigation: async (organizationId, customObjectDefs = null) => {
+  getNavigation: async (organizationId, customObjectDefs = null, permissions = null) => {
     const objectDefs = customObjectDefs || (await metadataService.getObjectDefinitions(organizationId));
 
 
@@ -457,8 +457,17 @@ const metadataService = {
       return String(a.display_name || '').localeCompare(String(b.display_name || ''));
     });
 
+    const filtered = sorted.filter((obj) => {
+      if (!permissions) return false;
+      const key = String(obj.api_name).toLowerCase();
+      const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
+      const keyPlural = key.endsWith('s') ? key : `${key}s`;
+      const perm = permissions[key] || permissions[keySingular] || permissions[keyPlural];
+      return perm?.canRead === true;
+    });
 
-    return sorted.map((obj) => ({
+
+    return filtered.map((obj) => ({
       id: `nav_${obj.api_name}`,
       displayName: obj.display_name,
       route: `/workspace/object/${obj.api_name}`,
@@ -732,11 +741,6 @@ const metadataService = {
     }
     const availableObjects = (metaRes?.data || []).filter((o) => o.api_name !== 'form_inquiry' && o.api_name !== 'form_inquiries' && o.id !== 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a47');
 
-    // Measure Navigation query execution time
-    const tNavStart = Date.now();
-    const navigation = await metadataService.getNavigation(user?.organization_id, availableObjects);
-    const navDuration = Date.now() - tNavStart;
-
     // Measure Permissions query execution time (Object + Field Permissions)
     const tPermStart = Date.now();
     
@@ -831,6 +835,11 @@ const metadataService = {
       permissions[keySingular] = objPerm;
       permissions[keyPlural] = objPerm;
     }
+
+    // Build permission-aware navigation reusing resolved permissions
+    const tNavStart = Date.now();
+    const navigation = await metadataService.getNavigation(user?.organization_id, availableObjects, permissions);
+    const navDuration = Date.now() - tNavStart;
 
 
     const supabaseDuration = Date.now() - supabaseStart;

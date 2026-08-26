@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost } from '../../api/client';
+import AccessDenied from '../../components/AccessDenied';
 import { ChevronRight, ArrowLeft, Save, Plus, X, AlertTriangle, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import CustomPicklist from '../../components/CustomPicklist';
 
@@ -24,6 +25,11 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
   const objectTypeId = propObjectTypeId || params.objectTypeId || 'leads';
   const { objectTypes, currentUser, permissions } = useWorkspace();
   const navigate = useNavigate();
+
+  const cleanObjKey = String(objectTypeId || '').toLowerCase();
+  const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
+  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
+  const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
 
   const [formData, setFormData] = useState({});
   const [fields, setFields] = useState([]);
@@ -93,10 +99,18 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     return canCreate !== false;
   });
 
+  const objCreateApiName = String(rawMeta?.api_name || objectTypeId || '').toLowerCase();
+  const isDealCreateObj = objCreateApiName.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441';
+
   const meta = {
     displayName: rawMeta?.displayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1).replace(/s$/, '') : 'Record'),
     pluralDisplayName: rawMeta?.pluralDisplayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1) : 'Records'),
-    fields: effectiveFields.filter((f) => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'created_by' && f.name !== 'updated_at' && f.name !== 'updated_by'),
+    fields: effectiveFields.filter((f) => {
+      if (f.name === 'id' || f.name === 'created_at' || f.name === 'created_by' || f.name === 'updated_at' || f.name === 'updated_by') return false;
+      const fNameLower = String(f.name || f.api_name || '').toLowerCase();
+      if (isDealCreateObj && fNameLower === 'status') return false;
+      return true;
+    }),
   };
 
   const handleCancel = () => {
@@ -374,6 +388,10 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       </div>
     );
   };
+
+  if (permissions && (!objPerm || objPerm.canRead !== true || objPerm.canCreate !== true)) {
+    return <AccessDenied message={`You do not have permission to create ${objectTypeId} records.`} moduleName={objectTypeId} />;
+  }
 
   return (
     <div

@@ -28,7 +28,13 @@ const getRecords = async (req, res, next) => {
     // Enforce permission check
     await metadataService.checkPermission(req.user, objectType, 'read');
 
-    const records = await objectService.listRecords(objectType, organizationId);
+    const options = {};
+    if (req.query.scope === 'user' || req.query.owner_id) {
+      // Security enforcement: Always use authenticated user's ID from req.user
+      options.owner_id = req.user?.id;
+    }
+
+    const records = await objectService.listRecords(objectType, organizationId, options);
     return res.status(200).json(records);
   } catch (err) {
     next(err);

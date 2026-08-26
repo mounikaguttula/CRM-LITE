@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPut } from '../../api/client';
+import AccessDenied from '../../components/AccessDenied';
 import { ChevronRight, ArrowLeft, Save, X, AlertTriangle, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import CustomPicklist from '../../components/CustomPicklist';
 
@@ -68,6 +69,13 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
   const { objectTypes, currentUser, organization, company, permissions } = useWorkspace();
   const navigate = useNavigate();
+
+  const cleanObjKey = String(objectTypeId || '').toLowerCase();
+  const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
+  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${keyPlural}s`;
+  const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
+
+  const canUpdate = objPerm ? (objPerm.canUpdate === true || objPerm.canEdit === true) : false;
 
   const [formData, setFormData] = useState({});
   const [fields, setFields] = useState([]);
@@ -210,23 +218,14 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
   const effectiveFields = fields.length > 0 ? [...fields] : [...(rawMeta?.fields || [])];
 
-  const lowerObj = String(objectTypeId || '').toLowerCase();
-  if (lowerObj.includes('company') || lowerObj.includes('account')) {
-    const stdCompFields = [
-      { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address' },
-      { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address' },
-    ];
-    stdCompFields.forEach((scf) => {
-      if (!effectiveFields.some((existing) => (existing.name || '').toLowerCase() === scf.name)) {
-        effectiveFields.push(scf);
-      }
-    });
-  }
-
+  const objApiName = String(rawMeta?.api_name || objectTypeId || '').toLowerCase();
+  const isDealEditObj = objApiName.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441';
   const fpPerms = permissions?.fieldPermissions || {};
   const visibleFields = effectiveFields
     .filter((f) => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'created_by' && f.name !== 'updated_at' && f.name !== 'updated_by')
     .filter((f) => {
+      const fNameLower = String(f.name || f.api_name || '').toLowerCase();
+      if (isDealEditObj && fNameLower === 'status') return false;
       const fp = fpPerms[f.id];
       const canRead = f.canRead !== undefined ? f.canRead : (fp ? fp.canRead !== false : true);
       return canRead !== false;
@@ -701,6 +700,10 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       </div>
     );
   };
+
+  if (permissions && (!objPerm || objPerm.canRead !== true || !canUpdate)) {
+    return <AccessDenied message={`You do not have permission to edit ${objectTypeId} records.`} moduleName={objectTypeId} />;
+  }
 
   return (
     <div

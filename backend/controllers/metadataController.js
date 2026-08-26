@@ -64,7 +64,8 @@ const getObjectViews = async (req, res, next) => {
 const getNavigation = async (req, res, next) => {
   try {
     const organizationId = req.params.organizationId || req.user?.organization_id;
-    const nav = await metadataService.getNavigation(organizationId);
+    const permissions = await metadataService.getPermissions(req.user);
+    const nav = await metadataService.getNavigation(organizationId, null, permissions);
     return successResponse(res, nav, 'Navigation items retrieved successfully.');
   } catch (err) {
     next(err);

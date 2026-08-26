@@ -88,6 +88,7 @@ const objectService = {
     const addressVal = dataObj.address || dataObj.country || '';
     const employeesVal = dataObj.number_of_employees || dataObj.company_size || '';
     const sourceVal = dataObj.lead_source || dataObj.source || '';
+    const stageVal = dataObj.stage || dataObj.Stage || null;
 
     // Resolve human name if row.name is a UUID
     let humanName = name;
@@ -114,6 +115,7 @@ const objectService = {
       created_at,
       updated_at,
       ...dataObj,
+      ...(stageVal ? { stage: stageVal } : {}),
       ...(titleVal ? { title: titleVal, job_title: titleVal } : {}),
       ...(designationVal ? { designation: designationVal, role: designationVal } : {}),
       ...(addressVal ? { address: addressVal, country: addressVal } : {}),
@@ -125,7 +127,7 @@ const objectService = {
   /**
    * List records from universal_table for any objectType.
    */
-  listRecords: async (objectKey, organizationId) => {
+  listRecords: async (objectKey, organizationId, options = {}) => {
     if (!objectKey || typeof objectKey !== 'string' || objectKey.includes('📁') || objectKey.trim() === '') {
       return [];
     }
@@ -148,6 +150,10 @@ const objectService = {
 
     if (organizationId) {
       query = query.eq('organization_id', organizationId);
+    }
+
+    if (options.owner_id) {
+      query = query.eq('owner_id', options.owner_id);
     }
 
     const { data: rows, error } = await query;
