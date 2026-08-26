@@ -542,6 +542,8 @@ const metadataService = {
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
 
 
+      const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
+
       let objPerm;
       if (dbPerm) {
         objPerm = {
@@ -562,15 +564,15 @@ const metadataService = {
         }));
       } else {
         objPerm = {
-          canCreate: true,
-          canRead: true,
-          canUpdate: true,
-          canEdit: true,
-          canDelete: true,
-          viewAll: true,
-          modifyAll: true,
+          canCreate: isSystemAdmin,
+          canRead: isSystemAdmin,
+          canUpdate: isSystemAdmin,
+          canEdit: isSystemAdmin,
+          canDelete: isSystemAdmin,
+          viewAll: isSystemAdmin,
+          modifyAll: isSystemAdmin,
         };
-        console.log(`[Permissions] ⚠️ Default fallback for [${apiName}] (no DB record matching object_type_id=${obj.id}): Granted full access.`);
+        console.log(`[Permissions] ⚠️ Default fallback for [${apiName}] (no DB record matching object_type_id=${obj.id}): Resolved failClosed=${!isSystemAdmin}`);
       }
 
 
@@ -585,6 +587,41 @@ const metadataService = {
 
 
     return permissions;
+  },
+
+  /**
+   * Centralized permission checking helper for controller routes.
+   * Resolves effective permissions via getPermissions(user) and verifies authorization.
+   * @param {Object} user - req.user context
+   * @param {String} objectType - Object key (e.g. 'lead', 'deal', 'campaign')
+   * @param {String} action - Action ('create', 'read', 'update', 'delete')
+   */
+  checkPermission: async (user, objectType, action) => {
+    if (!objectType || !action) return;
+
+    const actionMap = {
+      create: 'canCreate',
+      read: 'canRead',
+      update: 'canUpdate',
+      edit: 'canUpdate',
+      delete: 'canDelete',
+    };
+
+    const targetProp = actionMap[String(action).toLowerCase()] || 'canRead';
+
+    const perms = await metadataService.getPermissions(user);
+    if (!perms) return;
+
+    const key = String(objectType).toLowerCase();
+    const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
+    const keyPlural = key.endsWith('s') ? key : `${key}s`;
+
+    const objPerm = perms[key] || perms[keySingular] || perms[keyPlural];
+
+    if (objPerm && (objPerm[targetProp] === false || (targetProp === 'canUpdate' && objPerm.canEdit === false))) {
+      console.log(`[Authorization] ⛔ DENIED ${action} request for [${objectType}] (user: ${user?.id || user?.email}, role_id: ${user?.role_id})`);
+      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
+    }
   },
 
 
@@ -765,6 +802,8 @@ const metadataService = {
       const keySingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
 
+      const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
+
       let objPerm;
       if (dbPerm) {
         objPerm = {
@@ -778,13 +817,13 @@ const metadataService = {
         };
       } else {
         objPerm = {
-          canCreate: true,
-          canRead: true,
-          canUpdate: true,
-          canEdit: true,
-          canDelete: true,
-          viewAll: true,
-          modifyAll: true,
+          canCreate: isSystemAdmin,
+          canRead: isSystemAdmin,
+          canUpdate: isSystemAdmin,
+          canEdit: isSystemAdmin,
+          canDelete: isSystemAdmin,
+          viewAll: isSystemAdmin,
+          modifyAll: isSystemAdmin,
         };
       }
 

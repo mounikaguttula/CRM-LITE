@@ -1359,6 +1359,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const isAlreadyConvertedLead = cleanObjKey.includes('lead') && (currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted));
 
   const canDeleteRecord = permissions?.canDelete !== false && permissions?.[objectTypeId]?.canDelete !== false && permissions?.[cleanObjKey]?.canDelete !== false && !isAlreadyConvertedLead;
+  const canUpdateRecord = permissions?.canEdit !== false && permissions?.canUpdate !== false && permissions?.[objectTypeId]?.canUpdate !== false && permissions?.[cleanObjKey]?.canUpdate !== false;
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(false);
@@ -2158,17 +2159,19 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                       </div>
                     </div>
 
-                    <button
-                      onClick={handleOpenAddProducts}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 18px',
-                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
-                        color: '#fff', background: '#2563eb', boxShadow: '0 8px 18px -8px rgba(37,99,235,.6)',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      + Add Products
-                    </button>
+                    {canUpdateRecord && (
+                      <button
+                        onClick={handleOpenAddProducts}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 18px',
+                          borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
+                          color: '#fff', background: '#2563eb', boxShadow: '0 8px 18px -8px rgba(37,99,235,.6)',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        + Add Products
+                      </button>
+                    )}
                   </header>
 
                   {lineItems.length > 0 ? (
@@ -2178,7 +2181,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                           <thead>
                             <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
                               <th style={{ padding: '14px 20px' }}>Product</th>
-                              <th style={{ padding: '14px 16px' }}>Code</th>
                               <th style={{ padding: '14px 16px' }}>Qty</th>
                               <th style={{ padding: '14px 16px' }}>Unit Price</th>
                               <th style={{ padding: '14px 16px' }}>Discount</th>
@@ -2189,13 +2191,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                           <tbody>
                             {lineItems.map((item) => (
                               <tr key={item.productId} style={{ borderBottom: `1px solid ${C.border}` }}>
-                                <td style={{ padding: '14px 20px', fontWeight: 800, color: C.text }}>
-                                  {item.name}
+                                <td style={{ padding: '14px 20px' }}>
+                                  <div style={{ fontWeight: 700, color: C.text }}>{item.name}</div>
+                                  <div style={{ fontSize: 11, color: C.dim }}>Code: {item.code || '—'}</div>
                                 </td>
-                                <td style={{ padding: '14px 16px', color: '#64748b', fontWeight: 600 }}>
-                                  {item.code || '—'}
-                                </td>
-                                <td style={{ padding: '14px 16px', fontWeight: 700, color: C.text }}>
+                                <td style={{ padding: '14px 16px', color: C.text, fontWeight: 700 }}>
                                   {item.quantity}
                                 </td>
                                 <td style={{ padding: '14px 16px', fontWeight: 600, color: C.text }}>
@@ -2208,18 +2208,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                                   ${Number(item.total).toLocaleString()}
                                 </td>
                                 <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                                  <button
-                                    onClick={() => handleDeleteLineItem(item.productId)}
-                                    title="Delete Line Item"
-                                    style={{
-                                      border: 'none', background: '#fef2f2', color: '#ef4444',
-                                      borderRadius: '50%', width: 32, height: 32, display: 'inline-flex',
-                                      alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                                      transition: 'all .15s ease',
-                                    }}
-                                  >
-                                    <Trash2 size={15} />
-                                  </button>
+                                  {canUpdateRecord && (
+                                    <button
+                                      onClick={() => handleDeleteLineItem(item.productId)}
+                                      title="Delete Line Item"
+                                      style={{
+                                        border: 'none', background: '#fef2f2', color: '#ef4444',
+                                        borderRadius: '50%', width: 32, height: 32, display: 'inline-flex',
+                                        alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                        transition: 'all .15s ease',
+                                      }}
+                                    >
+                                      <Trash2 size={15} />
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             ))}

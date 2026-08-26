@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const formService = require('../services/formService');
+const metadataService = require('../services/metadataService');
 
 const formController = {
   /**
@@ -8,6 +9,8 @@ const formController = {
    */
   listForms: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form', 'read');
+
       const organizationId = req.user?.organization_id;
       if (!organizationId) {
         return res.status(400).json({ message: 'Organization ID is required.' });
@@ -25,6 +28,8 @@ const formController = {
    */
   getFormById: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form', 'read');
+
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
       const form = await formService.getFormById(id, organizationId);
@@ -40,6 +45,8 @@ const formController = {
    */
   createForm: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form', 'create');
+
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
       if (!organizationId) {
@@ -62,6 +69,8 @@ const formController = {
    */
   updateForm: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form', 'update');
+
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
@@ -82,6 +91,8 @@ const formController = {
    */
   deleteForm: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form', 'delete');
+
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
@@ -98,6 +109,8 @@ const formController = {
    */
   listSubmissions: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form_submission', 'read');
+
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
       const submissions = await formService.listSubmissions(id, organizationId);
@@ -113,6 +126,8 @@ const formController = {
    */
   deleteSubmission: async (req, res, next) => {
     try {
+      await metadataService.checkPermission(req.user, 'form_submission', 'delete');
+
       const { id, submissionId } = req.params;
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;

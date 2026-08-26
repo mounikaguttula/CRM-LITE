@@ -231,6 +231,84 @@ class RoleService {
     };
   }
 
+  /**
+   * Idempotent backfill: Ensures every role has explicit object_permissions rows for all object definitions.
+   * NEVER overwrites existing custom permissions.
+   */
+  async ensurePermissionRowsExist(organizationId) {
+    try {
+      let orgId = isUuid(organizationId) ? organizationId : '40f7407a-a751-4090-9012-f383b1e68de5';
+
+      // Seed default enterprise roles if missing
+      const defaultRoles = [
+        { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', organization_id: orgId, role_name: 'Administrator', description: 'Full administrative access to all CRM features.' },
+        { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', organization_id: orgId, role_name: 'CRM Manager', description: 'Full management access to sales and customer operations.' },
+        { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', organization_id: orgId, role_name: 'Relationship Manager', description: 'Access to manage client relationships, deals, and communication.' },
+        { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', organization_id: orgId, role_name: 'CRM Executive', description: 'Standard operational access to leads, accounts, and tasks.' },
+        { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', organization_id: orgId, role_name: 'Read Only User', description: 'Read-only access across all standard CRM objects and reports.' },
+      ];
+
+      await supabase.from('roles').upsert(defaultRoles, { onConflict: 'id', ignoreDuplicates: true });
+      
+      const [{ data: roles }, { data: objectDefs }, { data: existingPerms }] = await Promise.all([
+        supabase.from('roles').select('id, role_name').or(`organization_id.eq.${orgId},organization_id.is.null`),
+        supabase.from('object_type_definitions').select('id, api_name').or(`organization_id.eq.${orgId},organization_id.is.null`),
+        supabase.from('object_permissions').select('role_id, object_type_id'),
+      ]);
+
+      if (!roles || !objectDefs) return;
+
+      const existingSet = new Set(
+        (existingPerms || []).map((p) => `${p.role_id}_${p.object_type_id}`)
+      );
+
+      const missingRows = [];
+
+      for (const r of roles) {
+        if (!isUuid(r.id)) continue;
+        const rName = (r.role_name || '').toLowerCase();
+        const isReadOnly = rName.includes('read only') || rName.includes('viewer');
+        const isAdmin = rName.includes('admin') || rName.includes('manager');
+        const isExecutive = rName.includes('executive');
+
+        for (const obj of objectDefs) {
+          if (!isUuid(obj.id)) continue;
+          const key = `${r.id}_${obj.id}`;
+          if (!existingSet.has(key)) {
+            let rowPayload = {
+              organization_id: orgId,
+              role_id: r.id,
+              object_type_id: obj.id,
+              can_read: true,
+              can_create: !isReadOnly,
+              can_update: !isReadOnly,
+              can_delete: isAdmin ? true : (isExecutive ? false : !isReadOnly),
+              view_all: isAdmin,
+              modify_all: isAdmin,
+            };
+            missingRows.push(rowPayload);
+            existingSet.add(key);
+          }
+        }
+      }
+
+      if (missingRows.length > 0) {
+        const { error: insErr } = await supabase
+          .from('object_permissions')
+          .upsert(missingRows, { onConflict: 'organization_id,role_id,object_type_id', ignoreDuplicates: true });
+
+        if (insErr) {
+          console.warn('ensurePermissionRowsExist insert warning:', insErr.message);
+        } else {
+          console.log(`✅ Backfilled ${missingRows.length} missing object_permissions rows for org ${orgId}`);
+          await invalidateMetadataCache(orgId);
+        }
+      }
+    } catch (err) {
+      console.warn('ensurePermissionRowsExist error:', err.message);
+    }
+  }
+
   async createRole(roleData, organizationId) {
     if (!roleData.role_name && !roleData.name) {
       throw new Error('Role name is required.');
@@ -258,6 +336,61 @@ class RoleService {
         updated_at: '31 Jul 2026',
         status: 'active',
       };
+    }
+
+    // Automatically populate object_permissions for the new role if clone_from_role_id is provided or default
+    try {
+      const cloneFromId = roleData.clone_from_role_id || roleData.cloneFrom;
+      let sourcePerms = [];
+
+      if (cloneFromId && isUuid(cloneFromId)) {
+        const { data: cData } = await supabase.from('object_permissions').select('*').eq('role_id', cloneFromId);
+        if (cData) sourcePerms = cData;
+      }
+
+      const { data: objectDefs } = await supabase
+        .from('object_type_definitions')
+        .select('id')
+        .or(`organization_id.eq.${newRole.organization_id},organization_id.is.null`);
+
+      if (objectDefs && objectDefs.length > 0) {
+        const newPermRows = objectDefs.map((obj) => {
+          const matchedSource = sourcePerms.find((p) => p.object_type_id === obj.id);
+          if (matchedSource) {
+            return {
+              role_id: newRole.id,
+              object_type_id: obj.id,
+              organization_id: newRole.organization_id,
+              can_create: Boolean(matchedSource.can_create),
+              can_read: Boolean(matchedSource.can_read),
+              can_update: Boolean(matchedSource.can_update),
+              can_delete: Boolean(matchedSource.can_delete),
+              view_all: Boolean(matchedSource.view_all),
+              modify_all: Boolean(matchedSource.modify_all),
+            };
+          }
+
+          const rName = (newRole.role_name || '').toLowerCase();
+          const isReadOnly = rName.includes('read only') || rName.includes('viewer');
+          const isAdmin = rName.includes('admin') || rName.includes('manager');
+
+          return {
+            role_id: newRole.id,
+            object_type_id: obj.id,
+            organization_id: newRole.organization_id,
+            can_create: !isReadOnly,
+            can_read: true,
+            can_update: !isReadOnly,
+            can_delete: isAdmin,
+            view_all: isAdmin,
+            modify_all: isAdmin,
+          };
+        });
+
+        await supabase.from('object_permissions').upsert(newPermRows, { onConflict: 'role_id,object_type_id' });
+      }
+    } catch (permEx) {
+      console.warn('Warning seeding object_permissions for new role:', permEx.message);
     }
 
     await invalidateMetadataCache(organizationId);
