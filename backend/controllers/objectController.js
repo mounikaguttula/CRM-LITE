@@ -1,5 +1,6 @@
 const objectService = require('../services/objectService');
 const metadataService = require('../services/metadataService');
+const auditService = require('../services/auditService');
 const { successResponse } = require('../utils/response');
 
 
@@ -69,6 +70,17 @@ const createRecord = async (req, res, next) => {
     await metadataService.checkPermission(req.user, objectType, 'create');
 
     const record = await objectService.createRecord(objectType, req.body, organizationId, userId);
+
+    // Log audit activity after successful creation
+    auditService.logUserActivity({
+      organization_id: organizationId,
+      user_id: userId,
+      action: 'CREATE',
+      module: objectType,
+      record_id: record?.id || null,
+      description: `Created ${objectType}`,
+    }).catch((auditErr) => console.error('❌ Audit log error in createRecord:', auditErr.message));
+
     return successResponse(res, record, `${objectType} record created successfully.`, 201);
   } catch (err) {
     next(err);
@@ -87,6 +99,17 @@ const updateRecord = async (req, res, next) => {
     await metadataService.checkPermission(req.user, objectType, 'update');
 
     const record = await objectService.updateRecord(objectType, id, req.body, organizationId, userId);
+
+    // Log audit activity after successful update
+    auditService.logUserActivity({
+      organization_id: organizationId,
+      user_id: userId,
+      action: 'UPDATE',
+      module: objectType,
+      record_id: id,
+      description: `Updated ${objectType}`,
+    }).catch((auditErr) => console.error('❌ Audit log error in updateRecord:', auditErr.message));
+
     return successResponse(res, record, `${objectType} record updated successfully.`);
   } catch (err) {
     next(err);
@@ -105,6 +128,17 @@ const deleteRecord = async (req, res, next) => {
     await metadataService.checkPermission(req.user, objectType, 'delete');
 
     await objectService.deleteRecord(objectType, id, organizationId, userId);
+
+    // Log audit activity after successful deletion
+    auditService.logUserActivity({
+      organization_id: organizationId,
+      user_id: userId,
+      action: 'DELETE',
+      module: objectType,
+      record_id: id,
+      description: `Deleted ${objectType}`,
+    }).catch((auditErr) => console.error('❌ Audit log error in deleteRecord:', auditErr.message));
+
     return successResponse(res, null, `${objectType} record deleted successfully.`);
   } catch (err) {
     next(err);
