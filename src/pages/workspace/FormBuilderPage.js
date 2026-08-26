@@ -541,7 +541,7 @@ const generateUUID = () => {
 
   const handleRemoveField = (id) => {
     if (fieldsConfig.length <= 1) {
-      showToast('warning', 'Validation Warning', 'Form must contain at least one field.');
+      showToast('warning', 'Form Rule Warning', 'Form must contain at least one field.');
       return;
     }
     setFieldsConfig((prev) => prev.filter((f) => f.id !== id));

@@ -518,8 +518,8 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
   const [justSaved, setJustSaved] = useState(false);
   const [errorModal, setErrorModal] = useState(null);
 
-  const showErrorModal = (message, title = 'Validation Error') => {
-    setErrorModal({ title, message });
+  const showErrorModal = (message, title = 'Record Rule Error') => {
+    setErrorModal({ show: true, title, message });
   };
 
   useEffect(() => {
@@ -883,7 +883,7 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
                 letterSpacing: '-0.02em',
               }}
             >
-              {errorModal.title || 'Validation Error'}
+              {errorModal.title || 'Record Rule Error'}
             </h3>
 
             <p

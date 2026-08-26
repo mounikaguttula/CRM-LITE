@@ -319,7 +319,7 @@ function ObjectManager({ onSelectObject }) {
             </span>
           </div>
           <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '4px 0 0', lineHeight: 1.4 }}>
-            Configure CRM standard objects, create custom data structures, and manage layouts.
+            Configure CRM standard modules, create custom data structures, and manage layouts.
           </p>
         </div>
 

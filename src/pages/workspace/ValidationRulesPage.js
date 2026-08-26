@@ -193,25 +193,25 @@ function ValidationRulesPage({ initialObject }) {
 
   /* ── Delete Rule (Only updates state on successful API response) ── */
   const handleDeleteRule = async (ruleId) => {
-    if (!window.confirm('Are you sure you want to delete this validation rule?')) return;
+    if (!window.confirm('Are you sure you want to delete this record rule?')) return;
     try {
       await api.delete(`/validation-rules/${ruleId}`);
-      setRules((prev) => prev.filter((r) => r.id !== ruleId));
+      await fetchRulesForObject();
     } catch (err) {
-      console.error('Failed to delete validation rule:', err);
-      setSubmitError(err.response?.data?.message || err.message || 'Failed to delete validation rule.');
+      console.error('Failed to delete record rule:', err);
+      setSubmitError(err.response?.data?.message || err.message || 'Failed to delete record rule.');
     }
   };
 
   /* ── Reset Override to Default (Deletes override & re-fetches system rule) ── */
   const handleResetToDefault = async (overrideRuleId) => {
-    if (!window.confirm('Reset this rule to system default? Your customizations will be removed.')) return;
+    if (!window.confirm('Are you sure you want to reset this rule to default system behavior?')) return;
     try {
       await api.delete(`/validation-rules/${overrideRuleId}`);
       // Re-fetch from backend so system default rule resurfaces naturally
       fetchRulesForObject();
     } catch (err) {
-      console.error('Failed to reset validation rule to default:', err);
+      console.error('Failed to reset record rule to default:', err);
       setSubmitError(err.response?.data?.message || err.message || 'Failed to reset rule to default.');
     }
   };
@@ -372,10 +372,11 @@ function ValidationRulesPage({ initialObject }) {
         const created = res?.data || res;
         setRules((prev) => [created, ...prev]);
       }
+      await fetchRulesForObject();
       setViewMode('list');
     } catch (err) {
-      console.error('Failed to save validation rule:', err);
-      setSubmitError(err.message || 'Failed to save validation rule to backend.');
+      console.error('Failed to save record rule:', err);
+      setSubmitError(err.message || 'Failed to save record rule to backend.');
     } finally {
       setSavingRule(false);
     }
@@ -388,10 +389,10 @@ function ValidationRulesPage({ initialObject }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ margin: '0 0 4px', fontSize: '1.5rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em' }}>
-            Validation Rules
+            Record Rules
           </h1>
           <p style={{ margin: 0, fontSize: '0.84rem', color: '#64748B', fontWeight: 500 }}>
-            Define and manage field validation rules per object
+            Define and manage field record rules per module
           </p>
         </div>
 
@@ -438,7 +439,7 @@ function ValidationRulesPage({ initialObject }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
             <Filter style={{ width: 16, height: 16, color: '#6366f1' }} />
-            Select Object
+            Select Module
           </div>
 
           <div style={{ position: 'relative' }}>
@@ -495,7 +496,7 @@ function ValidationRulesPage({ initialObject }) {
 
           {loadingRules ? (
             <div style={{ padding: '48px 0', textAlign: 'center', color: '#94A3B8', fontSize: '0.875rem' }}>
-              Loading validation rules…
+              Loading record rules…
             </div>
           ) : rules.length === 0 ? (
             <div style={{
@@ -503,7 +504,7 @@ function ValidationRulesPage({ initialObject }) {
               border: '1.5px dashed #CBD5E1', borderRadius: '14px', color: '#64748B',
             }}>
               <ShieldAlert style={{ width: 32, height: 32, color: '#94A3B8', marginBottom: '8px' }} />
-              <p style={{ margin: '0 0 12px', fontWeight: 600, fontSize: '0.9rem' }}>No validation rules configured for {currentObjMeta.displayName}.</p>
+              <p style={{ margin: '0 0 12px', fontWeight: 600, fontSize: '0.9rem' }}>No record rules configured for {currentObjMeta.displayName}.</p>
               <button
                 type="button"
                 onClick={handleOpenNewRule}
@@ -512,7 +513,7 @@ function ValidationRulesPage({ initialObject }) {
                   backgroundColor: 'rgba(6, 182, 212, 0.08)', border: '1px solid rgba(6, 182, 212, 0.25)', borderRadius: '8px', cursor: 'pointer',
                 }}
               >
-                + Create First Validation Rule
+                + Create First Record Rule
               </button>
             </div>
           ) : (
@@ -616,7 +617,7 @@ function ValidationRulesPage({ initialObject }) {
                             <button
                               type="button"
                               onClick={() => handleOpenEditRule(rule)}
-                              title="Edit Validation Rule"
+                              title="Edit Record Rule"
                               style={{
                                 width: '32px', height: '32px', borderRadius: '8px',
                                 border: '1px solid #E2E8F0', backgroundColor: '#ffffff',
@@ -643,7 +644,7 @@ function ValidationRulesPage({ initialObject }) {
                               <button
                                 type="button"
                                 onClick={() => handleDeleteRule(rule.id)}
-                                title="Delete Validation Rule"
+                                title="Delete Record Rule"
                                 style={{
                                   width: '32px', height: '32px', borderRadius: '8px',
                                   border: '1px solid #FECACA', backgroundColor: '#FEF2F2',
@@ -688,13 +689,13 @@ function ValidationRulesPage({ initialObject }) {
                 padding: 0,
               }}
             >
-              <ArrowLeft style={{ width: 14, height: 14 }} /> Back to Validation Rules
+              <ArrowLeft style={{ width: 14, height: 14 }} /> Back to Record Rules
             </button>
           </div>
 
           <div>
             <h2 style={{ margin: '0 0 4px', fontSize: '1.25rem', fontWeight: 800, color: '#0F172A' }}>
-              {editingRuleId ? 'Edit Validation Rule' : overrideRuleKey ? 'Customize System Rule' : 'New Validation Rule'}
+              {editingRuleId ? 'Edit Record Rule' : overrideRuleKey ? 'Customize System Rule' : 'New Record Rule'}
             </h2>
             <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748B' }}>
               {overrideRuleKey
@@ -746,7 +747,7 @@ function ValidationRulesPage({ initialObject }) {
                 </label>
                 <input
                   type="text"
-                  placeholder="Message shown to the user when this validation fails..."
+                  placeholder="Message shown to the user when this record rule fails..."
                   value={errorMessage}
                   onChange={(e) => setErrorMessage(e.target.value)}
                   style={{
