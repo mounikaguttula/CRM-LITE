@@ -5,7 +5,8 @@ import { apiPost } from '../api/client';
 import { setAuthSession } from '../utils/authStorage';
 import {
   AlertCircle, Sparkles, ShieldCheck, TrendingUp, Users,
-  User, Mail, Lock, Building2, ArrowLeft, UserPlus, CheckCircle2
+  User, Mail, Lock, Building2, ArrowLeft, UserPlus, CheckCircle2,
+  Eye, EyeOff
 } from 'lucide-react';
 
 function Login() {
@@ -53,6 +54,14 @@ function Login() {
       navigate('/workspace/dashboard', { replace: true });
     }
   }, [user, navigate]);
+
+  const [isIdleTimeoutReason] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('reason') === 'idle_timeout';
+    }
+    return false;
+  });
 
   // Mode: 'login' | 'register' | 'forgot-password' | 'reset-password'
   const [mode, setMode] = useState('login');
@@ -136,6 +145,7 @@ function Login() {
   // Login Form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -145,9 +155,15 @@ function Login() {
   const [regOrgId, setRegOrgId] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
   const [regError, setRegError] = useState('');
   const [regSuccess, setRegSuccess] = useState('');
+
+  // Reset Password visibility state
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
 
   // Focus tracking for input styling
   const [focusedField, setFocusedField] = useState(null);
@@ -454,6 +470,24 @@ function Login() {
                 </p>
               </div>
 
+              {isIdleTimeoutReason && (
+                <div
+                  className="alert alert-warning d-flex align-items-center gap-2"
+                  style={{
+                    padding: '12px 14px',
+                    fontSize: 13,
+                    marginBottom: 18,
+                    borderRadius: 10,
+                    background: '#fffbeb',
+                    color: '#b45309',
+                    border: '1px solid #fde68a',
+                  }}
+                >
+                  <AlertCircle size={18} style={{ flexShrink: 0 }} />
+                  <span>Your session has expired due to inactivity. Please log in again.</span>
+                </div>
+              )}
+
               {error && (
                 <div className="alert alert-danger d-flex align-items-center gap-2" style={{ padding: '10px 12px', fontSize: 13, marginBottom: 18, borderRadius: 10 }}>
                   <AlertCircle size={16} />
@@ -488,23 +522,45 @@ function Login() {
                     <label className="form-label" style={{ fontSize: 12.5, fontWeight: 600, color: '#334155', margin: 0 }}>Password</label>
                     <button type="button" onClick={() => setMode('forgot-password')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#6366f1', outline: 'none' }}>Forgot?</button>
                   </div>
-                  <input
-                    type="password"
-                    required
-                    className="form-control"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    style={{
-                      height: 44,
-                      borderRadius: 10,
-                      border: '1px solid #e2e8f0',
-                      padding: '0 14px',
-                      fontSize: 13.5,
-                      outline: 'none',
-                      boxShadow: 'none',
-                    }}
-                  />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      className="form-control"
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      style={{
+                        height: 44,
+                        borderRadius: 10,
+                        border: '1px solid #e2e8f0',
+                        padding: '0 40px 0 14px',
+                        fontSize: 13.5,
+                        outline: 'none',
+                        boxShadow: 'none',
+                        width: '100%',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      style={{
+                        position: 'absolute',
+                        right: 12,
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        cursor: 'pointer',
+                        color: '#64748b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 <button
@@ -754,7 +810,7 @@ function Login() {
                       <Lock size={16} color={focusedField === 'resetPassword' ? '#6366f1' : '#94a3b8'} />
                     </div>
                     <input
-                      type="password"
+                      type={showResetPassword ? 'text' : 'password'}
                       required
                       placeholder="Minimum 6 characters"
                       value={resetPassword}
@@ -772,6 +828,14 @@ function Login() {
                         outline: 'none',
                       }}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(!showResetPassword)}
+                      style={{ background: 'none', border: 'none', padding: '0 12px', cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
+                      title={showResetPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
                 </div>
 
@@ -785,7 +849,7 @@ function Login() {
                       <Lock size={16} color={focusedField === 'resetConfirmPassword' ? '#6366f1' : '#94a3b8'} />
                     </div>
                     <input
-                      type="password"
+                      type={showResetConfirmPassword ? 'text' : 'password'}
                       required
                       placeholder="Re-enter your password"
                       value={resetConfirmPassword}
@@ -803,6 +867,14 @@ function Login() {
                         outline: 'none',
                       }}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                      style={{ background: 'none', border: 'none', padding: '0 12px', cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
+                      title={showResetConfirmPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showResetConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
                 </div>
 
@@ -1014,7 +1086,7 @@ function Login() {
                       <Lock size={16} color={focusedField === 'password' ? '#6366f1' : '#94a3b8'} />
                     </div>
                     <input
-                      type="password"
+                      type={showRegPassword ? 'text' : 'password'}
                       required
                       autoComplete="new-password"
                       name="req_new_password"
@@ -1034,6 +1106,14 @@ function Login() {
                         outline: 'none',
                       }}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegPassword(!showRegPassword)}
+                      style={{ background: 'none', border: 'none', padding: '0 12px', cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
+                      title={showRegPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showRegPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
                 </div>
 
@@ -1047,7 +1127,7 @@ function Login() {
                       <Lock size={16} color={focusedField === 'confirmPassword' ? '#6366f1' : '#94a3b8'} />
                     </div>
                     <input
-                      type="password"
+                      type={showRegConfirmPassword ? 'text' : 'password'}
                       required
                       autoComplete="new-password"
                       name="req_confirm_password"
@@ -1067,6 +1147,14 @@ function Login() {
                         outline: 'none',
                       }}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegConfirmPassword(!showRegConfirmPassword)}
+                      style={{ background: 'none', border: 'none', padding: '0 12px', cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
+                      title={showRegConfirmPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showRegConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
                 </div>
 

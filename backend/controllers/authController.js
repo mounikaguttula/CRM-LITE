@@ -1,4 +1,5 @@
 const authService = require('../services/authService');
+const auditService = require('../services/auditService');
 const { successResponse, errorResponse } = require('../utils/response');
 const supabase = require('../config/supabase');
 const { signToken } = require('../utils/jwt');
@@ -196,6 +197,18 @@ const verifyResetToken = async (req, res, next) => {
       } : null,
     };
 
+    // Start audit log session for reset token login
+    try {
+      await auditService.startSession({
+        organization_id: user.organization_id,
+        user_id: user.id,
+        user_email: user.email,
+        name: fullName,
+      });
+    } catch (auditErr) {
+      console.error('❌ Audit startSession error in verifyResetToken:', auditErr.message);
+    }
+
     return successResponse(res, { token: sessionToken, user: userProfile }, 'Password reset token verification successful.');
   } catch (err) {
     next(err);
@@ -242,6 +255,90 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
+const logout = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (user && user.id && user.organization_id) {
+      await auditService.endSession({
+        organization_id: user.organization_id,
+        user_id: user.id,
+        reason: 'LOGOUT',
+        logout_reason: 'LOGOUT',
+      });
+    }
+    return successResponse(res, null, 'Logged out successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+const ping = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!user || !user.id || !user.organization_id) {
+      return errorResponse(res, 'Unauthorized: User session info missing.', 401);
+    }
+
+    const { supabaseAdmin } = require('../config/supabase');
+    const supabase = require('../config/supabase');
+    const client = supabaseAdmin || supabase;
+
+    const { data: sessionRow } = await client
+      .from('audit_logs')
+      .select('id, details, created_at')
+      .eq('organization_id', user.organization_id)
+      .eq('user_id', user.id)
+      .eq('event_type', 'LOGIN')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!sessionRow) {
+      return errorResponse(res, 'Unauthorized: Session expired or not found.', 401);
+    }
+
+    const timeoutMs = process.env.IDLE_TIMEOUT_MS ? parseInt(process.env.IDLE_TIMEOUT_MS, 10) : 300000;
+    const lastActivityStr = sessionRow.details?.last_activity_at || sessionRow.created_at;
+    const lastActivityTime = new Date(lastActivityStr).getTime();
+
+    if (Date.now() - lastActivityTime > timeoutMs) {
+      await auditService.endSession({
+        organization_id: user.organization_id,
+        user_id: user.id,
+        reason: 'SESSION_EXPIRED',
+        logout_reason: 'IDLE_TIMEOUT',
+      });
+      return errorResponse(res, 'Session expired due to inactivity.', 401);
+    }
+
+    await auditService.updateLastActivity({
+      organization_id: user.organization_id,
+      user_id: user.id,
+    });
+
+    return successResponse(res, null, 'Session active.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+const idleTimeout = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (user && user.id && user.organization_id) {
+      await auditService.endSession({
+        organization_id: user.organization_id,
+        user_id: user.id,
+        reason: 'SESSION_EXPIRED',
+        logout_reason: 'IDLE_TIMEOUT',
+      });
+    }
+    return successResponse(res, null, 'Session closed due to idle timeout.');
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   login,
   registerOrganization,
@@ -249,4 +346,7 @@ module.exports = {
   verifyResetToken,
   resetPassword,
   getMe,
+  logout,
+  ping,
+  idleTimeout,
 };

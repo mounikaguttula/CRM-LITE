@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const formService = require('../services/formService');
 const metadataService = require('../services/metadataService');
+const auditService = require('../services/auditService');
 
 const formController = {
   /**
@@ -53,6 +54,16 @@ const formController = {
         return res.status(400).json({ message: 'Organization ID is required.' });
       }
       const form = await formService.createForm(req.body, organizationId, userId);
+
+      auditService.logUserActivity({
+        organization_id: organizationId,
+        user_id: userId,
+        action: 'CREATE',
+        module: 'form',
+        record_id: form?.id || null,
+        description: 'Created Form',
+      }).catch(() => null);
+
       return res.status(201).json({
         success: true,
         message: 'Form created successfully.',
@@ -75,6 +86,16 @@ const formController = {
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
       const updatedForm = await formService.updateForm(id, req.body, organizationId, userId);
+
+      auditService.logUserActivity({
+        organization_id: organizationId,
+        user_id: userId,
+        action: 'UPDATE',
+        module: 'form',
+        record_id: id,
+        description: 'Updated Form',
+      }).catch(() => null);
+
       return res.status(200).json({
         success: true,
         message: 'Form updated successfully.',
@@ -97,6 +118,16 @@ const formController = {
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
       const result = await formService.deleteForm(id, organizationId, userId);
+
+      auditService.logUserActivity({
+        organization_id: organizationId,
+        user_id: userId,
+        action: 'DELETE',
+        module: 'form',
+        record_id: id,
+        description: 'Deleted Form',
+      }).catch(() => null);
+
       return res.status(200).json(result);
     } catch (err) {
       next(err);

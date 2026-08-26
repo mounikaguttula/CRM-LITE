@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { signToken } = require('../utils/jwt');
 const supabase = require('../config/supabase');
+const auditService = require('./auditService');
 
 const login = async (email, password) => {
   // Query users table joined with Organization
@@ -49,6 +50,18 @@ const login = async (email, password) => {
       plan: user.organization.subscription_plan,
     } : null,
   };
+
+  // Start audit log session for successful login
+  try {
+    await auditService.startSession({
+      organization_id: user.organization_id,
+      user_id: user.id,
+      user_email: user.email,
+      name: fullName,
+    });
+  } catch (auditErr) {
+    console.error('❌ Audit startSession error in login:', auditErr.message);
+  }
 
   return { token, user: userProfile };
 };
@@ -101,6 +114,18 @@ const registerOrganization = async ({ orgName, companyCode, organizationCode, ad
     role_id: user.role_id,
     organization_id: org.id,
   });
+
+  // Start audit log session for organization registration login
+  try {
+    await auditService.startSession({
+      organization_id: org.id,
+      user_id: user.id,
+      user_email: user.email,
+      name: fullName,
+    });
+  } catch (auditErr) {
+    console.error('❌ Audit startSession error in registerOrganization:', auditErr.message);
+  }
 
   return {
     organization: org,

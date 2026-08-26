@@ -72,7 +72,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
   const cleanObjKey = String(objectTypeId || '').toLowerCase();
   const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
-  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${keyPlural}s`;
+  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
   const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
 
   const canUpdate = objPerm ? (objPerm.canUpdate === true || objPerm.canEdit === true) : false;

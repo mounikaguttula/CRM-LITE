@@ -16,6 +16,9 @@ router.post('/verify-reset-token', authController.verifyResetToken);
 
 // Protected routes
 router.get('/me', authMiddleware, authController.getMe);
+router.post('/logout', authMiddleware, authController.logout);
+router.post('/ping', authMiddleware, authController.ping);
+router.post('/idle-timeout', authMiddleware, authController.idleTimeout);
 router.post('/reset-password', authMiddleware, authController.resetPassword);
 
 module.exports = router;

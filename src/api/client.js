@@ -13,6 +13,10 @@ const apiFetch = async (endpoint, options = {}) => {
     ...(options.headers || {}),
   };
 
+  if (options.isUserActivity || options.headers?.['X-User-Activity'] || options.headers?.['x-user-activity']) {
+    headers['X-User-Activity'] = '1';
+  }
+
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
   }
