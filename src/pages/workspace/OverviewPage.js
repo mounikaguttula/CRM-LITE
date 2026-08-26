@@ -448,6 +448,41 @@ function DashboardContent() {
     return list.slice(0, 5);
   }, [userLeads, userDeals, userContacts, userCompanies]);
 
+  // Dynamic top-right header KPI metrics for current week (7 days)
+  const headerKpiMetrics = useMemo(() => {
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const weekAgoMs = now - sevenDaysMs;
+
+    // 1. New Leads created this week
+    const newLeads = userLeads.filter((r) => {
+      const createdStr = r.created_at || (r.data && r.data.created_at);
+      const createdMs = createdStr ? Date.parse(createdStr) : 0;
+      return !isNaN(createdMs) && createdMs >= weekAgoMs;
+    }).length;
+
+    // 2. New Contacts created this week
+    const newContacts = userContacts.filter((r) => {
+      const createdStr = r.created_at || (r.data && r.data.created_at);
+      const createdMs = createdStr ? Date.parse(createdStr) : 0;
+      return !isNaN(createdMs) && createdMs >= weekAgoMs;
+    }).length;
+
+    // 3. Recent Updates modified this week across user-scoped records
+    const allRecords = [...userLeads, ...userDeals, ...userContacts, ...userCompanies];
+    const recentUpdates = allRecords.filter((r) => {
+      const updatedStr = r.updated_at || (r.data && r.data.updated_at);
+      const updatedMs = updatedStr ? Date.parse(updatedStr) : 0;
+      return !isNaN(updatedMs) && updatedMs >= weekAgoMs;
+    }).length;
+
+    return {
+      newLeads,
+      newContacts,
+      recentUpdates,
+    };
+  }, [userLeads, userContacts, userDeals, userCompanies]);
+
   if (loading) {
     return (
       <div style={{ padding: '60px 0', textAlign: 'center', color: '#8990ac' }}>
@@ -691,13 +726,14 @@ function DashboardContent() {
 
           <div style={{ display: 'flex', gap: 10, animation: 'dbFadeSlideIn 0.5s 0.4s both' }}>
             {[
-              { v: '$489k', l: 'Closed', color: '#10b981' },
-              { v: '68%', l: 'Q3 Goal', color: '#f59e0b' },
-              { v: '94%', l: 'Retention', color: '#38bdf8' },
+              { v: headerKpiMetrics.newLeads, l: 'NEW LEADS', sub: 'This week', color: '#10b981' },
+              { v: headerKpiMetrics.newContacts, l: 'NEW CONTACTS', sub: 'This week', color: '#f59e0b' },
+              { v: headerKpiMetrics.recentUpdates, l: 'RECENT UPDATES', sub: 'This week', color: '#38bdf8' },
             ].map((s) => (
-              <div key={s.l} style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'center', minWidth: 72 }}>
-                <div style={{ fontSize: '1rem', fontWeight: 900, color: s.color, lineHeight: 1, marginBottom: 3 }}>{s.v}</div>
-                <div style={{ fontSize: '0.6rem', fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{s.l}</div>
+              <div key={s.l} style={{ padding: '10px 14px', borderRadius: 14, background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'center', minWidth: 84 }}>
+                <div style={{ fontSize: '1.05rem', fontWeight: 900, color: s.color, lineHeight: 1, marginBottom: 3 }}>{s.v}</div>
+                <div style={{ fontSize: '0.58rem', fontWeight: 700, color: 'rgba(255,255,255,0.7)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{s.l}</div>
+                <div style={{ fontSize: '0.54rem', fontWeight: 500, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>{s.sub}</div>
               </div>
             ))}
           </div>

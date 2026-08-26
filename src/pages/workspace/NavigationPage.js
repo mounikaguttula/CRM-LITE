@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Target, Briefcase, Users, Building2,
   Megaphone, FileText, QrCode, Folder, LogOut,
-  ChevronRight, Sparkles,
+  ChevronRight, Sparkles, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 function getModuleIcon(name, size = 15) {
@@ -132,6 +132,61 @@ function NavigationPage({ onNavigate }) {
       return a._label.localeCompare(b._label, undefined, { sensitivity: 'base' });
     });
 
+  const [isStandardOpen, setIsStandardOpen] = React.useState(() => {
+    const saved = localStorage.getItem('crm_nav_standard_open');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const [isCustomOpen, setIsCustomOpen] = React.useState(() => {
+    const saved = localStorage.getItem('crm_nav_custom_open');
+    return saved !== null ? saved === 'true' : false;
+  });
+
+  const toggleStandard = () => {
+    setIsStandardOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem('crm_nav_standard_open', String(next));
+      return next;
+    });
+  };
+
+  const toggleCustom = () => {
+    setIsCustomOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem('crm_nav_custom_open', String(next));
+      return next;
+    });
+  };
+
+  const standardNavItems = [];
+  const customNavItems = [];
+
+  navItems.forEach((item) => {
+    const rawKey = String(item.id || item.icon || item.displayName || '').replace(/^nav_/, '').toLowerCase();
+    const keySingular = rawKey.endsWith('s') ? rawKey.slice(0, -1) : rawKey;
+    const keyPlural = rawKey.endsWith('s') ? rawKey : `${rawKey}s`;
+
+    const objMeta = objectTypes
+      ? (objectTypes[rawKey] || objectTypes[keySingular] || objectTypes[keyPlural] || Object.values(objectTypes).find((o) => String(o.api_name || '').toLowerCase() === rawKey))
+      : null;
+
+    const isCustom = Boolean(
+      objMeta?.is_custom === true ||
+      objMeta?.is_system === false ||
+      rawKey.endsWith('__c') ||
+      (objMeta && !objMeta.is_system && objMeta.organization_id !== null)
+    );
+
+    if (isCustom) {
+      customNavItems.push(item);
+    } else {
+      standardNavItems.push(item);
+    }
+  });
+
+  const canReadForms = !permissions || (permissions.form?.canRead !== false && permissions.forms?.canRead !== false);
+  const canReadLeadScanner = !permissions || (permissions.lead?.canRead !== false && permissions.leads?.canRead !== false);
+
   const SidebarNavItem = ({ to, label, icon, gradient, isActive, onClick }) => {
     const [hov, setHov] = React.useState(false);
     return (
@@ -178,6 +233,38 @@ function NavigationPage({ onNavigate }) {
     }}>
       {children}
     </div>
+  );
+
+  const CollapsibleSectionHeader = ({ title, isOpen, onToggle }) => (
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: 'transparent',
+        border: 'none',
+        padding: '10px 14px 4px',
+        cursor: 'pointer',
+        color: 'rgba(255,255,255,0.38)',
+        fontSize: '0.62rem',
+        fontWeight: 700,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        transition: 'color 0.2s ease',
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.75)')}
+      onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.38)')}
+    >
+      <span>{title}</span>
+      {isOpen ? (
+        <ChevronDown size={12} style={{ color: 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+      ) : (
+        <ChevronUp size={12} style={{ color: 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+      )}
+    </button>
   );
 
   const isDashboardActive = location.pathname === '/workspace' || location.pathname === '/workspace/dashboard';
@@ -227,49 +314,93 @@ function NavigationPage({ onNavigate }) {
           onClick={onNavigate}
         />
 
-        {/* Modules */}
-        <SectionLabel>Modules</SectionLabel>
-        {loading ? (
-          <div style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.3)', padding:'8px 14px', fontStyle:'italic' }}>Loading modules…</div>
-        ) : navItems.length === 0 ? (
-          <div style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.3)', padding:'8px 14px', fontStyle:'italic' }}>No modules found</div>
-        ) : (
-          navItems.map((item) => {
-            const isActive = location.pathname.startsWith(item.route);
-            const grad = getModuleGradient(`${item.icon || ''} ${item.displayName || ''}`);
-            const icon = getModuleIcon(`${item.icon || ''} ${item.displayName || ''}`);
-            return (
+        {/* STANDARD MODULES SECTION */}
+        <CollapsibleSectionHeader
+          title="Standard"
+          isOpen={isStandardOpen}
+          onToggle={toggleStandard}
+        />
+        {isStandardOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {loading ? (
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', padding: '6px 14px', fontStyle: 'italic' }}>Loading modules…</div>
+            ) : standardNavItems.length === 0 ? (
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', padding: '6px 14px', fontStyle: 'italic' }}>No standard modules</div>
+            ) : (
+              standardNavItems.map((item) => {
+                const isActive = location.pathname.startsWith(item.route);
+                const grad = getModuleGradient(`${item.icon || ''} ${item.displayName || ''}`);
+                const icon = getModuleIcon(`${item.icon || ''} ${item.displayName || ''}`);
+                return (
+                  <SidebarNavItem
+                    key={item.id}
+                    to={item.route}
+                    label={item.displayName}
+                    icon={icon}
+                    gradient={grad}
+                    isActive={isActive}
+                    onClick={onNavigate}
+                  />
+                );
+              })
+            )}
+
+            {canReadForms && (
               <SidebarNavItem
-                key={item.id}
-                to={item.route}
-                label={item.displayName}
-                icon={icon}
-                gradient={grad}
-                isActive={isActive}
+                to="/workspace/forms"
+                label="Forms"
+                icon={<FileText size={15} color="#fff" />}
+                gradient="linear-gradient(135deg,#4f46e5,#818cf8)"
+                isActive={location.pathname.startsWith('/workspace/forms')}
                 onClick={onNavigate}
               />
-            );
-          })
+            )}
+
+            {canReadLeadScanner && (
+              <SidebarNavItem
+                to="/workspace/lead-scanner"
+                label="Lead QR Scanner"
+                icon={<QrCode size={15} color="#fff" />}
+                gradient="linear-gradient(135deg,#6366f1,#22d3ee)"
+                isActive={location.pathname === '/workspace/lead-scanner'}
+                onClick={onNavigate}
+              />
+            )}
+          </div>
         )}
 
-        {/* Tools after all modules */}
-        <SidebarNavItem
-          to="/workspace/forms"
-          label="Forms"
-          icon={<FileText size={15} color="#fff" />}
-          gradient="linear-gradient(135deg,#4f46e5,#818cf8)"
-          isActive={location.pathname.startsWith('/workspace/forms')}
-          onClick={onNavigate}
+        {/* CUSTOM MODULES SECTION */}
+        <CollapsibleSectionHeader
+          title="Custom"
+          isOpen={isCustomOpen}
+          onToggle={toggleCustom}
         />
-
-        <SidebarNavItem
-          to="/workspace/lead-scanner"
-          label="Lead QR Scanner"
-          icon={<QrCode size={15} color="#fff" />}
-          gradient="linear-gradient(135deg,#6366f1,#22d3ee)"
-          isActive={location.pathname === '/workspace/lead-scanner'}
-          onClick={onNavigate}
-        />
+        {isCustomOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {loading ? (
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', padding: '6px 14px', fontStyle: 'italic' }}>Loading modules…</div>
+            ) : customNavItems.length === 0 ? (
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', padding: '6px 14px', fontStyle: 'italic' }}>No custom modules</div>
+            ) : (
+              customNavItems.map((item) => {
+                const isActive = location.pathname.startsWith(item.route);
+                const grad = getModuleGradient(`${item.icon || ''} ${item.displayName || ''}`);
+                const icon = getModuleIcon(`${item.icon || ''} ${item.displayName || ''}`);
+                return (
+                  <SidebarNavItem
+                    key={item.id}
+                    to={item.route}
+                    label={item.displayName}
+                    icon={icon}
+                    gradient={grad}
+                    isActive={isActive}
+                    onClick={onNavigate}
+                  />
+                );
+              })
+            )}
+          </div>
+        )}
 
       </nav>
 

@@ -208,7 +208,7 @@ function Setup() {
       id: 'data', title: 'DATA MANAGEMENT',
       items: [
         { id: 'modules', label: 'Modules', icon: Boxes },
-        { id: 'validation', label: 'Validation', icon: FileText },
+        { id: 'validation', label: 'Record Rules', icon: FileText },
         { id: 'automations', label: 'Flow Automations', icon: Workflow },
       ],
     },
@@ -221,7 +221,7 @@ function Setup() {
       glow: '#764ba2', tab: 'company', isOrg: true, delay: 0,
     },
     {
-      value: '5', label: 'Custom Objects', sub: '+2 this quarter',
+      value: '5', label: 'Custom Modules', sub: '+2 this quarter',
       icon: Boxes, gradient: 'linear-gradient(135deg, #00b09b, #96c93d)',
       glow: '#00b09b', tab: 'modules', trend: '+40%',
       sparkData: [3, 2, 4, 3, 5, 4, 5], delay: 80,
@@ -245,7 +245,7 @@ function Setup() {
     { label: 'User Management', desc: 'Roles & access', icon: Users, color: '#f5576c', bg: 'rgba(245,87,108,0.07)', tab: 'users' },
     { label: 'Security Roles', desc: 'Permissions', icon: Shield, color: '#4facfe', bg: 'rgba(79,172,254,0.07)', tab: 'roles' },
     { label: 'Company Profile', desc: 'Org settings', icon: Building2, color: '#764ba2', bg: 'rgba(118,75,162,0.07)', tab: 'company' },
-    { label: 'Validation Rules', desc: 'Field policies', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation' },
+    { label: 'Record Rules', desc: 'Field policies', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation' },
     { label: 'General Config', desc: 'Workspace prefs', icon: Settings, color: '#a18cd1', bg: 'rgba(161,140,209,0.07)', tab: 'general' },
   ];
 
@@ -260,7 +260,7 @@ function Setup() {
     { action: 'Custom field added', target: 'Lead module', time: '2m ago', color: '#00b09b', icon: Boxes },
     { action: 'User invited', target: 'developer@team.io', time: '15m ago', color: '#f5576c', icon: Users },
     { action: 'Role permissions updated', target: 'Manager role', time: '1h ago', color: '#764ba2', icon: Shield },
-    { action: 'Object schema modified', target: 'Deal module', time: '3h ago', color: '#4facfe', icon: Database },
+    { action: 'Module schema modified', target: 'Deal module', time: '3h ago', color: '#4facfe', icon: Database },
     { action: 'Company settings saved', target: 'Org profile', time: 'Yesterday', color: '#f6d365', icon: Building2 },
   ];
 
@@ -446,7 +446,7 @@ function Setup() {
                     Setup & <span style={{ background: 'linear-gradient(90deg, #00b09b, #4facfe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Administration</span>
                   </h1>
                   <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.48)', maxWidth: 480, lineHeight: 1.65, animation: 'fadeSlideIn 0.5s 0.3s both' }}>
-                    Manage your CRM platform — configure objects, schemas, users, roles, and workspace settings.
+                    Manage your CRM platform — configure modules, schemas, users, roles, and workspace settings.
                   </p>
                 </div>
 

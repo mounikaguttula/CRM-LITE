@@ -778,10 +778,10 @@ function ObjectDetail({ objectKey, onBack }) {
 function DetailsTab({ objectDef }) {
   const detailRows = [
     { label: 'Label', value: objectDef?.display_name || objectDef?.api_name || '—' },
-    { label: 'Description', value: objectDef?.description || `Data object definition for managing ${objectDef?.display_name || objectDef?.api_name || ''} records.` },
+    { label: 'Description', value: objectDef?.description || `Data module definition for managing ${objectDef?.display_name || objectDef?.api_name || ''} records.` },
     { label: 'API Name', value: objectDef?.api_name || '—' },
     { label: 'Last Modified', value: objectDef?.updated_at || objectDef?.created_at || '—' },
-    { label: 'Type', value: objectDef?.is_system ? 'System Object' : 'Custom Object' },
+    { label: 'Type', value: objectDef?.is_system ? 'System Module' : 'Custom Module' },
     { label: 'Deployment Status', value: objectDef?.status || 'Deployed' },
   ];
 
@@ -843,7 +843,7 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, onD
           </div>
         ) : fields.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-            No fields configured for this object.
+            No fields configured for this module.
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1126,7 +1126,7 @@ function PageLayoutsTab({ displayName, fields }) {
 
 
 /* ══════════════════════════════════════════════
-   Tab 4: Validation
+   Tab 4: Record Rules
    ══════════════════════════════════════════════ */
 function ValidationTab({ displayName, fields }) {
   const requiredFields = fields.filter((f) => f.required);
@@ -1135,20 +1135,20 @@ function ValidationTab({ displayName, fields }) {
   return (
     <div className="fade-in glass" style={{ padding: '24px 28px', borderRadius: '16px', background: '#ffffff', border: '1px solid #f1f5f9', boxShadow: '0 4px 18px rgba(15, 23, 42, 0.03), 0 1px 3px rgba(15, 23, 42, 0.02)' }}>
       <h3 className="font-display" style={{ margin: '0 0 20px', fontSize: '1.05rem', fontWeight: 700, color: '#1c2033' }}>
-        Validation Rules
+        Record Rules
       </h3>
 
 
       {/* Built-in required field validations */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#64748b', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          Required Field Validations ({requiredFields.length})
+          Required Field Rules ({requiredFields.length})
         </div>
 
 
         {requiredFields.length === 0 ? (
           <div style={{ padding: 20, textAlign: 'center', color: '#64748b', fontSize: '0.84rem', background: 'rgba(99,102,241,0.03)', borderRadius: 10 }}>
-            No required field validations configured.
+            No required field rules configured.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

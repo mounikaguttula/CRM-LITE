@@ -166,7 +166,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     if (Object.keys(valErrors).length > 0) {
       setErrors(valErrors);
       const firstErrMsg = Object.values(valErrors)[0];
-      setSubmitError(firstErrMsg ? `Validation Error: ${firstErrMsg}` : 'Validation Error: Please review the errors on this page.');
+      setSubmitError(firstErrMsg ? `Record Rule Error: ${firstErrMsg}` : 'Record Rule Error: Please review the errors on this page.');
       return;
     }
 

@@ -52,7 +52,7 @@ function Navbar({ onMenuToggle }) {
     { label: 'Companies Directory', route: '/workspace/object/company', keywords: ['company', 'companies', 'account', 'accounts', 'org'], category: 'CRM Modules' },
     { label: 'Campaigns & Marketing', route: '/workspace/campaigns', keywords: ['campaign', 'campaigns', 'marketing', 'outreach'], category: 'CRM Modules' },
     { label: 'Lead QR & Barcode Scanner', route: '/workspace/lead-scanner', keywords: ['scan', 'scanner', 'qr', 'barcode', 'vcard'], category: 'Tools' },
-    { label: 'Validation Rules Policy', route: '/setup?tab=validation', keywords: ['validation', 'rule', 'rules', 'policy', 'data'], category: 'Settings' },
+    { label: 'Record Rules Policy', route: '/setup?tab=validation', keywords: ['record', 'rules', 'rule', 'validation', 'policy', 'data'], category: 'Settings' },
     { label: 'CRM Executive Dashboard', route: '/workspace/dashboard', keywords: ['dashboard', 'overview', 'stats', 'analytics', 'home'], category: 'Navigation' },
     { label: 'Setup & System Admin', route: '/setup', keywords: ['setup', 'admin', 'users', 'roles', 'modules', 'settings'], category: 'Settings' },
   ];
@@ -98,7 +98,7 @@ function Navbar({ onMenuToggle }) {
       if (tab === 'users')   return ['User Management', 'Manage team members and their access.'];
       if (tab === 'roles')   return ['Roles & Permissions', 'Configure security roles and policies.'];
       if (tab === 'modules') return ['Module Manager', 'Customize objects, fields, and schemas.'];
-      if (tab === 'validation') return ['Validation Rules', 'Configure field-level data policies.'];
+      if (tab === 'validation') return ['Record Rules', 'Configure field-level data policies.'];
       if (tab === 'automations') return ['Flow Automations', 'Automate business workflows.'];
       return ['Setup & Administration', 'Configure your CRM platform.'];
     }
