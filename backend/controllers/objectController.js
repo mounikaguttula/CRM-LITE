@@ -25,28 +25,16 @@ const getRecords = async (req, res, next) => {
     const objectType = req.params.objectType || req.path.replace(/^\//, '').split('/')[0];
     const organizationId = req.user?.organization_id;
 
-
-    console.log(`\n------------------- 🔍 CONTROLLER CHECK: GET RECORDS -------------------`);
-    console.log(`[Controller] getRecords -> objectType="${objectType}", userId=${req.user?.id}, roleId=${req.user?.role_id}, orgId=${organizationId}`);
-
-
     // Enforce permission check
-    const perms = await metadataService.getPermissions(req.user);
-    const objPerm = getPermForObject(perms, objectType);
-    console.log(`[Controller] Read Permission resolved for [${objectType}]:`, JSON.stringify(objPerm, null, 2));
+    await metadataService.checkPermission(req.user, objectType, 'read');
 
-
-    if (objPerm && objPerm.canRead === false) {
-      console.log(`[Controller] ⛔ BLOCKED read request for [${objectType}] (canRead is false)! Throwing 403 Access Denied.`);
-      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
+    const options = {};
+    if (req.query.scope === 'user' || req.query.owner_id) {
+      // Security enforcement: Always use authenticated user's ID from req.user
+      options.owner_id = req.user?.id;
     }
 
-
-    console.log(`[Controller] ✅ ALLOWED read request for [${objectType}]. Proceeding to fetch records.`);
-    console.log(`-------------------------------------------------------------------------\n`);
-
-
-    const records = await objectService.listRecords(objectType, organizationId);
+    const records = await objectService.listRecords(objectType, organizationId, options);
     return res.status(200).json(records);
   } catch (err) {
     next(err);
@@ -60,21 +48,8 @@ const getRecordById = async (req, res, next) => {
     const { id } = req.params;
     const organizationId = req.user?.organization_id;
 
-
-    console.log(`[Controller] getRecordById for objectType=${objectType}, recordId=${id}, userId=${req.user?.id}`);
-
-
     // Enforce permission check
-    const perms = await metadataService.getPermissions(req.user);
-    const objPerm = getPermForObject(perms, objectType);
-    console.log(`[Controller] ReadById Permission resolved for [${objectType}]:`, JSON.stringify(objPerm));
-
-
-    if (objPerm && objPerm.canRead === false) {
-      console.log(`[Controller] BLOCKED readById request for [${objectType}] (canRead is false)`);
-      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-    }
-
+    await metadataService.checkPermission(req.user, objectType, 'read');
 
     const record = await objectService.getRecordById(objectType, id, organizationId);
     return successResponse(res, record, `${objectType} record fetched successfully.`);
@@ -90,21 +65,8 @@ const createRecord = async (req, res, next) => {
     const organizationId = req.user?.organization_id;
     const userId = req.user?.id;
 
-
-    console.log(`[Controller] createRecord for objectType=${objectType}, userId=${userId}`);
-
-
     // Enforce permission check
-    const perms = await metadataService.getPermissions(req.user);
-    const objPerm = getPermForObject(perms, objectType);
-    console.log(`[Controller] Create Permission resolved for [${objectType}]:`, JSON.stringify(objPerm));
-
-
-    if (objPerm && objPerm.canCreate === false) {
-      console.log(`[Controller] BLOCKED create request for [${objectType}] (canCreate is false)`);
-      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-    }
-
+    await metadataService.checkPermission(req.user, objectType, 'create');
 
     const record = await objectService.createRecord(objectType, req.body, organizationId, userId);
     return successResponse(res, record, `${objectType} record created successfully.`, 201);
@@ -121,21 +83,8 @@ const updateRecord = async (req, res, next) => {
     const organizationId = req.user?.organization_id;
     const userId = req.user?.id;
 
-
-    console.log(`[Controller] updateRecord for objectType=${objectType}, recordId=${id}, userId=${userId}`);
-
-
     // Enforce permission check
-    const perms = await metadataService.getPermissions(req.user);
-    const objPerm = getPermForObject(perms, objectType);
-    console.log(`[Controller] Update/Edit Permission resolved for [${objectType}]:`, JSON.stringify(objPerm));
-
-
-    if (objPerm && (objPerm.canUpdate === false || objPerm.canEdit === false)) {
-      console.log(`[Controller] BLOCKED update request for [${objectType}] (canUpdate is false)`);
-      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-    }
-
+    await metadataService.checkPermission(req.user, objectType, 'update');
 
     const record = await objectService.updateRecord(objectType, id, req.body, organizationId, userId);
     return successResponse(res, record, `${objectType} record updated successfully.`);
@@ -152,21 +101,8 @@ const deleteRecord = async (req, res, next) => {
     const organizationId = req.user?.organization_id;
     const userId = req.user?.id;
 
-
-    console.log(`[Controller] deleteRecord for objectType=${objectType}, recordId=${id}, userId=${userId}`);
-
-
     // Enforce permission check
-    const perms = await metadataService.getPermissions(req.user);
-    const objPerm = getPermForObject(perms, objectType);
-    console.log(`[Controller] Delete Permission resolved for [${objectType}]:`, JSON.stringify(objPerm));
-
-
-    if (objPerm && objPerm.canDelete === false) {
-      console.log(`[Controller] BLOCKED delete request for [${objectType}] (canDelete is false)`);
-      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-    }
-
+    await metadataService.checkPermission(req.user, objectType, 'delete');
 
     await objectService.deleteRecord(objectType, id, organizationId, userId);
     return successResponse(res, null, `${objectType} record deleted successfully.`);

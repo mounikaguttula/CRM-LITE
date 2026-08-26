@@ -62,7 +62,7 @@ function SignOutIconButton({ onClick }) {
 }
 
 function NavigationPage({ onNavigate }) {
-  const { navigation, company, currentUser, objectTypes, loading } = useWorkspace();
+  const { navigation, company, currentUser, objectTypes, permissions, loading } = useWorkspace();
   const { logout, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -82,7 +82,7 @@ function NavigationPage({ onNavigate }) {
     ? displayName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
 
-  /* Build nav items from backend, filtering out internal form and form_submission system objects */
+  /* Build nav items from backend, applying strict fail-closed canRead permission check */
   const hasNav = Array.isArray(navigation) && navigation.length > 0;
   const hasObj = objectTypes && Object.keys(objectTypes).length > 0;
   const rawNavItems = (hasNav
@@ -96,8 +96,16 @@ function NavigationPage({ onNavigate }) {
         }))
       : []
   ).filter((item) => {
-    const key = String(item.id || item.icon || item.displayName || '').toLowerCase();
-    return !key.includes('form');
+    const rawKey = String(item.id || item.icon || item.displayName || '').replace(/^nav_/, '').toLowerCase();
+    if (rawKey.includes('form')) return false;
+
+    if (permissions) {
+      const keySingular = rawKey.endsWith('s') ? rawKey.slice(0, -1) : rawKey;
+      const keyPlural = rawKey.endsWith('s') ? rawKey : `${rawKey}s`;
+      const perm = permissions[rawKey] || permissions[keySingular] || permissions[keyPlural];
+      if (!perm || perm.canRead !== true) return false;
+    }
+    return true;
   });
 
 

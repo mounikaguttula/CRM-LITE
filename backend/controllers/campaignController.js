@@ -264,10 +264,7 @@ const campaignController = {
    */
   listCampaigns: async (req, res, next) => {
     try {
-      const { canRead } = await getCampaignPermissions(req.user);
-      if (!canRead) {
-        throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-      }
+      await metadataService.checkPermission(req.user, 'campaign', 'read');
 
       const organizationId = req.user?.organization_id;
 
@@ -316,10 +313,7 @@ const campaignController = {
    */
   sendCampaign: async (req, res, next) => {
     try {
-      const { canCreate, canUpdate } = await getCampaignPermissions(req.user);
-      if (!canCreate || !canUpdate) {
-        throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-      }
+      await metadataService.checkPermission(req.user, 'campaign', 'create');
 
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
@@ -479,10 +473,7 @@ const campaignController = {
    */
   deleteCampaign: async (req, res, next) => {
     try {
-      const { canDelete } = await getCampaignPermissions(req.user);
-      if (!canDelete) {
-        throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-      }
+      await metadataService.checkPermission(req.user, 'campaign', 'delete');
 
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
@@ -509,10 +500,7 @@ const campaignController = {
    */
   getCampaignTracking: async (req, res, next) => {
     try {
-      const { canRead } = await getCampaignPermissions(req.user);
-      if (!canRead) {
-        throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
-      }
+      await metadataService.checkPermission(req.user, 'campaign', 'read');
 
       const { id } = req.params;
       const organizationId = req.user?.organization_id;

@@ -199,7 +199,7 @@ function ValidationRulesPage({ initialObject }) {
       setRules((prev) => prev.filter((r) => r.id !== ruleId));
     } catch (err) {
       console.error('Failed to delete validation rule:', err);
-      alert(err.response?.data?.message || err.message || 'Failed to delete validation rule.');
+      setSubmitError(err.response?.data?.message || err.message || 'Failed to delete validation rule.');
     }
   };
 
@@ -212,7 +212,7 @@ function ValidationRulesPage({ initialObject }) {
       fetchRulesForObject();
     } catch (err) {
       console.error('Failed to reset validation rule to default:', err);
-      alert(err.response?.data?.message || err.message || 'Failed to reset rule to default.');
+      setSubmitError(err.response?.data?.message || err.message || 'Failed to reset rule to default.');
     }
   };
 

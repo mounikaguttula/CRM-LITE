@@ -279,6 +279,36 @@ VALUES
   ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a46', NULL, 'form_submission', 'Form Submissions', true)
 ON CONFLICT (id) DO NOTHING;
 
+-- Seed Object Permissions for Standard Enterprise Roles
+INSERT INTO public.object_permissions (role_id, object_type_id, can_create, can_read, can_update, can_delete, view_all, modify_all)
+VALUES
+  -- Administrator (Full Access)
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, true, true, true),
+  -- CRM Manager (Full Management Access)
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, true, true, true),
+  -- Relationship Manager (Client & Deal Management)
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, true, false, false),
+  -- CRM Executive (Operational Standard Access)
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, false, false, false),
+  -- Read Only User (Strict Read-Only Access)
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', false, true, false, false, false, false)
+ON CONFLICT DO NOTHING;
+
 -- Seed Field Definitions for Leads, Deals, Contacts, Companies
 INSERT INTO public.field_definitions (organization_id, object_type_id, api_name, display_name, field_type, required)
 VALUES

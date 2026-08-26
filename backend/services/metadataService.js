@@ -429,7 +429,7 @@ const metadataService = {
   /**
    * Get dynamic navigation items.
    */
-  getNavigation: async (organizationId, customObjectDefs = null) => {
+  getNavigation: async (organizationId, customObjectDefs = null, permissions = null) => {
     const objectDefs = customObjectDefs || (await metadataService.getObjectDefinitions(organizationId));
 
 
@@ -457,8 +457,17 @@ const metadataService = {
       return String(a.display_name || '').localeCompare(String(b.display_name || ''));
     });
 
+    const filtered = sorted.filter((obj) => {
+      if (!permissions) return false;
+      const key = String(obj.api_name).toLowerCase();
+      const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
+      const keyPlural = key.endsWith('s') ? key : `${key}s`;
+      const perm = permissions[key] || permissions[keySingular] || permissions[keyPlural];
+      return perm?.canRead === true;
+    });
 
-    return sorted.map((obj) => ({
+
+    return filtered.map((obj) => ({
       id: `nav_${obj.api_name}`,
       displayName: obj.display_name,
       route: `/workspace/object/${obj.api_name}`,
@@ -542,6 +551,8 @@ const metadataService = {
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
 
 
+      const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
+
       let objPerm;
       if (dbPerm) {
         objPerm = {
@@ -562,15 +573,15 @@ const metadataService = {
         }));
       } else {
         objPerm = {
-          canCreate: true,
-          canRead: true,
-          canUpdate: true,
-          canEdit: true,
-          canDelete: true,
-          viewAll: true,
-          modifyAll: true,
+          canCreate: isSystemAdmin,
+          canRead: isSystemAdmin,
+          canUpdate: isSystemAdmin,
+          canEdit: isSystemAdmin,
+          canDelete: isSystemAdmin,
+          viewAll: isSystemAdmin,
+          modifyAll: isSystemAdmin,
         };
-        console.log(`[Permissions] ⚠️ Default fallback for [${apiName}] (no DB record matching object_type_id=${obj.id}): Granted full access.`);
+        console.log(`[Permissions] ⚠️ Default fallback for [${apiName}] (no DB record matching object_type_id=${obj.id}): Resolved failClosed=${!isSystemAdmin}`);
       }
 
 
@@ -585,6 +596,41 @@ const metadataService = {
 
 
     return permissions;
+  },
+
+  /**
+   * Centralized permission checking helper for controller routes.
+   * Resolves effective permissions via getPermissions(user) and verifies authorization.
+   * @param {Object} user - req.user context
+   * @param {String} objectType - Object key (e.g. 'lead', 'deal', 'campaign')
+   * @param {String} action - Action ('create', 'read', 'update', 'delete')
+   */
+  checkPermission: async (user, objectType, action) => {
+    if (!objectType || !action) return;
+
+    const actionMap = {
+      create: 'canCreate',
+      read: 'canRead',
+      update: 'canUpdate',
+      edit: 'canUpdate',
+      delete: 'canDelete',
+    };
+
+    const targetProp = actionMap[String(action).toLowerCase()] || 'canRead';
+
+    const perms = await metadataService.getPermissions(user);
+    if (!perms) return;
+
+    const key = String(objectType).toLowerCase();
+    const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
+    const keyPlural = key.endsWith('s') ? key : `${key}s`;
+
+    const objPerm = perms[key] || perms[keySingular] || perms[keyPlural];
+
+    if (objPerm && (objPerm[targetProp] === false || (targetProp === 'canUpdate' && objPerm.canEdit === false))) {
+      console.log(`[Authorization] ⛔ DENIED ${action} request for [${objectType}] (user: ${user?.id || user?.email}, role_id: ${user?.role_id})`);
+      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
+    }
   },
 
 
@@ -695,11 +741,6 @@ const metadataService = {
     }
     const availableObjects = (metaRes?.data || []).filter((o) => o.api_name !== 'form_inquiry' && o.api_name !== 'form_inquiries' && o.id !== 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a47');
 
-    // Measure Navigation query execution time
-    const tNavStart = Date.now();
-    const navigation = await metadataService.getNavigation(user?.organization_id, availableObjects);
-    const navDuration = Date.now() - tNavStart;
-
     // Measure Permissions query execution time (Object + Field Permissions)
     const tPermStart = Date.now();
     
@@ -765,6 +806,8 @@ const metadataService = {
       const keySingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
 
+      const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
+
       let objPerm;
       if (dbPerm) {
         objPerm = {
@@ -778,13 +821,13 @@ const metadataService = {
         };
       } else {
         objPerm = {
-          canCreate: true,
-          canRead: true,
-          canUpdate: true,
-          canEdit: true,
-          canDelete: true,
-          viewAll: true,
-          modifyAll: true,
+          canCreate: isSystemAdmin,
+          canRead: isSystemAdmin,
+          canUpdate: isSystemAdmin,
+          canEdit: isSystemAdmin,
+          canDelete: isSystemAdmin,
+          viewAll: isSystemAdmin,
+          modifyAll: isSystemAdmin,
         };
       }
 
@@ -792,6 +835,11 @@ const metadataService = {
       permissions[keySingular] = objPerm;
       permissions[keyPlural] = objPerm;
     }
+
+    // Build permission-aware navigation reusing resolved permissions
+    const tNavStart = Date.now();
+    const navigation = await metadataService.getNavigation(user?.organization_id, availableObjects, permissions);
+    const navDuration = Date.now() - tNavStart;
 
 
     const supabaseDuration = Date.now() - supabaseStart;

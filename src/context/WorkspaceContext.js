@@ -81,12 +81,21 @@ export function WorkspaceProvider({ children }) {
 
   const dbPerms = workspaceData?.permissions;
 
-  let activeObjectPerm = {};
+  let activeObjectPerm = null;
   if (objectTypeId && dbPerms) {
     const key = String(objectTypeId).toLowerCase();
     const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
     const keyPlural = key.endsWith('s') ? key : `${key}s`;
-    activeObjectPerm = dbPerms[key] || dbPerms[keySingular] || dbPerms[keyPlural] || {};
+    const foundPerm = dbPerms[key] || dbPerms[keySingular] || dbPerms[keyPlural];
+    activeObjectPerm = foundPerm || {
+      canCreate: false,
+      canRead: false,
+      canUpdate: false,
+      canEdit: false,
+      canDelete: false,
+      viewAll: false,
+      modifyAll: false,
+    };
   }
 
   const activePermissions = {
@@ -98,7 +107,7 @@ export function WorkspaceProvider({ children }) {
     viewAll: true,
     modifyAll: true,
     ...dbPerms,
-    ...activeObjectPerm,
+    ...(activeObjectPerm || {}),
   };
 
   const value = {

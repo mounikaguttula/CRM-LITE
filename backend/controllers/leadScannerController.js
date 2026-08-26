@@ -1,4 +1,5 @@
 const objectService = require('../services/objectService');
+const metadataService = require('../services/metadataService');
 
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET || '6LdcTZ8sAAAAAPSRxmKLXkzRzRn6KnLeIfvVG-fs';
 
@@ -57,6 +58,9 @@ const saveScannedLead = async (req, res, next) => {
     const { name, email, phone, company, title, lead_source, description, captchaToken } = req.body || {};
     const organizationId = req.user?.organization_id;
     const userId = req.user?.id;
+
+    // Enforce Lead Create Permission for authenticated QR scan save
+    await metadataService.checkPermission(req.user, 'lead', 'create');
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: 'Lead full name is required.' });

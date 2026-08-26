@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost, apiPut, apiDelete } from '../../api/client';
+import AccessDenied from '../../components/AccessDenied';
 import {
   Edit3,
   Mail,
@@ -484,16 +485,18 @@ function deriveHeaderTiles(objectTypeId, record, currentUser, organization, comp
    ═══════════════════════════════════════════════════════════════ */
 function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, onEdit, emailVal }) {
   const stageField =
-    meta?.fields?.find((f) => (f.name || '').toLowerCase() === 'stage') ||
-    meta?.fields?.find((f) => (f.name || '').toLowerCase() === 'status');
+    meta?.fields?.find((f) => (f.name || f.api_name || '').toLowerCase() === 'stage') ||
+    meta?.fields?.find((f) => (f.name || f.api_name || '').toLowerCase() === 'status');
 
-  let defaultStages = ['Qualification', 'Discovery', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
+  let defaultStages = [];
 
   if (stageField) {
-    if (Array.isArray(stageField.options) && stageField.options.length > 0) {
-      defaultStages = stageField.options.map((o) => (typeof o === 'object' ? o.value || o.label : String(o)));
+    if (Array.isArray(stageField.picklist_values) && stageField.picklist_values.length > 0) {
+      defaultStages = stageField.picklist_values.map(String);
     } else if (Array.isArray(stageField.picklistValues) && stageField.picklistValues.length > 0) {
       defaultStages = stageField.picklistValues.map(String);
+    } else if (Array.isArray(stageField.options) && stageField.options.length > 0) {
+      defaultStages = stageField.options.map((o) => (typeof o === 'object' ? o.value || o.label : String(o)));
     }
   }
 
@@ -502,7 +505,7 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
     (record?.data && record.data.stage) ||
     record?.status ||
     (record?.data && record.data.status) ||
-    defaultStages[0];
+    (defaultStages.length > 0 ? defaultStages[0] : '');
 
   const currentIdx = defaultStages.findIndex(
     (s) => String(s).trim().toLowerCase() === String(currentVal).trim().toLowerCase()
@@ -513,10 +516,19 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
   const [hoveredIdx, setHoveredIdx] = useState(null);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [errorModal, setErrorModal] = useState(null);
+
+  const showErrorModal = (message, title = 'Validation Error') => {
+    setErrorModal({ title, message });
+  };
 
   useEffect(() => {
     setSelectedIdx(activeIndex);
   }, [activeIndex]);
+
+  if (!defaultStages || defaultStages.length === 0) {
+    return null;
+  }
 
   const handleSaveStage = async (targetStage) => {
     setSaving(true);
@@ -563,7 +575,8 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
       setTimeout(() => setJustSaved(false), 2500);
     } catch (err) {
       console.error('Failed to update stage:', err);
-      alert('Failed to update stage: ' + (err.message || 'Unknown error'));
+      const msg = err.response?.data?.message || err.message || 'Unknown error';
+      showErrorModal(msg, 'Unable to Update Stage');
     } finally {
       setSaving(false);
     }
@@ -786,6 +799,130 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
           );
         })}
       </div>
+
+      {errorModal && ReactDOM.createPortal(
+        <div
+          className="fade-in"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+        >
+          <div
+            className="fade-in-up"
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '24px',
+              padding: '32px 28px 24px',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0,0,0,0.05)',
+              textAlign: 'center',
+              position: 'relative',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setErrorModal(null)}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: 6,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: '50%',
+                backgroundColor: '#fef2f2',
+                color: '#ef4444',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+                boxShadow: '0 0 0 8px #fff5f5',
+              }}
+            >
+              <AlertTriangle size={28} />
+            </div>
+
+            <h3
+              className="font-display"
+              style={{
+                margin: '0 0 8px 0',
+                fontSize: '1.25rem',
+                fontWeight: 800,
+                color: '#0f172a',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              {errorModal.title || 'Validation Error'}
+            </h3>
+
+            <p
+              style={{
+                margin: '0 0 24px 0',
+                fontSize: '0.92rem',
+                color: '#475569',
+                lineHeight: 1.55,
+                fontWeight: 500,
+              }}
+            >
+              {errorModal.message}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setErrorModal(null)}
+              style={{
+                width: '100%',
+                padding: '12px 20px',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                color: '#ffffff',
+                backgroundColor: '#ef4444',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.35)',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
+            >
+              OK
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -801,6 +938,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const { objectTypes, permissions, currentUser, organization, company } = useWorkspace();
   const navigate = useNavigate();
 
+  const cleanObjKey = String(objectTypeId || '').toLowerCase();
+  const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
+  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
+  const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
+
   const [record, setRecord] = useState(null);
   const [fields, setFields] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -809,6 +951,12 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [converting, setConverting] = useState(false);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [convertError, setConvertError] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  const showToast = (text, type = 'error') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   /* Lookup Data Stores for Related Records & Lookup Resolution */
   const [lookupMap, setLookupMap] = useState({ users: {}, companies: {}, contacts: {}, deals: {}, all: {} });
@@ -1119,7 +1267,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     if (!record || converting) return;
 
     if (isAlreadyConverted) {
-      alert('This Lead has already been converted into a Company, Contact, and Deal.');
+      showToast('This Lead has already been converted into a Company, Contact, and Deal.', 'error');
       return;
     }
 
@@ -1343,7 +1491,12 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
   const rawEffectiveFields = fields.length > 0 ? fields : (rawMeta?.fields || []);
 
+  const objDetailApiName = String(rawMeta?.api_name || objectTypeId || '').toLowerCase();
+  const isDealObj = objDetailApiName.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441';
+
   const readableFields = rawEffectiveFields.filter((f) => {
+    const fNameLower = String(f.name || f.api_name || '').toLowerCase();
+    if (isDealObj && fNameLower === 'status') return false;
     const fp = permissions?.fieldPermissions?.[f.id];
     const canRead = f.canRead !== undefined ? f.canRead : (fp ? fp.canRead !== false : true);
     return canRead !== false;
@@ -1355,10 +1508,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     fields: readableFields,
   };
 
-  const cleanObjKey = String(objectTypeId || '').toLowerCase();
   const isAlreadyConvertedLead = cleanObjKey.includes('lead') && (currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted));
 
   const canDeleteRecord = permissions?.canDelete !== false && permissions?.[objectTypeId]?.canDelete !== false && permissions?.[cleanObjKey]?.canDelete !== false && !isAlreadyConvertedLead;
+  const canUpdateRecord = permissions?.canEdit !== false && permissions?.canUpdate !== false && permissions?.[objectTypeId]?.canUpdate !== false && permissions?.[cleanObjKey]?.canUpdate !== false;
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(false);
@@ -1384,6 +1537,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     minHeight: '100%',
     padding: '14px 24px 28px',
   };
+
+  if (permissions && (!objPerm || objPerm.canRead !== true)) {
+    return <AccessDenied moduleName={objectTypeId} />;
+  }
 
   if (error) {
     return (
@@ -2158,17 +2315,19 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                       </div>
                     </div>
 
-                    <button
-                      onClick={handleOpenAddProducts}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 18px',
-                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
-                        color: '#fff', background: '#2563eb', boxShadow: '0 8px 18px -8px rgba(37,99,235,.6)',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      + Add Products
-                    </button>
+                    {canUpdateRecord && (
+                      <button
+                        onClick={handleOpenAddProducts}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 18px',
+                          borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
+                          color: '#fff', background: '#2563eb', boxShadow: '0 8px 18px -8px rgba(37,99,235,.6)',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        + Add Products
+                      </button>
+                    )}
                   </header>
 
                   {lineItems.length > 0 ? (
@@ -2178,7 +2337,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                           <thead>
                             <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
                               <th style={{ padding: '14px 20px' }}>Product</th>
-                              <th style={{ padding: '14px 16px' }}>Code</th>
                               <th style={{ padding: '14px 16px' }}>Qty</th>
                               <th style={{ padding: '14px 16px' }}>Unit Price</th>
                               <th style={{ padding: '14px 16px' }}>Discount</th>
@@ -2189,13 +2347,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                           <tbody>
                             {lineItems.map((item) => (
                               <tr key={item.productId} style={{ borderBottom: `1px solid ${C.border}` }}>
-                                <td style={{ padding: '14px 20px', fontWeight: 800, color: C.text }}>
-                                  {item.name}
+                                <td style={{ padding: '14px 20px' }}>
+                                  <div style={{ fontWeight: 700, color: C.text }}>{item.name}</div>
+                                  <div style={{ fontSize: 11, color: C.dim }}>Code: {item.code || '—'}</div>
                                 </td>
-                                <td style={{ padding: '14px 16px', color: '#64748b', fontWeight: 600 }}>
-                                  {item.code || '—'}
-                                </td>
-                                <td style={{ padding: '14px 16px', fontWeight: 700, color: C.text }}>
+                                <td style={{ padding: '14px 16px', color: C.text, fontWeight: 700 }}>
                                   {item.quantity}
                                 </td>
                                 <td style={{ padding: '14px 16px', fontWeight: 600, color: C.text }}>
@@ -2208,18 +2364,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                                   ${Number(item.total).toLocaleString()}
                                 </td>
                                 <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                                  <button
-                                    onClick={() => handleDeleteLineItem(item.productId)}
-                                    title="Delete Line Item"
-                                    style={{
-                                      border: 'none', background: '#fef2f2', color: '#ef4444',
-                                      borderRadius: '50%', width: 32, height: 32, display: 'inline-flex',
-                                      alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                                      transition: 'all .15s ease',
-                                    }}
-                                  >
-                                    <Trash2 size={15} />
-                                  </button>
+                                  {canUpdateRecord && (
+                                    <button
+                                      onClick={() => handleDeleteLineItem(item.productId)}
+                                      title="Delete Line Item"
+                                      style={{
+                                        border: 'none', background: '#fef2f2', color: '#ef4444',
+                                        borderRadius: '50%', width: 32, height: 32, display: 'inline-flex',
+                                        alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                        transition: 'all .15s ease',
+                                      }}
+                                    >
+                                      <Trash2 size={15} />
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             ))}
@@ -3220,6 +3378,48 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               </button>
             </div>
           </div>
+        </div>,
+        document.body
+      )}
+
+      {toastMessage && ReactDOM.createPortal(
+        <div
+          className="fade-in-up"
+          style={{
+            position: 'fixed',
+            top: 24,
+            right: 24,
+            zIndex: 99999,
+            background: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#fef2f2' : '#ffffff',
+            color: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#991b1b' : '#0f172a',
+            padding: '12px 20px',
+            borderRadius: 14,
+            boxShadow: (typeof toastMessage === 'object' && toastMessage.type === 'error')
+              ? '0 10px 30px rgba(220, 38, 38, 0.2)'
+              : '0 10px 30px rgba(0,0,0,0.12)',
+            border: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '1.5px solid #fecaca' : '1.5px solid #a7f3d0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            fontSize: 13.5,
+            fontWeight: 600,
+          }}
+        >
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              background: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#fee2e2' : '#d1fae5',
+              color: (typeof toastMessage === 'object' && toastMessage.type === 'error') ? '#dc2626' : '#059669',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {(typeof toastMessage === 'object' && toastMessage.type === 'error') ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+          </div>
+          <span>{typeof toastMessage === 'object' ? toastMessage.text : toastMessage}</span>
         </div>,
         document.body
       )}
