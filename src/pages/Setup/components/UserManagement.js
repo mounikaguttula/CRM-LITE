@@ -214,7 +214,7 @@ const RolePicklist = ({ roles = [], value = '', onChange, placeholder = 'Select 
 };
 
 function UserManagement() {
-  const { company } = useContext(WorkspaceContext) || {};
+  const { company, currentUser } = useContext(WorkspaceContext) || {};
   const orgId = company?.organization_code || company?.code || company?.id || '';
 
   const [users, setUsers] = useState([]);
@@ -774,12 +774,18 @@ function UserManagement() {
               {/* Role Picklist */}
               <div style={{ marginBottom: 24 }}>
                 <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Assigned Role</label>
-                <RolePicklist
-                  roles={roles}
-                  value={editModalUser.role_id || ''}
-                  onChange={(roleId) => setEditModalUser((p) => ({ ...p, role_id: roleId }))}
-                  placeholder="Select Role..."
-                />
+                {currentUser && (editModalUser.id === currentUser.id || editModalUser.id === currentUser.user_id) ? (
+                  <div style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '0.84rem', color: '#64748b', fontWeight: 600 }}>
+                    {roles.find((r) => String(r.id) === String(editModalUser.role_id))?.role_name || 'Administrator'} (Role locked: Users cannot change their own assigned role)
+                  </div>
+                ) : (
+                  <RolePicklist
+                    roles={roles}
+                    value={editModalUser.role_id || ''}
+                    onChange={(roleId) => setEditModalUser((p) => ({ ...p, role_id: roleId }))}
+                    placeholder="Select Role..."
+                  />
+                )}
               </div>
 
               {/* Action Buttons */}

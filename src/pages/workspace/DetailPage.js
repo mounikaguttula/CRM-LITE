@@ -1510,8 +1510,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
   const isAlreadyConvertedLead = cleanObjKey.includes('lead') && (currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted));
 
-  const canDeleteRecord = permissions?.canDelete !== false && permissions?.[objectTypeId]?.canDelete !== false && permissions?.[cleanObjKey]?.canDelete !== false && !isAlreadyConvertedLead;
-  const canUpdateRecord = permissions?.canEdit !== false && permissions?.canUpdate !== false && permissions?.[objectTypeId]?.canUpdate !== false && permissions?.[cleanObjKey]?.canUpdate !== false;
+  const canDeleteRecord = objPerm ? (objPerm.canDelete !== false && !isAlreadyConvertedLead) : !isAlreadyConvertedLead;
+  const canUpdateRecord = objPerm ? (objPerm.canUpdate !== false && objPerm.canEdit !== false) : true;
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(false);
@@ -1538,24 +1538,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     padding: '14px 24px 28px',
   };
 
-  if (permissions && (!objPerm || objPerm.canRead !== true)) {
-    return <AccessDenied moduleName={objectTypeId} />;
-  }
-
-  if (error) {
-    return (
-      <div style={pageWrap}>
-        <div style={{
-          maxWidth: 720, margin: '40px auto', padding: '22px 24px', borderRadius: 18,
-          background: 'rgba(251,113,133,.08)', border: '1px solid rgba(251,113,133,.35)',
-          color: '#b4324a', fontWeight: 600,
-        }}>
-          Error: {error}
-        </div>
-      </div>
-    );
-  }
-
   if (loading) {
     return (
       <div style={{ ...pageWrap, display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
@@ -1570,6 +1552,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         <style>{`@keyframes dp-spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
+  }
+
+  if (permissions && (!objPerm || objPerm.canRead === false)) {
+    return <AccessDenied moduleName={objectTypeId} />;
   }
 
   if (!record) {

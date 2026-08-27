@@ -23,7 +23,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
   const params = useParams();
   const location = useLocation();
   const objectTypeId = propObjectTypeId || params.objectTypeId || 'leads';
-  const { objectTypes, currentUser, permissions } = useWorkspace();
+  const { objectTypes, currentUser, permissions, loading } = useWorkspace();
   const navigate = useNavigate();
 
   const cleanObjKey = String(objectTypeId || '').toLowerCase();
@@ -389,7 +389,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     );
   };
 
-  if (permissions && (!objPerm || objPerm.canRead !== true || objPerm.canCreate !== true)) {
+  if (!loading && permissions && objPerm && (objPerm.canRead === false || objPerm.canCreate === false)) {
     return <AccessDenied message={`You do not have permission to create ${objectTypeId} records.`} moduleName={objectTypeId} />;
   }
 

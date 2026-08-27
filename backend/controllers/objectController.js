@@ -29,9 +29,12 @@ const getRecords = async (req, res, next) => {
     // Enforce permission check
     await metadataService.checkPermission(req.user, objectType, 'read');
 
+    const perms = await metadataService.getPermissions(req.user);
+    const objPerm = getPermForObject(perms, objectType);
+
     const options = {};
-    if (req.query.scope === 'user' || req.query.owner_id) {
-      // Security enforcement: Always use authenticated user's ID from req.user
+    if ((objPerm && objPerm.viewAll === false) || req.query.scope === 'user' || req.query.owner_id) {
+      // Security enforcement: Scope to user's records when View All is false
       options.owner_id = req.user?.id;
     }
 
@@ -49,10 +52,11 @@ const getRecordById = async (req, res, next) => {
     const { id } = req.params;
     const organizationId = req.user?.organization_id;
 
-    // Enforce permission check
-    await metadataService.checkPermission(req.user, objectType, 'read');
-
     const record = await objectService.getRecordById(objectType, id, organizationId);
+
+    // Enforce permission and record-level scope check
+    await metadataService.checkPermission(req.user, objectType, 'read', record);
+
     return successResponse(res, record, `${objectType} record fetched successfully.`);
   } catch (err) {
     next(err);
@@ -95,8 +99,11 @@ const updateRecord = async (req, res, next) => {
     const organizationId = req.user?.organization_id;
     const userId = req.user?.id;
 
-    // Enforce permission check
-    await metadataService.checkPermission(req.user, objectType, 'update');
+    // Fetch existing record first for scope check
+    const existing = await objectService.getRecordById(objectType, id, organizationId);
+
+    // Enforce permission and record-level scope check
+    await metadataService.checkPermission(req.user, objectType, 'update', existing);
 
     const record = await objectService.updateRecord(objectType, id, req.body, organizationId, userId);
 
@@ -124,8 +131,11 @@ const deleteRecord = async (req, res, next) => {
     const organizationId = req.user?.organization_id;
     const userId = req.user?.id;
 
-    // Enforce permission check
-    await metadataService.checkPermission(req.user, objectType, 'delete');
+    // Fetch existing record first for scope check
+    const existing = await objectService.getRecordById(objectType, id, organizationId);
+
+    // Enforce permission and record-level scope check
+    await metadataService.checkPermission(req.user, objectType, 'delete', existing);
 
     await objectService.deleteRecord(objectType, id, organizationId, userId);
 

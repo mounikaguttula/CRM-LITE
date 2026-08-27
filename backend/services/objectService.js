@@ -67,6 +67,43 @@ const validateEmailFormats = (payload) => {
   }
 };
 
+// Helper to validate parent record existence, tenant ownership, and target object type
+const validateParentRelationship = async (parentId, expectedObjectKey, organizationId, fieldLabel = 'Company') => {
+  if (!parentId || !isUuid(parentId)) return null;
+
+  const { data: parentRow, error } = await supabase
+    .from('universal_table')
+    .select('id, organization_id, object_type_id, name, data, is_deleted')
+    .eq('id', parentId)
+    .maybeSingle();
+
+  if (error || !parentRow || parentRow.is_deleted) {
+    throw {
+      statusCode: 400,
+      message: `Validation Error: The specified ${fieldLabel} parent record '${parentId}' does not exist or has been deleted.`,
+    };
+  }
+
+  if (parentRow.organization_id !== organizationId) {
+    throw {
+      statusCode: 403,
+      message: `Validation Error: The specified ${fieldLabel} parent record does not belong to your organization.`,
+    };
+  }
+
+  if (expectedObjectKey) {
+    const expectedDef = await metadataService.getObjectTypeByApiName(expectedObjectKey, organizationId).catch(() => null);
+    if (expectedDef && expectedDef.id && parentRow.object_type_id !== expectedDef.id) {
+      throw {
+        statusCode: 400,
+        message: `Validation Error: The referenced record '${parentId}' is not a ${fieldLabel} object type.`,
+      };
+    }
+  }
+
+  return parentRow;
+};
+
 /**
  * Generic Object Service
  * Executes dynamic CRUD operations against Supabase universal_table.
@@ -266,72 +303,65 @@ const objectService = {
       customData.source = sourceVal;
     }
 
-    const resolvedParent = isUuid(parent_id)
-      ? parent_id
-      : (isUuid(payload.company_id)
-        ? payload.company_id
-        : (isUuid(payload.company)
-          ? payload.company
-          : (isUuid(payload.Company)
-            ? payload.Company
-            : (isUuid(payload.Company_id)
-              ? payload.Company_id
-              : null))));
+    const cleanObjKey = String(objectKey || '').toLowerCase();
 
-    const resolvedSecondary = isUuid(secondary_parent_id)
-      ? secondary_parent_id
-      : (isUuid(payload.contact_id)
-        ? payload.contact_id
-        : (isUuid(payload.contact)
-          ? payload.contact
-          : (isUuid(payload.Contact)
-            ? payload.Contact
-            : (isUuid(payload.Contact_id)
-              ? payload.Contact_id
-              : null))));
+    const parentInput = payload.parent_id !== undefined ? payload.parent_id : (payload.company_id !== undefined ? payload.company_id : (payload.company !== undefined ? payload.company : (payload.Company !== undefined ? payload.Company : (payload.Company_id !== undefined ? payload.Company_id : undefined))));
+    const secondaryInput = payload.secondary_parent_id !== undefined ? payload.secondary_parent_id : (payload.contact_id !== undefined ? payload.contact_id : (payload.contact !== undefined ? payload.contact : (payload.Contact !== undefined ? payload.Contact : (payload.Contact_id !== undefined ? payload.Contact_id : undefined))));
+
+    let rawParent = isUuid(parentInput) ? parentInput : null;
+    let rawSecondary = isUuid(secondaryInput) ? secondaryInput : null;
+
+    let resolvedParent = null;
+    let resolvedSecondary = null;
+
+    if (rawParent) {
+      const expectedTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) ? 'company' : null;
+      const parentRow = await validateParentRelationship(rawParent, expectedTarget, organizationId, 'Company');
+      if (parentRow) {
+        resolvedParent = parentRow.id;
+        const compName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name;
+        if (compName && typeof compName === 'string' && !isUuid(compName)) {
+          customData.company_name = compName;
+        }
+      }
+    }
+
+    if (rawSecondary) {
+      const expectedSecondaryTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity') || cleanObjKey.includes('contact')) ? 'contact' : null;
+      const secondaryRow = await validateParentRelationship(rawSecondary, expectedSecondaryTarget, organizationId, 'Contact');
+      if (secondaryRow) {
+        resolvedSecondary = secondaryRow.id;
+        const contName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name;
+        if (contName && typeof contName === 'string' && !isUuid(contName)) {
+          customData.contact_name = contName;
+        }
+      }
+    }
 
     if (resolvedParent) {
       customData.company = resolvedParent;
       customData.company_id = resolvedParent;
       customData.Company = resolvedParent;
+      customData.Company_id = resolvedParent;
+    } else {
+      customData.company = null;
+      customData.company_id = null;
+      customData.Company = null;
+      customData.Company_id = null;
+      customData.company_name = null;
     }
 
     if (resolvedSecondary) {
       customData.contact = resolvedSecondary;
       customData.contact_id = resolvedSecondary;
       customData.Contact = resolvedSecondary;
-    }
-
-    if (resolvedParent && (!customData.company_name || isUuid(customData.company_name))) {
-      try {
-        const { data: parentRow } = await supabase
-          .from('universal_table')
-          .select('name, data')
-          .eq('id', resolvedParent)
-          .single();
-        if (parentRow) {
-          const compName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name;
-          if (compName && typeof compName === 'string' && !isUuid(compName)) {
-            customData.company_name = compName;
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (resolvedSecondary && (!customData.contact_name || isUuid(customData.contact_name))) {
-      try {
-        const { data: secondaryRow } = await supabase
-          .from('universal_table')
-          .select('name, data')
-          .eq('id', resolvedSecondary)
-          .single();
-        if (secondaryRow) {
-          const contName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name;
-          if (contName && typeof contName === 'string' && !isUuid(contName)) {
-            customData.contact_name = contName;
-          }
-        }
-      } catch (e) {}
+      customData.Contact_id = resolvedSecondary;
+    } else {
+      customData.contact = null;
+      customData.contact_id = null;
+      customData.Contact = null;
+      customData.Contact_id = null;
+      customData.contact_name = null;
     }
 
     const newRow = {
@@ -416,8 +446,113 @@ const objectService = {
       customData.source = sourceVal;
     }
 
-    const resolvedParent = isUuid(parent_id) ? parent_id : (isUuid(payload.company_id) ? payload.company_id : (isUuid(payload.company) ? payload.company : (isUuid(existing.parent_id) ? existing.parent_id : null)));
-    const resolvedSecondary = isUuid(secondary_parent_id) ? secondary_parent_id : (isUuid(payload.contact_id) ? payload.contact_id : (isUuid(payload.contact) ? payload.contact : (isUuid(existing.secondary_parent_id) ? existing.secondary_parent_id : null)));
+    const cleanObjKey = String(objectKey || '').toLowerCase();
+
+    let payloadCompVal = undefined;
+    if (payload.company !== undefined && payload.company !== existing.parent_id) {
+      payloadCompVal = payload.company;
+    } else if (payload.company_id !== undefined && payload.company_id !== existing.parent_id) {
+      payloadCompVal = payload.company_id;
+    } else if (payload.parent_id !== undefined && payload.parent_id !== existing.parent_id) {
+      payloadCompVal = payload.parent_id;
+    } else if (payload.Company !== undefined && payload.Company !== existing.parent_id) {
+      payloadCompVal = payload.Company;
+    } else if (payload.Company_id !== undefined && payload.Company_id !== existing.parent_id) {
+      payloadCompVal = payload.Company_id;
+    } else if (payload.company !== undefined) {
+      payloadCompVal = payload.company;
+    } else if (payload.company_id !== undefined) {
+      payloadCompVal = payload.company_id;
+    } else if (payload.parent_id !== undefined) {
+      payloadCompVal = payload.parent_id;
+    }
+
+    let resolvedParent = existing.parent_id;
+    if (payloadCompVal !== undefined) {
+      if (payloadCompVal === null || payloadCompVal === '' || payloadCompVal === 'null') {
+        resolvedParent = null;
+      } else if (isUuid(payloadCompVal)) {
+        resolvedParent = payloadCompVal;
+      }
+    }
+
+    let payloadContactVal = undefined;
+    if (payload.contact !== undefined && payload.contact !== existing.secondary_parent_id) {
+      payloadContactVal = payload.contact;
+    } else if (payload.contact_id !== undefined && payload.contact_id !== existing.secondary_parent_id) {
+      payloadContactVal = payload.contact_id;
+    } else if (payload.secondary_parent_id !== undefined && payload.secondary_parent_id !== existing.secondary_parent_id) {
+      payloadContactVal = payload.secondary_parent_id;
+    } else if (payload.Contact !== undefined && payload.Contact !== existing.secondary_parent_id) {
+      payloadContactVal = payload.Contact;
+    } else if (payload.Contact_id !== undefined && payload.Contact_id !== existing.secondary_parent_id) {
+      payloadContactVal = payload.Contact_id;
+    } else if (payload.contact !== undefined) {
+      payloadContactVal = payload.contact;
+    } else if (payload.contact_id !== undefined) {
+      payloadContactVal = payload.contact_id;
+    } else if (payload.secondary_parent_id !== undefined) {
+      payloadContactVal = payload.secondary_parent_id;
+    }
+
+    let resolvedSecondary = existing.secondary_parent_id;
+    if (payloadContactVal !== undefined) {
+      if (payloadContactVal === null || payloadContactVal === '' || payloadContactVal === 'null') {
+        resolvedSecondary = null;
+      } else if (isUuid(payloadContactVal)) {
+        resolvedSecondary = payloadContactVal;
+      }
+    }
+
+    if (resolvedParent) {
+      const expectedTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) ? 'company' : null;
+      const parentRow = await validateParentRelationship(resolvedParent, expectedTarget, organizationId, 'Company');
+      if (parentRow) {
+        resolvedParent = parentRow.id;
+        const compName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name;
+        if (compName && typeof compName === 'string' && !isUuid(compName)) {
+          customData.company_name = compName;
+        }
+      }
+    }
+
+    if (resolvedSecondary) {
+      const expectedSecondaryTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity') || cleanObjKey.includes('contact')) ? 'contact' : null;
+      const secondaryRow = await validateParentRelationship(resolvedSecondary, expectedSecondaryTarget, organizationId, 'Contact');
+      if (secondaryRow) {
+        resolvedSecondary = secondaryRow.id;
+        const contName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name;
+        if (contName && typeof contName === 'string' && !isUuid(contName)) {
+          customData.contact_name = contName;
+        }
+      }
+    }
+
+    if (resolvedParent) {
+      customData.company = resolvedParent;
+      customData.company_id = resolvedParent;
+      customData.Company = resolvedParent;
+      customData.Company_id = resolvedParent;
+    } else {
+      customData.company = null;
+      customData.company_id = null;
+      customData.Company = null;
+      customData.Company_id = null;
+      customData.company_name = null;
+    }
+
+    if (resolvedSecondary) {
+      customData.contact = resolvedSecondary;
+      customData.contact_id = resolvedSecondary;
+      customData.Contact = resolvedSecondary;
+      customData.Contact_id = resolvedSecondary;
+    } else {
+      customData.contact = null;
+      customData.contact_id = null;
+      customData.Contact = null;
+      customData.Contact_id = null;
+      customData.contact_name = null;
+    }
 
     const finalResolvedName = name || existing.name || customData.name || 'Untitled';
     customData.name = finalResolvedName;

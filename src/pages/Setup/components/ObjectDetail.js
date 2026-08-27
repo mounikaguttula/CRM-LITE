@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { apiGet, apiPost, apiDelete } from '../../../api/client';
+import { useWorkspace } from '../../../context/WorkspaceContext';
 import {
   ArrowLeft,
   Plus,
@@ -145,6 +146,14 @@ function DataTypeIcon({ type }) {
    Main ObjectDetail Component
    ────────────────────────────────────────────── */
 function ObjectDetail({ objectKey, onBack }) {
+  const { permissions } = useWorkspace();
+  const fieldDefPerm = permissions ? (permissions['object_field'] || permissions['field'] || permissions['custom_field']) : null;
+  const objDefPerm = permissions ? (permissions['object_definition'] || permissions['object'] || permissions['custom_module'] || permissions['module']) : null;
+
+  const canCreateField = fieldDefPerm ? fieldDefPerm.canCreate !== false : true;
+  const canUpdateModule = objDefPerm ? (objDefPerm.canUpdate !== false && objDefPerm.canEdit !== false) : true;
+  const canDeleteField = fieldDefPerm ? fieldDefPerm.canDelete !== false : true;
+
   const [activeTab, setActiveTab] = useState('details');
   const [objectDef, setObjectDef] = useState(null);
   const [fields, setFields] = useState([]);
@@ -460,8 +469,8 @@ function ObjectDetail({ objectKey, onBack }) {
 
         {/* Right Side: Inline Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Edit Object Button (If custom) */}
-          {isCustom && (
+          {/* Edit Object Button (If custom and permitted) */}
+          {isCustom && canUpdateModule && (
             <button
               type="button"
               onClick={() => setShowEditModal(true)}
@@ -526,6 +535,8 @@ function ObjectDetail({ objectKey, onBack }) {
           fields={fields}
           loading={fieldsLoading}
           deleteLoading={deleteLoading}
+          canCreateField={canCreateField}
+          canDeleteField={canDeleteField}
           onDelete={handleDeleteFieldClick}
           onAddField={() => setShowAddField(true)}
           onRefresh={loadFields}
@@ -811,7 +822,7 @@ function DetailsTab({ objectDef }) {
 /* ══════════════════════════════════════════════
    Tab 2: Fields & Relationships
    ══════════════════════════════════════════════ */
-function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, onDelete, onAddField }) {
+function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, canCreateField = true, canDeleteField = true, onDelete, onAddField }) {
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Header bar */}
@@ -819,18 +830,20 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, onD
         <span style={{ fontSize: '0.84rem', color: '#6366f1', fontWeight: 600 }}>
           Showing {fields.length} fields configured for {displayName}
         </span>
-        <button
-          onClick={onAddField}
-          className="orbit-btn-primary"
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '9px 16px', borderRadius: 10,
-            fontSize: '0.84rem', fontWeight: 600, cursor: 'pointer',
-          }}
-        >
-          <Plus size={15} />
-          <span>Add Field</span>
-        </button>
+        {canCreateField && (
+          <button
+            onClick={onAddField}
+            className="orbit-btn-primary"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '9px 16px', borderRadius: 10,
+              fontSize: '0.84rem', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            <Plus size={15} />
+            <span>Add Field</span>
+          </button>
+        )}
       </div>
 
 
@@ -916,7 +929,7 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, onD
                       </span>
                     </td>
                     <td style={{ padding: '14px 20px' }}>
-                      {!isSystem ? (
+                      {!isSystem && canDeleteField ? (
                         <button
                           onClick={() => onDelete(fieldId, fieldLabel)}
                           disabled={isDeleting}
@@ -935,7 +948,7 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, onD
                           {isDeleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
                         </button>
                       ) : (
-                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>System</span>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{isSystem ? 'System' : 'Protected'}</span>
                       )}
                     </td>
                   </tr>

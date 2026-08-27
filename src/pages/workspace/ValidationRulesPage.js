@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import WorkspaceContext from '../../context/WorkspaceContext';
 import api from '../../api';
-import { Plus, Trash2, Edit3, ShieldAlert, Check, X, Filter, ChevronDown, ArrowLeft, Lock, RotateCcw, Sliders } from 'lucide-react';
+import { Plus, Trash2, Edit3, ShieldAlert, X, Filter, ChevronDown, ArrowLeft, Lock, RotateCcw, Sliders } from 'lucide-react';
 
 /* ── Canonical System Rule Keys (for detecting tenant overrides) ── */
 const CANONICAL_SYSTEM_RULE_KEYS = new Set([
@@ -31,6 +31,12 @@ const OPERATORS = [
 function ValidationRulesPage({ initialObject }) {
   const workspaceContext = useContext(WorkspaceContext);
   const objectTypes = workspaceContext?.objectTypes || {};
+  const permissions = workspaceContext?.permissions || {};
+  const rulePerm = permissions['validation_rule'] || permissions['validation_rules'] || permissions['rule'] || permissions['rules'];
+
+  const canCreateRule = rulePerm ? rulePerm.canCreate !== false : true;
+  const canUpdateRule = rulePerm ? (rulePerm.canUpdate !== false && rulePerm.canEdit !== false) : true;
+  const canDeleteRule = rulePerm ? rulePerm.canDelete !== false : true;
 
   /* ── Page Mode: 'list' | 'builder' ── */
   const [viewMode, setViewMode] = useState('list');
@@ -396,7 +402,7 @@ function ValidationRulesPage({ initialObject }) {
           </p>
         </div>
 
-        {viewMode === 'list' && (
+        {viewMode === 'list' && canCreateRule && (
           <button
             type="button"
             onClick={handleOpenNewRule}

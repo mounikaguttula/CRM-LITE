@@ -39,6 +39,14 @@ const DEFAULT_ROLES = [
     status: 'active',
   },
   {
+    id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a38',
+    role_name: 'CRM Manager Clone',
+    description: 'CRM CRUD access according to assigned department/team scope.',
+    user_count: 14,
+    updated_at: '2026-07-29T11:00:00Z',
+    status: 'active',
+  },
+  {
     id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35',
     role_name: 'Relationship Manager',
     description: 'Access to manage client relationships, deals, and communication.',
@@ -243,59 +251,54 @@ class RoleService {
       const defaultRoles = [
         { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', organization_id: orgId, role_name: 'Administrator', description: 'Full administrative access to all CRM features.' },
         { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', organization_id: orgId, role_name: 'CRM Manager', description: 'Full management access to sales and customer operations.' },
+        { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a38', organization_id: orgId, role_name: 'CRM Manager Clone', description: 'CRM CRUD access according to assigned department/team scope.' },
         { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', organization_id: orgId, role_name: 'Relationship Manager', description: 'Access to manage client relationships, deals, and communication.' },
         { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', organization_id: orgId, role_name: 'CRM Executive', description: 'Standard operational access to leads, accounts, and tasks.' },
         { id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', organization_id: orgId, role_name: 'Read Only User', description: 'Read-only access across all standard CRM objects and reports.' },
       ];
 
-      await supabase.from('roles').upsert(defaultRoles, { onConflict: 'id', ignoreDuplicates: true });
-      
-      const [{ data: roles }, { data: objectDefs }, { data: existingPerms }] = await Promise.all([
+      await supabase.from('roles').upsert(defaultRoles, { onConflict: 'id' });
+
+      const [{ data: roles }, { data: objectDefs }] = await Promise.all([
         supabase.from('roles').select('id, role_name').or(`organization_id.eq.${orgId},organization_id.is.null`),
         supabase.from('object_type_definitions').select('id, api_name').or(`organization_id.eq.${orgId},organization_id.is.null`),
-        supabase.from('object_permissions').select('role_id, object_type_id'),
       ]);
 
       if (!roles || !objectDefs) return;
-
-      const existingSet = new Set(
-        (existingPerms || []).map((p) => `${p.role_id}_${p.object_type_id}`)
-      );
 
       const missingRows = [];
 
       for (const r of roles) {
         if (!isUuid(r.id)) continue;
         const rName = (r.role_name || '').toLowerCase();
-        const isReadOnly = rName.includes('read only') || rName.includes('viewer');
-        const isAdmin = rName.includes('admin') || rName.includes('manager');
+        const isAdmin = rName.includes('admin');
+        const isCrmManager = rName === 'crm manager';
+        const isClone = rName.includes('clone');
         const isExecutive = rName.includes('executive');
+        const isRelManager = rName.includes('relationship');
+        const isReadOnly = rName.includes('read only') || rName.includes('viewer');
 
         for (const obj of objectDefs) {
           if (!isUuid(obj.id)) continue;
-          const key = `${r.id}_${obj.id}`;
-          if (!existingSet.has(key)) {
-            let rowPayload = {
-              organization_id: orgId,
-              role_id: r.id,
-              object_type_id: obj.id,
-              can_read: true,
-              can_create: !isReadOnly,
-              can_update: !isReadOnly,
-              can_delete: isAdmin ? true : (isExecutive ? false : !isReadOnly),
-              view_all: isAdmin,
-              modify_all: isAdmin,
-            };
-            missingRows.push(rowPayload);
-            existingSet.add(key);
-          }
+          let rowPayload = {
+            organization_id: orgId,
+            role_id: r.id,
+            object_type_id: obj.id,
+            can_read: true,
+            can_create: !isReadOnly,
+            can_update: !isReadOnly,
+            can_delete: isAdmin || isCrmManager || isClone,
+            view_all: isAdmin || isCrmManager,
+            modify_all: isAdmin,
+          };
+          missingRows.push(rowPayload);
         }
       }
 
       if (missingRows.length > 0) {
         const { error: insErr } = await supabase
           .from('object_permissions')
-          .upsert(missingRows, { onConflict: 'organization_id,role_id,object_type_id', ignoreDuplicates: true });
+          .upsert(missingRows, { onConflict: 'role_id,object_type_id' });
 
         if (insErr) {
           console.warn('ensurePermissionRowsExist insert warning:', insErr.message);

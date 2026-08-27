@@ -19,7 +19,7 @@ router.get('/records/:objectType/:id', objectController.getRecordById);
 router.post('/records/:objectType', objectController.createRecord);
 
 // Direct route aliases (e.g. GET /leads, POST /leads, GET /contacts, etc.)
-const EXCLUDED_PREFIXES = ['auth', 'workspace', 'health', 'objects', 'users', 'roles', 'records', 'company', 'metadata', 'validation-rules', 'api'];
+const EXCLUDED_PREFIXES = ['auth', 'workspace', 'health', 'objects', 'users', 'roles', 'records', 'company', 'metadata', 'validation-rules', 'api', 'setup'];
 
 router.get('/:objectType', (req, res, next) => {
   if (EXCLUDED_PREFIXES.includes(req.params.objectType)) return next('route');

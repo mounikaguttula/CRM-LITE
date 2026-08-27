@@ -65,6 +65,8 @@ const getCompany = async (req, res) => {
   }
 };
 
+const auditService = require('../services/auditService');
+
 const updateCompany = async (req, res) => {
   try {
     const orgId = req.user?.organization_id;
@@ -89,6 +91,16 @@ const updateCompany = async (req, res) => {
     if (error) {
       return res.status(500).json({ message: error.message });
     }
+
+    auditService.logSetupActivity({
+      organization_id: orgId,
+      user_id: req.user?.id,
+      action: 'UPDATE',
+      entity_type: 'organization',
+      entity_id: orgId,
+      entity_name: updated?.organization_name || name || 'Company Settings',
+      module_name: 'Company Info',
+    }).catch(err => console.error('❌ Audit log error:', err.message));
 
     return res.status(200).json({
       id:                updated.id,

@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { Search, Bell, Menu, Settings, Command, ArrowRight, Sparkles, Layers } from 'lucide-react';
+import { Search, Bell, Menu, Settings, Command, ArrowRight, Layers } from 'lucide-react';
 
 function Navbar({ onMenuToggle }) {
-  const { currentUser } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
 

@@ -13,19 +13,19 @@ const DEFAULT_NAVIGATION = [
 ];
 
 export function WorkspaceProvider({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [workspaceData, setWorkspaceData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const loadWorkspace = useCallback(async () => {
     if (!isAuthenticated) {
       setWorkspaceData(null);
-      setLoading(false);
+      setWorkspaceLoading(false);
       return;
     }
 
-    setLoading(true);
+    setWorkspaceLoading(true);
     setError(null);
 
     try {
@@ -48,7 +48,7 @@ export function WorkspaceProvider({ children }) {
           contact: { displayName: 'Contact', pluralDisplayName: 'Contacts' },
           deal: { displayName: 'Deal', pluralDisplayName: 'Deals' },
         },
-        permissions: res.permissions || { canCreate: true, canEdit: true, canDelete: true },
+        permissions: res.permissions || { canCreate: true, canEdit: true, canDelete: true, canRead: true, viewAll: true, modifyAll: true },
       });
     } catch (err) {
       console.warn('Workspace metadata fetch error:', err.message);
@@ -64,10 +64,10 @@ export function WorkspaceProvider({ children }) {
           contact: { displayName: 'Contact', pluralDisplayName: 'Contacts' },
           deal: { displayName: 'Deal', pluralDisplayName: 'Deals' },
         },
-        permissions: { canCreate: true, canEdit: true, canDelete: true },
+        permissions: { canCreate: true, canEdit: true, canDelete: true, canRead: true, viewAll: true, modifyAll: true },
       });
     } finally {
-      setLoading(false);
+      setWorkspaceLoading(false);
     }
   }, [isAuthenticated]);
 
@@ -77,25 +77,33 @@ export function WorkspaceProvider({ children }) {
 
   const pathParts = window.location.pathname.split('/');
   const objectTypeIndex = pathParts.indexOf('object');
-  const objectTypeId = objectTypeIndex !== -1 ? pathParts[objectTypeIndex + 1] : null;
+  const rawObjectTypeParam = objectTypeIndex !== -1 ? pathParts[objectTypeIndex + 1] : null;
 
   const dbPerms = workspaceData?.permissions;
 
   let activeObjectPerm = null;
-  if (objectTypeId && dbPerms) {
-    const key = String(objectTypeId).toLowerCase();
+  if (rawObjectTypeParam && dbPerms) {
+    const key = String(rawObjectTypeParam).toLowerCase();
     const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
     const keyPlural = key.endsWith('s') ? key : `${key}s`;
-    const foundPerm = dbPerms[key] || dbPerms[keySingular] || dbPerms[keyPlural];
-    activeObjectPerm = foundPerm || {
-      canCreate: false,
-      canRead: false,
-      canUpdate: false,
-      canEdit: false,
-      canDelete: false,
-      viewAll: false,
-      modifyAll: false,
-    };
+
+    let foundPerm = dbPerms[key] || dbPerms[keySingular] || dbPerms[keyPlural];
+
+    if (!foundPerm && workspaceData?.objectTypes) {
+      const matchedObjDef = Object.values(workspaceData.objectTypes).find(
+        (o) => o.id === rawObjectTypeParam || o.api_name === rawObjectTypeParam || o.name === rawObjectTypeParam
+      );
+      if (matchedObjDef) {
+        const apiName = String(matchedObjDef.api_name || matchedObjDef.name || '').toLowerCase();
+        const apiSingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
+        const apiPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
+        foundPerm = dbPerms[apiName] || dbPerms[apiSingular] || dbPerms[apiPlural];
+      }
+    }
+
+    if (foundPerm) {
+      activeObjectPerm = foundPerm;
+    }
   }
 
   const activePermissions = {
@@ -106,9 +114,11 @@ export function WorkspaceProvider({ children }) {
     canRead: true,
     viewAll: true,
     modifyAll: true,
-    ...dbPerms,
+    ...(dbPerms || {}),
     ...(activeObjectPerm || {}),
   };
+
+  const isOverallLoading = authLoading || (isAuthenticated && (!workspaceData || workspaceLoading));
 
   const value = {
     company: isAuthenticated ? (workspaceData?.company || { name: 'Acme Corp', code: 'ACME' }) : null,
@@ -116,7 +126,7 @@ export function WorkspaceProvider({ children }) {
     navigation: isAuthenticated ? (workspaceData?.navigation || DEFAULT_NAVIGATION) : [],
     objectTypes: workspaceData?.objectTypes || {},
     permissions: activePermissions,
-    loading,
+    loading: isOverallLoading,
     error,
     refreshWorkspace: loadWorkspace,
   };

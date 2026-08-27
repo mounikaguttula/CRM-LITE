@@ -279,41 +279,11 @@ const ping = async (req, res, next) => {
       return errorResponse(res, 'Unauthorized: User session info missing.', 401);
     }
 
-    const { supabaseAdmin } = require('../config/supabase');
-    const supabase = require('../config/supabase');
-    const client = supabaseAdmin || supabase;
-
-    const { data: sessionRow } = await client
-      .from('audit_logs')
-      .select('id, details, created_at')
-      .eq('organization_id', user.organization_id)
-      .eq('user_id', user.id)
-      .eq('event_type', 'LOGIN')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!sessionRow) {
-      return errorResponse(res, 'Unauthorized: Session expired or not found.', 401);
-    }
-
-    const timeoutMs = process.env.IDLE_TIMEOUT_MS ? parseInt(process.env.IDLE_TIMEOUT_MS, 10) : 300000;
-    const lastActivityStr = sessionRow.details?.last_activity_at || sessionRow.created_at;
-    const lastActivityTime = new Date(lastActivityStr).getTime();
-
-    if (Date.now() - lastActivityTime > timeoutMs) {
-      await auditService.endSession({
-        organization_id: user.organization_id,
-        user_id: user.id,
-        reason: 'SESSION_EXPIRED',
-        logout_reason: 'IDLE_TIMEOUT',
-      });
-      return errorResponse(res, 'Session expired due to inactivity.', 401);
-    }
-
     await auditService.updateLastActivity({
       organization_id: user.organization_id,
       user_id: user.id,
+      user_email: user.email,
+      name: user.name,
     });
 
     return successResponse(res, null, 'Session active.');
