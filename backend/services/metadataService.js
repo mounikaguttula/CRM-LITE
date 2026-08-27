@@ -564,13 +564,6 @@ const metadataService = {
           viewAll: dbPerm.view_all !== false,
           modifyAll: dbPerm.modify_all !== false,
         };
-        console.log(`[Permissions] ✅ Matched DB Perm for [${apiName}] (object_type_id=${obj.id}):`, JSON.stringify({
-          can_create: dbPerm.can_create,
-          can_read: dbPerm.can_read,
-          can_update: dbPerm.can_update,
-          can_delete: dbPerm.can_delete,
-          resolved: objPerm,
-        }));
       } else {
         objPerm = {
           canCreate: isSystemAdmin,
@@ -581,7 +574,33 @@ const metadataService = {
           viewAll: isSystemAdmin,
           modifyAll: isSystemAdmin,
         };
-        console.log(`[Permissions] ⚠️ Default fallback for [${apiName}] (no DB record matching object_type_id=${obj.id}): Resolved failClosed=${!isSystemAdmin}`);
+      }
+
+      // Enforce Role Hierarchy baseline constraints
+      const lowerRole = (user?.role || '').toLowerCase();
+      if (lowerRole.includes('read only')) {
+        objPerm.canCreate = false;
+        objPerm.canUpdate = false;
+        objPerm.canEdit = false;
+        objPerm.canDelete = false;
+        objPerm.viewAll = false;
+        objPerm.modifyAll = false;
+      } else if (lowerRole.includes('relationship manager') || lowerRole.includes('executive')) {
+        objPerm.canCreate = true;
+        objPerm.canRead = true;
+        objPerm.canUpdate = true;
+        objPerm.canEdit = true;
+        objPerm.canDelete = false;
+        objPerm.viewAll = false;
+        objPerm.modifyAll = false;
+      } else if (lowerRole.includes('clone')) {
+        objPerm.canCreate = true;
+        objPerm.canRead = true;
+        objPerm.canUpdate = true;
+        objPerm.canEdit = true;
+        objPerm.canDelete = true;
+        objPerm.viewAll = false;
+        objPerm.modifyAll = false;
       }
 
 
@@ -599,13 +618,41 @@ const metadataService = {
   },
 
   /**
+   * Check if authenticated user has Administrator role.
+   * Resolves exact role from DB table users & roles.
+   */
+  checkAdminPermission: async (user) => {
+    if (!user || !user.id) {
+      throw { statusCode: 403, message: 'Please check with your administrator. You do not have administrative permissions.' };
+    }
+
+    let roleName = String(user.role || '').toLowerCase();
+    if (!roleName && user.id && isUuid(user.id)) {
+      const { data: dbUser } = await supabase
+        .from('users')
+        .select('role_id, roles(role_name)')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (dbUser?.roles?.role_name) {
+        roleName = String(dbUser.roles.role_name).toLowerCase();
+      }
+    }
+
+    if (!roleName.includes('admin')) {
+      console.log(`[Authorization] ⛔ DENIED Admin operation for user ${user.id} (${user.email})`);
+      throw { statusCode: 403, message: 'Please check with your administrator. You do not have administrative permissions.' };
+    }
+  },
+
+  /**
    * Centralized permission checking helper for controller routes.
-   * Resolves effective permissions via getPermissions(user) and verifies authorization.
+   * Resolves effective permissions via getPermissions(user) and verifies authorization & record scope.
    * @param {Object} user - req.user context
    * @param {String} objectType - Object key (e.g. 'lead', 'deal', 'campaign')
    * @param {String} action - Action ('create', 'read', 'update', 'delete')
+   * @param {Object} [record=null] - Target record object for scope checking
    */
-  checkPermission: async (user, objectType, action) => {
+  checkPermission: async (user, objectType, action, record = null) => {
     if (!objectType || !action) return;
 
     const actionMap = {
@@ -616,7 +663,8 @@ const metadataService = {
       delete: 'canDelete',
     };
 
-    const targetProp = actionMap[String(action).toLowerCase()] || 'canRead';
+    const targetAction = String(action).toLowerCase();
+    const targetProp = actionMap[targetAction] || 'canRead';
 
     const perms = await metadataService.getPermissions(user);
     if (!perms) return;
@@ -625,11 +673,82 @@ const metadataService = {
     const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
     const keyPlural = key.endsWith('s') ? key : `${key}s`;
 
-    const objPerm = perms[key] || perms[keySingular] || perms[keyPlural];
+    let objPerm = perms[key] || perms[keySingular] || perms[keyPlural];
 
+    // Alias resolution for setup configuration objects
+    if (!objPerm) {
+      if (['object_definition', 'object_type_definition', 'custom_module', 'module', 'object'].includes(key)) {
+        objPerm = perms['object_definition'] || perms['object'];
+      } else if (['object_field', 'field_definition', 'custom_field', 'field'].includes(key)) {
+        objPerm = perms['object_field'] || perms['field'];
+      } else if (['validation_rule', 'validation_rules', 'rule'].includes(key)) {
+        objPerm = perms['validation_rule'] || perms['rule'];
+      } else if (['flow_automation', 'flow', 'workflow'].includes(key)) {
+        objPerm = perms['flow_automation'] || perms['flow'];
+      }
+    }
+
+    // Fallback permission resolution when object permission row is not explicitly in DB
+    if (!objPerm) {
+      const uRole = String(user?.role || '').toLowerCase();
+      const isAdmin = uRole.includes('admin');
+      const isCrmManager = uRole === 'crm manager';
+      const isReadOnly = uRole.includes('read only') || uRole.includes('viewer');
+
+      if (isReadOnly) {
+        objPerm = {
+          canCreate: false,
+          canRead: true,
+          canUpdate: false,
+          canEdit: false,
+          canDelete: false,
+          viewAll: false,
+          modifyAll: false,
+        };
+      } else {
+        objPerm = {
+          canCreate: true,
+          canRead: true,
+          canUpdate: true,
+          canEdit: true,
+          canDelete: isAdmin || isCrmManager,
+          viewAll: isAdmin || isCrmManager,
+          modifyAll: isAdmin,
+        };
+      }
+    }
+
+    // 1. Check Object-Level CRUD Permission
     if (objPerm && (objPerm[targetProp] === false || (targetProp === 'canUpdate' && objPerm.canEdit === false))) {
-      console.log(`[Authorization] ⛔ DENIED ${action} request for [${objectType}] (user: ${user?.id || user?.email}, role_id: ${user?.role_id})`);
-      throw { statusCode: 403, message: 'Please check with your administrator. You do not have permissions.' };
+      console.log(`[Authorization] ⛔ DENIED ${action} request for [${objectType}] (user: ${user?.id || user?.email}, role: ${user?.role})`);
+      const msg = targetAction === 'delete'
+        ? "You don't have permission to delete this record."
+        : `You don't have permission to perform this action.`;
+      throw { statusCode: 403, message: msg };
+    }
+
+    // 2. Check Record-Level Scope if record object is provided
+    if (record && objPerm) {
+      const isOwner = record.owner_id === user.id || record.created_by === user.id;
+
+      // Check Read Scope when View All is false
+      if (targetAction === 'read' && objPerm.viewAll === false && !isOwner) {
+        // Allow if department/team in record data matches user
+        const recDept = record.department || (record.data && (record.data.department || record.data.department_id));
+        const userDept = user.department || user.department_id;
+        const matchesDept = Boolean(recDept && userDept && String(recDept).toLowerCase() === String(userDept).toLowerCase());
+
+        if (!matchesDept) {
+          console.log(`[Authorization] ⛔ DENIED out-of-scope read on ${objectType}/${record.id} for user ${user?.id}`);
+          throw { statusCode: 403, message: "You don't have permission to access this record." };
+        }
+      }
+
+      // Check Modify/Update/Delete Scope when Modify All is false (and View All is false)
+      if ((targetAction === 'update' || targetAction === 'delete' || targetAction === 'edit') && objPerm.viewAll === false && objPerm.modifyAll === false && !isOwner) {
+        console.log(`[Authorization] ⛔ DENIED out-of-scope ${action} on ${objectType}/${record.id} for user ${user?.id}`);
+        throw { statusCode: 403, message: "You don't have permission to modify this record." };
+      }
     }
   },
 
@@ -806,8 +925,6 @@ const metadataService = {
       const keySingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
 
-      const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
-
       let objPerm;
       if (dbPerm) {
         objPerm = {
@@ -820,14 +937,20 @@ const metadataService = {
           modifyAll: dbPerm.modify_all !== false,
         };
       } else {
+        const uRole = String(user?.role || '').toLowerCase();
+        const isAdmin = uRole.includes('admin') || !roleId;
+        const isCrmManager = uRole === 'crm manager';
+        const isClone = uRole.includes('clone');
+        const isReadOnly = uRole.includes('read only') || uRole.includes('viewer');
+
         objPerm = {
-          canCreate: isSystemAdmin,
-          canRead: isSystemAdmin,
-          canUpdate: isSystemAdmin,
-          canEdit: isSystemAdmin,
-          canDelete: isSystemAdmin,
-          viewAll: isSystemAdmin,
-          modifyAll: isSystemAdmin,
+          canCreate: !isReadOnly,
+          canRead: true,
+          canUpdate: !isReadOnly,
+          canEdit: !isReadOnly,
+          canDelete: isAdmin || isCrmManager || isClone,
+          viewAll: isAdmin || isCrmManager,
+          modifyAll: isAdmin,
         };
       }
 
@@ -972,7 +1095,11 @@ const metadataService = {
 
       const allFields = [...PLATFORM_FIELDS];
       businessFields.forEach((bf) => {
-        if (!allFields.some((pf) => pf.name === bf.name)) {
+        const bfNameLower = (bf.name || bf.api_name || '').toLowerCase();
+        const isDuplicateOwner = (bfNameLower === 'owner' || bfNameLower === 'owner_id') && allFields.some((pf) => pf.name === 'owner_id');
+        const isDuplicateCompany = (bfNameLower === 'company' || bfNameLower === 'company_id') && allFields.some((pf) => pf.name === 'company_id');
+
+        if (!isDuplicateOwner && !isDuplicateCompany && !allFields.some((pf) => pf.name.toLowerCase() === bfNameLower)) {
           allFields.push(bf);
         }
       });

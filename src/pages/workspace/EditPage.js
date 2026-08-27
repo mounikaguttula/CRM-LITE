@@ -223,8 +223,22 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   const fpPerms = permissions?.fieldPermissions || {};
   const visibleFields = effectiveFields
     .filter((f) => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'created_by' && f.name !== 'updated_at' && f.name !== 'updated_by')
-    .filter((f) => {
+    .filter((f, idx, self) => {
       const fNameLower = String(f.name || f.api_name || '').toLowerCase();
+      if (fNameLower === 'owner' || fNameLower === 'owner_id') {
+        const firstOwnerIdx = self.findIndex(item => {
+          const k = String(item.name || item.api_name || '').toLowerCase();
+          return k === 'owner' || k === 'owner_id';
+        });
+        if (idx !== firstOwnerIdx) return false;
+      }
+      if (fNameLower === 'company' || fNameLower === 'company_id') {
+        const firstCompIdx = self.findIndex(item => {
+          const k = String(item.name || item.api_name || '').toLowerCase();
+          return k === 'company' || k === 'company_id';
+        });
+        if (idx !== firstCompIdx) return false;
+      }
       if (isDealEditObj && fNameLower === 'status') return false;
       const fp = fpPerms[f.id];
       const canRead = f.canRead !== undefined ? f.canRead : (fp ? fp.canRead !== false : true);
@@ -244,11 +258,24 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   function handleChange(fieldName, value) {
     setFormData((prev) => {
       const next = { ...prev, [fieldName]: value };
-      if (fieldName === 'lead_source' || fieldName === 'source') {
+      const lower = String(fieldName || '').toLowerCase();
+      if (lower.includes('company') || lower === 'parent_id' || lower.includes('account')) {
+        next.company = value;
+        next.company_id = value;
+        next.parent_id = value;
+        next.Company = value;
+        next.Company_id = value;
+      }
+      if (lower.includes('owner') || lower === 'owner_id') {
+        next.owner = value;
+        next.owner_id = value;
+        next.Owner = value;
+      }
+      if (lower === 'lead_source' || lower === 'source') {
         next.lead_source = value;
         next.source = value;
       }
-      if (fieldName === 'title' || fieldName === 'job_title') {
+      if (lower === 'title' || lower === 'job_title') {
         next.title = value;
         next.job_title = value;
       }
@@ -272,7 +299,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     // Resolve company and owner lookup values before validation
     const normalizeString = (value) => String(value || '').trim().toLowerCase();
     if (lookupData.companies && lookupData.companies.length > 0) {
-      const currentComp = payload.company || payload.company_id || payload.account || payload.account_id || payload.organization || payload.organization_id || payload.company_name;
+      const currentComp = payload.company || payload.company_id || payload.parent_id || payload.account || payload.account_id || payload.organization || payload.organization_id || payload.company_name;
       const compMatch = lookupData.companies.find((c) => {
         const normalizedValues = [c.id, c._id, c.name, c.company_name, c.organization_name, c.account_name, c.display_name, c.code]
           .filter(Boolean)
@@ -280,8 +307,10 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         return normalizedValues.includes(normalizeString(currentComp));
       });
       if (compMatch) {
-        payload.company = compMatch.id || compMatch._id || compMatch.name;
-        payload.company_id = compMatch.id || compMatch._id || compMatch.name;
+        const compId = compMatch.id || compMatch._id || compMatch.name;
+        payload.company = compId;
+        payload.company_id = compId;
+        payload.parent_id = compId;
       }
     }
 
@@ -408,6 +437,10 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         <style>{'@keyframes ep-spin{to{transform:rotate(360deg)}}'}</style>
       </div>
     );
+  }
+
+  if (permissions && (!objPerm || objPerm.canRead === false || canUpdate === false)) {
+    return <AccessDenied message="You do not have permission to edit this record." moduleName={objectTypeId} />;
   }
 
   const getHumanEditTitle = (data) => {

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { apiGet, apiPost, apiDelete } from '../../../api/client';
+import { useWorkspace } from '../../../context/WorkspaceContext';
 import {
   Box, Plus, X, Loader, Layers, CheckCircle, Search,
-  Database, Layout, Shield, UserPlus, Users,
+  UserPlus, Users,
   DollarSign, Building2, CheckSquare, FileText, Phone, Calendar,
   Megaphone, UserCheck, ChevronRight, RefreshCw, Sparkles,
   Pencil, Trash2, AlertTriangle, MoreHorizontal
@@ -86,6 +87,12 @@ function getModuleMeta(key, obj) {
 
 
 function ObjectManager({ onSelectObject }) {
+  const { permissions } = useWorkspace();
+  const objDefPerm = permissions ? (permissions['object_definition'] || permissions['object'] || permissions['custom_module'] || permissions['module']) : null;
+  const canCreateModule = objDefPerm ? objDefPerm.canCreate !== false : true;
+  const canUpdateModule = objDefPerm ? (objDefPerm.canUpdate !== false && objDefPerm.canEdit !== false) : true;
+  const canDeleteModule = objDefPerm ? objDefPerm.canDelete !== false : true;
+
   const [objectTypes, setObjectTypes] = useState({});
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -371,18 +378,20 @@ function ObjectManager({ onSelectObject }) {
           </button>
 
 
-          <button
-            onClick={handleOpenNewModal}
-            className="orbit-btn-primary"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '6px',
-              height: '36px', padding: '0 14px', borderRadius: '8px', fontSize: '0.8rem',
-              fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            <Plus style={{ width: '15px', height: '15px', display: 'block' }} />
-            <span>New Custom Module</span>
-          </button>
+          {canCreateModule && (
+            <button
+              onClick={handleOpenNewModal}
+              className="orbit-btn-primary"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                height: '36px', padding: '0 14px', borderRadius: '8px', fontSize: '0.8rem',
+                fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <Plus style={{ width: '15px', height: '15px', display: 'block' }} />
+              <span>New Custom Module</span>
+            </button>
+          )}
         </div>
       </div>
 

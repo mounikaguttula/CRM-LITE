@@ -211,6 +211,54 @@ body::after {
 }
 
 /* ────────────────────────────── Scrollbar ────────────────────────────── */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.subtle-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.subtle-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.subtle-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+.subtle-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.ultra-subtle-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+.ultra-subtle-scrollbar::-webkit-scrollbar {
+  width: 2px;
+  height: 2px;
+}
+.ultra-subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ultra-subtle-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+.ultra-subtle-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 * { scrollbar-width: thin; scrollbar-color: rgba(99,102,241,0.25) transparent; }
 .orbit-scrollbar::-webkit-scrollbar,
 *::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -451,3 +499,18 @@ textarea.orbit-input::placeholder { color: var(--text-faint); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Setup lower dashboard section grid */
+.setup-lower-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  align-items: start;
+  gap: 20px;
+}
+
+@media (max-width: 992px) {
+  .setup-lower-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

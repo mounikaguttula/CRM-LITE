@@ -43,34 +43,44 @@ const startSession = async ({ organization_id, user_id, user_email, name }) => {
 
 
 /**
- * Update the last_activity_at timestamp for the user's active LOGIN session.
+ * Update or renew the last_activity_at timestamp for the user's active session.
+ * If the session was marked SESSION_EXPIRED or is missing, reactivate or create a fresh LOGIN session row.
  */
-const updateLastActivity = async ({ organization_id, user_id }) => {
+const updateLastActivity = async ({ organization_id, user_id, user_email, name }) => {
     try {
         if (!user_id || !organization_id) return;
         const client = getClient();
+        const nowIso = new Date().toISOString();
 
+        // Fetch latest session row (LOGIN or SESSION_EXPIRED)
         const { data: sessionRow, error: fetchErr } = await client
             .from('audit_logs')
             .select('*')
             .eq('organization_id', organization_id)
             .eq('user_id', user_id)
-            .eq('event_type', 'LOGIN')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        if (fetchErr || !sessionRow) return;
+        if (fetchErr || !sessionRow) {
+            await startSession({ organization_id, user_id, user_email, name });
+            return;
+        }
 
         const currentDetails = sessionRow.details || {};
         const updatedDetails = {
             ...currentDetails,
-            last_activity_at: new Date().toISOString(),
+            last_activity_at: nowIso,
         };
+        delete updatedDetails.logged_out_at;
+        delete updatedDetails.logout_reason;
 
         await client
             .from('audit_logs')
-            .update({ details: updatedDetails })
+            .update({
+                event_type: 'LOGIN',
+                details: updatedDetails,
+            })
             .eq('id', sessionRow.id);
     } catch (err) {
         console.error('❌ updateLastActivity exception:', err.message);
@@ -190,10 +200,71 @@ const endSession = async ({ organization_id, user_id, reason = 'LOGOUT', logout_
 };
 
 
+/**
+ * Log a discrete Setup & Administration activity event into audit_logs.
+ */
+const logSetupActivity = async ({ organization_id, user_id, action, entity_type, entity_id, entity_name, module_name, metadata = {} }) => {
+    try {
+        if (!organization_id || !user_id) return;
+        const client = getClient();
+        const nowIso = new Date().toISOString();
+
+        let actorName = metadata.actor_name;
+        let actorEmail = metadata.actor_email;
+
+        if (!actorName || !actorEmail) {
+            const { data: userData } = await client
+                .from('users')
+                .select('first_name, last_name, email, name')
+                .eq('id', user_id)
+                .maybeSingle();
+
+            if (userData) {
+                actorName = userData.name || `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email;
+                actorEmail = userData.email;
+            }
+        }
+
+        const details = {
+            action: action ? String(action).toUpperCase() : 'CREATE',
+            entity_type: entity_type ? String(entity_type).toLowerCase() : 'general',
+            entity_id: entity_id || null,
+            entity_name: entity_name || metadata.entity_name || '',
+            module_name: module_name || metadata.module_name || '',
+            actor_name: actorName || 'User',
+            actor_email: actorEmail || '',
+            metadata: metadata || {},
+        };
+
+        const { data, error } = await client
+            .from('audit_logs')
+            .insert([{
+                organization_id,
+                user_id,
+                event_type: 'SETUP_ACTIVITY',
+                details,
+                created_at: nowIso,
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('❌ Error logging setup activity:', error.message);
+        } else {
+            console.log(`✅ [SETUP ACTIVITY LOGGED] Action: ${details.action} | Entity: ${details.entity_type} (${details.entity_name})`);
+        }
+        return data;
+    } catch (err) {
+        console.error('❌ logSetupActivity exception:', err.message);
+    }
+};
+
+
 module.exports = {
     startSession,
     updateLastActivity,
     logUserActivity,
+    logSetupActivity,
     endSession,
     logAuditEvent: startSession, // Backward compatibility
 };

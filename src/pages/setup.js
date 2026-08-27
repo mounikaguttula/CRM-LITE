@@ -1,23 +1,301 @@
-import React, { useState, useContext, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useState, useContext, useEffect, useCallback } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { apiGet } from '../api/client';
 import ObjectDetail from './Setup/components/ObjectDetail';
 import WorkspaceContext, { WorkspaceProvider } from '../context/WorkspaceContext';
 import AIChatBotWidget from '../components/AIChatBotWidget';
 import ObjectManager from './Setup/components/ObjectManager';
 import UserManagement from './Setup/components/UserManagement';
-import RoleManagement from './Setup/components/RoleManagement';
 import RolesPermissions from './Setup/components/RolesPermissions';
 import CompanyInfo from './Setup/components/CompanyInfo';
 import Navbar from '../components/navbar';
 import ValidationRulesPage from './workspace/ValidationRulesPage';
 import FlowAutomations from './Setup/components/FlowAutomations';
+import AccessDenied from '../components/AccessDenied';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Users, Shield, Boxes, Building2,
-  FileText, ArrowLeft, Settings, Activity, TrendingUp,
+  FileText, ArrowLeft, Settings, ShieldCheck, Sliders,
   Clock, CheckCircle, Zap, Globe, Database, Lock,
-  ArrowUpRight, Server, Cpu, Layers, ChevronRight, Workflow, LogOut,
+  ArrowUpRight, Server, Cpu, ChevronRight, Workflow, LogOut,
 } from 'lucide-react';
+
+/* ─── Format Relative Time ─── */
+function formatRelativeTime(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  if (isNaN(diffMs)) return '';
+
+  const diffSecs = Math.floor(diffMs / 1000);
+  if (diffSecs < 60) return 'Just now';
+
+  const diffMins = Math.floor(diffSecs / 60);
+  if (diffMins < 60) return `${diffMins}m ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/* ─── Helper for formatting activity title, subtitle, color, and icon ─── */
+function getActivityMeta(item) {
+  const action = String(item.action || 'create').toLowerCase();
+  const entityType = String(item.entityType || item.entity_type || 'general').toLowerCase();
+  const entityName = item.entityName || item.entity_name || '';
+  const moduleName = item.moduleName || item.module_name || '';
+  const actorName = item.actorName || item.actor_name || '';
+
+  let title = `${action.toUpperCase()} ${entityType}`;
+  let color = '#4facfe';
+  let Icon = Database;
+
+  if (entityType === 'module' || entityType === 'object' || entityType === 'custom_module') {
+    Icon = Boxes;
+    color = '#00b09b';
+    if (action === 'create') title = 'Custom module created';
+    else if (action === 'update') title = 'Module schema modified';
+    else if (action === 'delete') title = 'Custom module deleted';
+  } else if (entityType === 'field' || entityType === 'custom_field') {
+    Icon = FileText;
+    color = '#00b09b';
+    if (action === 'create') title = 'Custom field added';
+    else if (action === 'update') title = 'Custom field updated';
+    else if (action === 'delete') title = 'Custom field removed';
+  } else if (entityType === 'user') {
+    Icon = Users;
+    color = '#f5576c';
+    if (action === 'create') title = 'User invited';
+    else if (action === 'update') title = 'User profile updated';
+    else if (action === 'delete') title = 'User removed';
+  } else if (entityType === 'role' || entityType === 'permission') {
+    Icon = Shield;
+    color = '#764ba2';
+    if (action === 'create') title = 'Role created';
+    else if (action === 'update') title = 'Role permissions updated';
+    else if (action === 'delete') title = 'Role deleted';
+  } else if (entityType === 'validation_rule' || entityType === 'rule') {
+    Icon = ShieldCheck;
+    color = '#a18cd1';
+    if (action === 'create') title = 'Validation rule created';
+    else if (action === 'update') title = 'Validation rule updated';
+    else if (action === 'delete') title = 'Validation rule deleted';
+  } else if (entityType === 'flow' || entityType === 'automation') {
+    Icon = Workflow;
+    color = '#ff9a9e';
+    if (action === 'create') title = 'Automation flow created';
+    else if (action === 'update') title = 'Automation flow updated';
+    else if (action === 'delete') title = 'Automation flow deleted';
+  } else if (entityType === 'organization' || entityType === 'company') {
+    Icon = Building2;
+    color = '#f6d365';
+    if (action === 'update' || action === 'save') title = 'Company settings saved';
+  }
+
+  // Subtitle / target text
+  let target = '';
+  if (entityName && moduleName && entityName.toLowerCase() !== moduleName.toLowerCase()) {
+    target = `${entityName} (${moduleName})`;
+  } else if (entityName) {
+    target = entityName;
+  } else if (moduleName) {
+    target = `${moduleName} module`;
+  } else {
+    target = 'System';
+  }
+
+  if (actorName && actorName !== 'User') {
+    target = `${target} • ${actorName}`;
+  }
+
+  return { title, target, color, Icon };
+}
+
+/* ─── Interactive Gravitational Particle Field Canvas for Hero Banner ─── */
+function HeroParticleCanvas({ containerRef }) {
+  const canvasRef = React.useRef(null);
+  const particlesRef = React.useRef([]);
+  const animFrameIdRef = React.useRef(null);
+  const mousePosRef = React.useRef({ x: -9999, y: -9999 });
+
+  useEffect(() => {
+    // Respect prefers-reduced-motion
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) return;
+
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const ctx = canvas.getContext('2d');
+
+    const colors = [
+      { r: 0, g: 176, b: 155 },   // cyan/teal
+      { r: 0, g: 214, b: 153 },   // mint
+      { r: 79, g: 172, b: 254 },  // blue
+      { r: 161, g: 140, b: 209 }, // purple
+      { r: 255, g: 255, b: 255 }, // subtle white
+    ];
+
+    let dpr = window.devicePixelRatio || 1;
+    let cssWidth = container.offsetWidth;
+    let cssHeight = container.offsetHeight;
+
+    const initParticles = () => {
+      cssWidth = container.offsetWidth;
+      cssHeight = container.offsetHeight;
+      dpr = window.devicePixelRatio || 1;
+
+      canvas.width = cssWidth * dpr;
+      canvas.height = cssHeight * dpr;
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
+
+      // Distribute ~45 small round particles across the hero grid
+      const count = 45;
+      const newParticles = [];
+
+      for (let i = 0; i < count; i++) {
+        const ox = 24 + Math.random() * (cssWidth - 48);
+        const oy = 18 + Math.random() * (cssHeight - 36);
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const radius = Math.random() * 1.5 + 1.2;
+
+        newParticles.push({
+          originX: ox,
+          originY: oy,
+          x: ox,
+          y: oy,
+          vx: 0,
+          vy: 0,
+          radius,
+          color,
+          baseAlpha: Math.random() * 0.25 + 0.2,
+        });
+      }
+
+      particlesRef.current = newParticles;
+    };
+
+    initParticles();
+
+    const handleResize = () => {
+      initParticles();
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    const handleMouseMove = (e) => {
+      const rect = container.getBoundingClientRect();
+      mousePosRef.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    };
+
+    const handleMouseLeave = () => {
+      mousePosRef.current = { x: -9999, y: -9999 };
+    };
+
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mouseleave', handleMouseLeave);
+
+    const influenceRadius = 140;
+
+    const render = () => {
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      const mouse = mousePosRef.current;
+      const mouseIn = mouse.x >= 0 && mouse.y >= 0;
+      const particles = particlesRef.current;
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        let targetX = p.originX;
+        let targetY = p.originY;
+        let influence = 0;
+
+        if (mouseIn) {
+          const dx = mouse.x - p.originX;
+          const dy = mouse.y - p.originY;
+          const distFromOrigin = Math.hypot(dx, dy);
+
+          if (distFromOrigin < influenceRadius && distFromOrigin > 0.1) {
+            influence = 1 - distFromOrigin / influenceRadius;
+            // Smooth displacement toward cursor, scaled gracefully to avoid clustering
+            const pullPower = Math.min(distFromOrigin * 0.45, influence * influence * 32);
+            targetX = p.originX + (dx / distFromOrigin) * pullPower;
+            targetY = p.originY + (dy / distFromOrigin) * pullPower;
+          }
+        }
+
+        // Damped spring physics toward target position
+        const ax = (targetX - p.x) * 0.08;
+        const ay = (targetY - p.y) * 0.08;
+
+        p.vx = (p.vx + ax) * 0.78;
+        p.vy = (p.vy + ay) * 0.78;
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Dynamic alpha glow when influenced by cursor
+        const currentAlpha = Math.min(0.9, p.baseAlpha + influence * 0.45);
+        const currentRadius = p.radius + influence * 0.5;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, currentRadius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${currentAlpha})`;
+
+        if (influence > 0.15) {
+          ctx.shadowColor = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, 0.6)`;
+          ctx.shadowBlur = 6 * influence;
+        } else {
+          ctx.shadowBlur = 0;
+        }
+
+        ctx.fill();
+      }
+
+      ctx.restore();
+      animFrameIdRef.current = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      container.removeEventListener('mousemove', handleMouseMove);
+      container.removeEventListener('mouseleave', handleMouseLeave);
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+      }
+    };
+  }, [containerRef]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 0,
+        borderRadius: 22,
+      }}
+    />
+  );
+}
 
 /* ─── Animated counter hook ─── */
 function useCounter(target, duration = 1200, start = false) {
@@ -38,7 +316,7 @@ function useCounter(target, duration = 1200, start = false) {
 }
 
 /* ─── Animated KPI Card ─── */
-function KpiCard({ value, label, sub, icon: Icon, gradient, glow, trend, sparkData, tab, onNavigate, delay = 0, isOrg }) {
+function KpiCard({ value, label, sub, icon: Icon, gradient, glow, tab, onNavigate, delay = 0 }) {
   const [hovered, setHovered] = useState(false);
   const [mounted, setMounted] = useState(false);
   const numVal = parseInt(value) || 0;
@@ -83,32 +361,13 @@ function KpiCard({ value, label, sub, icon: Icon, gradient, glow, trend, sparkDa
             </div>
             <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#6b7280' }}>{label}</span>
           </div>
-          {trend && (
-            <span style={{
-              fontSize: '0.65rem', fontWeight: 700,
-              color: '#059669', background: '#ecfdf5',
-              padding: '2px 7px', borderRadius: 6,
-              border: '1px solid #a7f3d0',
-            }}>
-              {trend}
-            </span>
-          )}
         </div>
 
         {/* Value */}
-        {isOrg ? (
-          <>
-            <div style={{ fontSize: '1rem', fontWeight: 700, color: '#111827', marginBottom: 2 }}>{value}</div>
-            <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>{sub}</div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#111827', lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 3 }}>
-              {mounted ? counted : 0}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>{sub}</div>
-          </>
-        )}
+        <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#111827', lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
+          {mounted ? counted : (parseInt(value) || 0)}
+        </div>
+        <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>{sub}</div>
       </div>
 
       {/* Bottom accent glow on hover */}
@@ -158,10 +417,141 @@ function Setup() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedObject, setSelectedObject] = useState(null);
   const [dashboardMounted, setDashboardMounted] = useState(false);
+  const [setupStats, setSetupStats] = useState({
+    userCount: null,
+    customModuleCount: null,
+    customFieldCount: null,
+    roleCount: null,
+  });
+  const [activities, setActivities] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState(null);
+
+  const fetchRecentActivity = useCallback(async () => {
+    try {
+      setActivityLoading(true);
+      setActivityError(null);
+      const res = await apiGet('/setup/recent-activity').catch(() => apiGet('/api/setup/recent-activity'));
+      const items = Array.isArray(res) ? res : (res?.activities || res?.data || []);
+      setActivities(items);
+    } catch (err) {
+      console.error('Failed to load recent activity:', err);
+      setActivityError('Unable to load recent activity');
+      setActivities([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, []);
+
   const location = useLocation();
+  const navigate = useNavigate();
+  const heroBannerRef = React.useRef(null);
+
+  const [configData, setConfigData] = useState(null);
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configError, setConfigError] = useState(null);
+
+  const fetchConfigurationOverview = useCallback(async () => {
+    try {
+      setConfigLoading(true);
+      setConfigError(null);
+      const res = await apiGet('/setup/configuration-overview').catch(() => apiGet('/api/setup/configuration-overview'));
+      setConfigData(res || {});
+    } catch (err) {
+      console.error('Failed to load configuration overview:', err);
+      setConfigError('Unable to load configuration');
+      setConfigData(null);
+    } finally {
+      setConfigLoading(false);
+    }
+  }, []);
+
+  const [userProfileData, setUserProfileData] = useState(null);
+  const [userProfileLoading, setUserProfileLoading] = useState(true);
+  const [userProfileError, setUserProfileError] = useState(null);
+
+  const fetchCurrentUserProfile = useCallback(async () => {
+    try {
+      setUserProfileLoading(true);
+      setUserProfileError(null);
+      const res = await apiGet('/setup/current-user').catch(() => apiGet('/api/setup/current-user'));
+      setUserProfileData(res || {});
+    } catch (err) {
+      console.error('Failed to load current user profile:', err);
+      setUserProfileError('Unable to load user profile');
+      setUserProfileData(null);
+    } finally {
+      setUserProfileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchConfigurationOverview();
+    fetchRecentActivity();
+    fetchCurrentUserProfile();
+  }, [fetchConfigurationOverview, fetchRecentActivity, fetchCurrentUserProfile]);
   const ctx = useContext(WorkspaceContext) || {};
-  const { company, currentUser } = ctx;
+  const { currentUser } = ctx;
   const { logout, user } = useAuth();
+  const userRole = String(user?.role || currentUser?.role || '').toLowerCase();
+  const isAdmin = userRole.includes('admin') || userRole.includes('administrator');
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSetupCounts() {
+      try {
+        const [uData, rData, metaData] = await Promise.all([
+          apiGet('/users').catch(() => []),
+          apiGet('/roles').catch(() => apiGet('/api/roles')).catch(() => []),
+          apiGet('/workspace/metadata').catch(() => ({})),
+        ]);
+
+        if (!isMounted) return;
+
+        const userList = Array.isArray(uData) ? uData : uData?.data || [];
+        const roleList = Array.isArray(rData) ? rData : rData?.data || [];
+        const objectsObj = metaData?.objectTypes || {};
+
+        let customModCount = 0;
+        let customFldCount = 0;
+
+        Object.keys(objectsObj).forEach((key) => {
+          const obj = objectsObj[key];
+          const lowerKey = key.toLowerCase();
+
+          const isCustomMod = Boolean(
+            obj?.is_custom === true ||
+            lowerKey.endsWith('__c') ||
+            (obj && !obj.is_system && obj.organization_id !== null && !['lead', 'company', 'contact', 'deal'].includes(lowerKey))
+          );
+
+          if (isCustomMod) {
+            customModCount++;
+          }
+
+          if (Array.isArray(obj?.fields)) {
+            obj.fields.forEach((f) => {
+              const fName = String(f.api_name || f.name || '').toLowerCase();
+              if (f.is_custom === true || fName.endsWith('__c')) {
+                customFldCount++;
+              }
+            });
+          }
+        });
+
+        setSetupStats({
+          userCount: userList.length,
+          roleCount: roleList.length,
+          customModuleCount: customModCount,
+          customFieldCount: customFldCount,
+        });
+      } catch (err) {
+        console.warn('Failed to load setup KPI counts:', err);
+      }
+    }
+    loadSetupCounts();
+    return () => { isMounted = false; };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -214,29 +604,51 @@ function Setup() {
     },
   ];
 
+  const userVal = setupStats.userCount ?? 0;
+  const customModVal = setupStats.customModuleCount ?? 0;
+  const customFldVal = setupStats.customFieldCount ?? 0;
+  const roleVal = setupStats.roleCount ?? 0;
+
   const kpiCards = [
     {
-      value: company?.name || company?.company_name || 'Organization', label: 'Organization', sub: 'Enterprise · Active',
-      icon: Building2, gradient: 'linear-gradient(135deg, #667eea, #764ba2)',
-      glow: '#764ba2', tab: 'company', isOrg: true, delay: 0,
+      value: String(userVal),
+      label: 'Team Members',
+      sub: setupStats.userCount !== null ? `${userVal} users configured` : 'Users configured',
+      icon: Users,
+      gradient: 'linear-gradient(135deg, #f093fb, #f5576c)',
+      glow: '#f5576c',
+      tab: 'users',
+      delay: 0,
     },
     {
-      value: '5', label: 'Custom Modules', sub: '+2 this quarter',
-      icon: Boxes, gradient: 'linear-gradient(135deg, #00b09b, #96c93d)',
-      glow: '#00b09b', tab: 'modules', trend: '+40%',
-      sparkData: [3, 2, 4, 3, 5, 4, 5], delay: 80,
+      value: String(customModVal),
+      label: 'Custom Modules',
+      sub: 'Custom modules',
+      icon: Boxes,
+      gradient: 'linear-gradient(135deg, #00b09b, #96c93d)',
+      glow: '#00b09b',
+      tab: 'modules',
+      delay: 80,
     },
     {
-      value: '12', label: 'Team Members', sub: '3 online now',
-      icon: Users, gradient: 'linear-gradient(135deg, #f093fb, #f5576c)',
-      glow: '#f5576c', tab: 'users', trend: '+3',
-      sparkData: [9, 11, 8, 13, 10, 14, 12], delay: 160,
+      value: String(customFldVal),
+      label: 'Custom Fields',
+      sub: 'Across all modules',
+      icon: FileText,
+      gradient: 'linear-gradient(135deg, #667eea, #764ba2)',
+      glow: '#764ba2',
+      tab: 'modules',
+      delay: 160,
     },
     {
-      value: '3', label: 'Security Roles', sub: 'All policies active',
-      icon: Shield, gradient: 'linear-gradient(135deg, #4facfe, #00f2fe)',
-      glow: '#00f2fe', tab: 'roles', trend: '100%',
-      sparkData: [2, 3, 1, 3, 2, 3, 3], delay: 240,
+      value: String(roleVal),
+      label: 'Security Roles',
+      sub: 'Configured roles',
+      icon: Shield,
+      gradient: 'linear-gradient(135deg, #4facfe, #00f2fe)',
+      glow: '#00f2fe',
+      tab: 'roles',
+      delay: 240,
     },
   ];
 
@@ -334,7 +746,7 @@ function Setup() {
                       <Icon size={15} style={{ color: isActive ? '#fff' : 'rgba(255,255,255,0.5)' }} />
                     </div>
                     <span>{item.label}</span>
-                    {isActive && <ChevronRight size={13} style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)' }} />}
+                    {isActive && item.id !== 'dashboard' && <ChevronRight size={13} style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)' }} />}
                   </button>
                 );
               })}
@@ -407,26 +819,19 @@ function Setup() {
         {activeTab === 'dashboard' && (
           <div>
             {/* ══ Hero Banner ══ */}
-            <div style={{
-              borderRadius: 22, marginBottom: 24, position: 'relative', overflow: 'hidden',
-              background: 'linear-gradient(135deg, #0d1117 0%, #0a1628 30%, #0d2137 55%, #0a2020 80%, #0d1117 100%)',
-              padding: '28px 32px 24px',
-              boxShadow: '0 20px 60px -16px rgba(0,176,155,0.18), 0 8px 32px -8px rgba(13,17,23,0.4)',
-              animation: 'slideUp 0.6s cubic-bezier(0.22,1,0.36,1) both',
-            }}>
-              {/* Animated particle dots */}
-              {[...Array(6)].map((_, i) => (
-                <div key={i} style={{
-                  position: 'absolute',
-                  width: i % 2 === 0 ? 6 : 4,
-                  height: i % 2 === 0 ? 6 : 4,
-                  borderRadius: '50%',
-                  background: ['#00b09b','#4facfe','#f5576c','#f6d365','#a18cd1','#00d699'][i],
-                  top: `${[15, 65, 30, 80, 20, 70][i]}%`,
-                  left: `${[75, 82, 88, 70, 94, 78][i]}%`,
-                  animation: `particleDrift ${[3, 4, 3.5, 5, 4.5, 3.8][i]}s ease-in-out infinite ${[0, 0.8, 1.2, 0.4, 1.6, 0.2][i]}s`,
-                }} />
-              ))}
+            <div
+              ref={heroBannerRef}
+              style={{
+                borderRadius: 22, marginBottom: 24, position: 'relative', overflow: 'hidden',
+                background: 'linear-gradient(135deg, #0d1117 0%, #0a1628 30%, #0d2137 55%, #0a2020 80%, #0d1117 100%)',
+                padding: '28px 32px 24px',
+                boxShadow: '0 20px 60px -16px rgba(0,176,155,0.18), 0 8px 32px -8px rgba(13,17,23,0.4)',
+                animation: 'slideUp 0.6s cubic-bezier(0.22,1,0.36,1) both',
+              }}
+            >
+              {/* Interactive cursor-following canvas particle field */}
+              <HeroParticleCanvas containerRef={heroBannerRef} />
+
               {/* Glow orbs */}
               <div style={{ position: 'absolute', top: -80, right: 60, width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.2), transparent 65%)', animation: 'float 7s ease-in-out infinite' }} />
               <div style={{ position: 'absolute', bottom: -60, right: 200, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.15), transparent 65%)', animation: 'float 9s ease-in-out infinite reverse' }} />
@@ -448,20 +853,6 @@ function Setup() {
                   <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.48)', maxWidth: 480, lineHeight: 1.65, animation: 'fadeSlideIn 0.5s 0.3s both' }}>
                     Manage your CRM platform — configure modules, schemas, users, roles, and workspace settings.
                   </p>
-                </div>
-
-                {/* Right side stats */}
-                <div style={{ display: 'flex', gap: 10, animation: 'fadeSlideIn 0.5s 0.4s both' }}>
-                  {[
-                    { v: '99.9%', l: 'Uptime', color: '#00b09b' },
-                    { v: '24/7', l: 'Support', color: '#4facfe' },
-                    { v: 'v2.4', l: 'Version', color: '#a18cd1' },
-                  ].map((s) => (
-                    <div key={s.l} style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'center', minWidth: 72 }}>
-                      <div style={{ fontSize: '1rem', fontWeight: 900, color: s.color, lineHeight: 1, marginBottom: 3 }}>{s.v}</div>
-                      <div style={{ fontSize: '0.6rem', fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{s.l}</div>
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>
@@ -525,7 +916,7 @@ function Setup() {
                 </div>
               </div>
 
-              {/* System Health */}
+              {/* Configuration Overview */}
               <div style={{
                 background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
                 backdropFilter: 'blur(24px)',
@@ -534,86 +925,113 @@ function Setup() {
                 padding: '26px 28px', display: 'flex', flexDirection: 'column',
                 animation: 'slideUp 0.6s 0.4s cubic-bezier(0.22,1,0.36,1) both',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
                   <div>
-                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>System Health</div>
-                    <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Real-time status monitoring</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Configuration Overview</div>
+                    <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Current CRM configuration</div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, background: 'rgba(0,214,153,0.08)', border: '1px solid rgba(0,214,153,0.2)' }}>
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#00d699', animation: 'pulseGlow 2s ease-in-out infinite' }} />
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#00d699' }}>All Systems Go</span>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 11,
+                    background: 'linear-gradient(135deg, #00b09b, #4facfe)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 4px 14px rgba(0,176,155,0.3)'
+                  }}>
+                    <Sliders size={16} style={{ color: '#fff' }} />
                   </div>
                 </div>
 
-                {/* Uptime ring */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '18px 20px', borderRadius: 16, background: 'linear-gradient(135deg, #f0fdf9, #e8f8ff)', border: '1px solid rgba(0,176,155,0.12)', marginBottom: 18 }}>
-                  <div style={{ position: 'relative', width: 68, height: 68, flexShrink: 0 }}>
-                    <svg width="68" height="68" viewBox="0 0 68 68">
-                      <defs>
-                        <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stopColor="#00b09b" />
-                          <stop offset="100%" stopColor="#4facfe" />
-                        </linearGradient>
-                      </defs>
-                      <circle cx="34" cy="34" r="28" fill="none" stroke="rgba(0,176,155,0.12)" strokeWidth="6" />
-                      <circle cx="34" cy="34" r="28" fill="none" stroke="url(#ringGrad)" strokeWidth="6"
-                        strokeLinecap="round" strokeDasharray={`${0.999 * 175.93} 175.93`}
-                        transform="rotate(-90 34 34)" />
-                    </svg>
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-                      <span style={{ fontSize: '0.78rem', fontWeight: 900, color: '#0d1117' }}>99.9%</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                  {configLoading ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 0' }}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 13, background: '#f8fafc' }}>
+                          <div style={{ height: 14, width: '40%', borderRadius: 4, background: '#e2e8f0' }} />
+                          <div style={{ height: 14, width: '15%', borderRadius: 4, background: '#cbd5e1' }} />
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#0d1117' }}>Platform Uptime</div>
-                    <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 3 }}>Last 30 days · 0 incidents</div>
-                  </div>
-                </div>
-
-                {/* Status rows */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                  {healthItems.map((item, i) => {
-                    const Icon = item.icon;
-                    return (
-                      <div key={item.label}
+                  ) : configError ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 600 }}>{configError}</span>
+                      <button
+                        type="button"
+                        onClick={fetchConfigurationOverview}
                         style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          padding: '11px 14px', borderRadius: 13,
-                          border: '1px solid rgba(0,0,0,0.04)',
-                          background: '#fafcff',
-                          transition: 'all 0.2s ease',
-                          animation: `slideUp 0.4s ${0.5 + i * 0.06}s both`,
+                          padding: '6px 14px', borderRadius: 8, border: '1px solid #cbd5e1',
+                          background: '#fff', fontSize: '0.78rem', fontWeight: 600, color: '#475569', cursor: 'pointer'
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = '#fafcff'; e.currentTarget.style.boxShadow = 'none'; }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <Icon size={14} style={{ color: '#8a9bb0' }} />
-                          <span style={{ fontSize: '0.82rem', fontWeight: 500, color: '#374151' }}>{item.label}</span>
+                        Retry
+                      </button>
+                    </div>
+                  ) : (
+                    [
+                      { label: 'Modules', key: 'modules', icon: Boxes, color: '#00b09b', onClick: () => setActiveTab('modules') },
+                      { label: 'Fields', key: 'fields', icon: FileText, color: '#4facfe', onClick: () => setActiveTab('modules') },
+                      { label: 'Record Rules', key: 'recordRules', icon: ShieldCheck, color: '#a18cd1', onClick: () => setActiveTab('validation') },
+                      { label: 'Automations', key: 'automations', icon: Workflow, color: '#ff9a9e', onClick: () => setActiveTab('automations') },
+                      { label: 'Forms', key: 'forms', icon: FileText, color: '#f5576c', onClick: () => navigate('/forms') },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const val = configData?.[item.key] ?? 0;
+                      return (
+                        <div
+                          key={item.label}
+                          onClick={item.onClick}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '11px 14px', borderRadius: 13,
+                            border: '1px solid rgba(0,0,0,0.04)',
+                            background: '#fafcff',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#ffffff';
+                            e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
+                            e.currentTarget.style.borderColor = `${item.color}40`;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#fafcff';
+                            e.currentTarget.style.boxShadow = 'none';
+                            e.currentTarget.style.borderColor = 'rgba(0,0,0,0.04)';
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{
+                              width: 28, height: 28, borderRadius: 8,
+                              background: `${item.color}12`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            }}>
+                              <Icon size={14} style={{ color: item.color }} />
+                            </div>
+                            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#1e293b' }}>{item.label}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>{val}</span>
+                            <ChevronRight size={14} style={{ color: '#94a3b8' }} />
+                          </div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#00d699', boxShadow: '0 0 6px rgba(0,214,153,0.5)' }} />
-                          <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#00b09b' }}>{item.value}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* ══ Bottom: Activity + Admin ══ */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 20 }}>
-              {/* Activity Timeline */}
+            {/* ══ Bottom: Activity + Current User ══ */}
+            <div className="setup-lower-grid">
+              {/* Activity Timeline (~60-65% width on desktop) */}
               <div style={{
                 background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
                 backdropFilter: 'blur(24px)',
                 border: '1px solid rgba(255,255,255,0.8)',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
-                padding: '26px 30px',
+                padding: '26px 28px',
+                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
                 animation: 'slideUp 0.6s 0.5s cubic-bezier(0.22,1,0.36,1) both',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
                   <div>
                     <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Recent Activity</div>
                     <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Latest admin operations</div>
@@ -622,113 +1040,163 @@ function Setup() {
                     <Clock size={16} style={{ color: '#fff' }} />
                   </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {activityFeed.map((ev, idx) => {
-                    const Icon = ev.icon;
-                    return (
-                      <div key={idx} style={{ display: 'flex', gap: 16, paddingBottom: idx < activityFeed.length - 1 ? 16 : 0, animation: `fadeSlideIn 0.4s ${0.6 + idx * 0.08}s both` }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 36, flexShrink: 0 }}>
-                          <div style={{
-                            width: 36, height: 36, borderRadius: 11,
-                            background: `${ev.color}10`,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            border: `1.5px solid ${ev.color}25`, zIndex: 1,
-                          }}>
-                            <Icon size={15} style={{ color: ev.color }} />
-                          </div>
-                          {idx < activityFeed.length - 1 && (
-                            <div style={{ width: 2, flex: 1, background: `linear-gradient(to bottom, ${ev.color}30, transparent)`, marginTop: 6, borderRadius: 1 }} />
-                          )}
-                        </div>
-                        <div style={{ flex: 1, paddingTop: 6, paddingBottom: idx < activityFeed.length - 1 ? 8 : 0 }}>
-                          <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#0d1117', lineHeight: 1.3 }}>{ev.action}</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                            <span style={{ fontSize: '0.74rem', color: '#5a6b7e' }}>{ev.target}</span>
-                            <span style={{ fontSize: '0.65rem', color: '#c4cdd6' }}>•</span>
-                            <span style={{ fontSize: '0.72rem', color: '#a0acba' }}>{ev.time}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'center' }}>
+                  {activityLoading ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '8px 0' }}>
+                      {[1, 2, 3, 4].map((n) => (
+                        <div key={n} style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                          <div style={{ width: 32, height: 32, borderRadius: 10, background: '#f1f5f9' }} />
+                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            <div style={{ height: 13, width: '55%', borderRadius: 4, background: '#f1f5f9' }} />
+                            <div style={{ height: 10, width: '40%', borderRadius: 4, background: '#f8fafc' }} />
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  ) : activityError ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem', fontWeight: 500 }}>
+                      {activityError}
+                    </div>
+                  ) : activities.length === 0 ? (
+                    <div style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>
+                      No recent activity
+                    </div>
+                  ) : (
+                    activities.slice(0, 4).map((item, idx, list) => {
+                      const { title, target, actorName, color, Icon } = getActivityMeta(item);
+                      const relativeTime = formatRelativeTime(item.createdAt || item.created_at);
+                      const metaText = [target, actorName && actorName !== 'User' ? actorName : null, relativeTime].filter(Boolean).join(' • ');
+
+                      return (
+                        <div key={item.id || idx} style={{ display: 'flex', gap: 14, paddingBottom: idx < list.length - 1 ? 14 : 0, animation: `fadeSlideIn 0.4s ${0.1 + idx * 0.05}s both` }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 32, flexShrink: 0 }}>
+                            <div style={{
+                              width: 32, height: 32, borderRadius: 10,
+                              background: `${color}10`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              border: `1.5px solid ${color}25`, zIndex: 1,
+                            }}>
+                              <Icon size={14} style={{ color: color }} />
+                            </div>
+                            {idx < list.length - 1 && (
+                              <div style={{ width: 2, flex: 1, background: `linear-gradient(to bottom, ${color}30, transparent)`, marginTop: 4, borderRadius: 1 }} />
+                            )}
+                          </div>
+                          <div style={{ flex: 1, paddingTop: 3, paddingBottom: idx < list.length - 1 ? 6 : 0, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#0d1117', lineHeight: 1.3 }}>{title}</div>
+                            <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {metaText}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
-              {/* Admin + Environment */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {/* Admin Card */}
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
-                  backdropFilter: 'blur(24px)',
-                  border: '1px solid rgba(255,255,255,0.8)',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
-                  padding: '26px 28px', position: 'relative', overflow: 'hidden',
-                  animation: 'slideUp 0.6s 0.55s cubic-bezier(0.22,1,0.36,1) both',
-                }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #00b09b, #4facfe, #f5576c)' }} />
-                  <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.06), transparent 70%)' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 18 }}>
-                    <div style={{
-                      width: 56, height: 56, borderRadius: 18,
-                      background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontWeight: 900, fontSize: '1.1rem', color: '#fff',
-                      boxShadow: '0 8px 24px rgba(102,126,234,0.4)', flexShrink: 0,
-                    }}>
-                      {(() => {
-                        const name = user?.name || currentUser?.name || '';
-                        return name ? name.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase() : 'U';
-                      })()}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontWeight: 800, fontSize: '1rem', color: '#0d1117' }}>{user?.name || currentUser?.name || 'User'}</span>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#00d699', boxShadow: '0 0 8px rgba(0,214,153,0.6)' }} />
+              {/* Current User Card (~35-40% width on desktop) */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
+                backdropFilter: 'blur(24px)',
+                border: '1px solid rgba(255,255,255,0.8)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
+                padding: '24px 26px', position: 'relative', overflow: 'hidden',
+                display: 'flex', flexDirection: 'column', gap: 14,
+                animation: 'slideUp 0.6s 0.55s cubic-bezier(0.22,1,0.36,1) both',
+              }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #00b09b, #4facfe, #764ba2)' }} />
+                
+                {userProfileLoading ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0' }}>
+                    <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 14, background: '#f1f5f9' }} />
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ height: 14, width: '60%', borderRadius: 4, background: '#f1f5f9' }} />
+                        <div style={{ height: 10, width: '40%', borderRadius: 4, background: '#f8fafc' }} />
                       </div>
-                      <div style={{ fontSize: '0.78rem', color: '#8a9bb0', marginTop: 2 }}>{currentUser?.email || 'admin@org.com'}</div>
                     </div>
+                    <div style={{ height: 32, borderRadius: 8, background: '#f1f5f9' }} />
+                    <div style={{ height: 32, borderRadius: 8, background: '#f1f5f9' }} />
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    {[
-                      { k: 'Role', v: currentUser?.role || 'Administrator', color: '#667eea' },
-                      { k: 'Status', v: '● Online', color: '#00d699' },
-                    ].map((r) => (
-                      <div key={r.k} style={{ padding: '12px 14px', borderRadius: 12, background: '#f8faff', border: '1px solid rgba(0,0,0,0.04)' }}>
-                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#a0acba', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{r.k}</div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: r.color, marginTop: 3 }}>{r.v}</div>
+                ) : userProfileError ? (
+                  <div style={{ padding: '18px 16px', textAlign: 'center', color: '#ef4444', fontSize: '0.85rem', fontWeight: 500 }}>
+                    {userProfileError}
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#8a9bb0', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                        CURRENT USER & ACCESS
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                        <div style={{
+                          width: 46, height: 46, borderRadius: 14,
+                          background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontWeight: 800, fontSize: '0.98rem', color: '#fff',
+                          boxShadow: '0 6px 18px rgba(102,126,234,0.35)', flexShrink: 0,
+                        }}>
+                          {userProfileData?.avatar || 'U'}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.96rem', color: '#0d1117', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {userProfileData?.name || user?.name || currentUser?.name || 'User'}
+                            </span>
+                            <div style={{
+                              width: 7, height: 7, borderRadius: '50%',
+                              background: userProfileData?.status === 'inactive' ? '#ef4444' : '#00d699',
+                              boxShadow: `0 0 6px ${userProfileData?.status === 'inactive' ? 'rgba(239,68,68,0.5)' : 'rgba(0,214,153,0.5)'}`,
+                              flexShrink: 0
+                            }} />
+                          </div>
+                          <div style={{ fontSize: '0.76rem', color: '#8a9bb0', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {userProfileData?.email || user?.email || currentUser?.email || ''}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-                {/* Environment Card */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #0d1117, #0a1628)',
-                  borderRadius: 22, border: '1px solid rgba(255,255,255,0.06)',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.2), 0 12px 40px -12px rgba(0,0,0,0.3)',
-                  padding: '22px 26px', flex: 1,
-                  animation: 'slideUp 0.6s 0.6s cubic-bezier(0.22,1,0.36,1) both',
-                  position: 'relative', overflow: 'hidden',
-                }}>
-                  <div style={{ position: 'absolute', bottom: -30, right: -20, width: 120, height: 120, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.08), transparent 70%)' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                    <Layers size={16} style={{ color: '#4facfe' }} />
-                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#fff' }}>Environment</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {[
-                      { k: 'Version', v: 'v2.4.1', color: '#00b09b' },
-                      { k: 'Environment', v: 'Production', color: '#00d699' },
-                      { k: 'Region', v: 'US-East-1', color: '#4facfe' },
-                      { k: 'Last Deploy', v: 'Today, 11:30 AM', color: '#a18cd1' },
-                    ].map((r) => (
-                      <div key={r.k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <span style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.35)' }}>{r.k}</span>
-                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: r.color, fontFamily: "'JetBrains Mono', monospace" }}>{r.v}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, background: '#fafcff', borderRadius: 14, border: '1px solid rgba(0,0,0,0.04)', padding: '11px 13px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Role</span>
+                        <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#667eea', background: 'rgba(102,126,234,0.08)', padding: '2px 8px', borderRadius: 6 }}>
+                          {userProfileData?.roleName || 'User'}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Account Status</span>
+                        <span style={{ fontSize: '0.76rem', fontWeight: 700, color: userProfileData?.status === 'inactive' ? '#ef4444' : '#00b09b', textTransform: 'capitalize' }}>
+                          ● {userProfileData?.status ? (userProfileData.status.charAt(0).toUpperCase() + userProfileData.status.slice(1)) : 'Active'}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Record Access</span>
+                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', textAlign: 'right', maxWidth: '62%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {userProfileData?.recordAccess || 'Assigned Records'}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Configuration</span>
+                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', textAlign: 'right', maxWidth: '62%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {userProfileData?.configurationAccess || 'Restricted'}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Last Login</span>
+                        <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#64748b' }}>
+                          {formatRelativeTime(userProfileData?.lastLoginAt) || 'Just now'}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -739,8 +1207,8 @@ function Setup() {
             ? <ObjectDetail objectKey={selectedObject} onBack={() => setSelectedObject(null)} />
             : <ObjectManager onSelectObject={(key) => setSelectedObject(key)} />
         )}
-        {activeTab === 'users' && <UserManagement />}
-        {(activeTab === 'roles' || activeTab === 'profiles') && <RolesPermissions />}
+        {activeTab === 'users' && (isAdmin ? <UserManagement /> : <AccessDenied message="User Administration is restricted to System Administrators." moduleName="Users" />)}
+        {(activeTab === 'roles' || activeTab === 'profiles') && (isAdmin ? <RolesPermissions /> : <AccessDenied message="Role & Security Administration is restricted to System Administrators." moduleName="Roles & Permissions" />)}
         {activeTab === 'company' && <CompanyInfo />}
         {activeTab === 'general' && <CompanyInfo />}
         {activeTab === 'validation' && <ValidationRulesPage />}

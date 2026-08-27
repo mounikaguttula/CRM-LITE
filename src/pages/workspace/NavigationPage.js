@@ -187,7 +187,10 @@ function NavigationPage({ onNavigate }) {
   const canReadForms = !permissions || (permissions.form?.canRead !== false && permissions.forms?.canRead !== false);
   const canReadLeadScanner = !permissions || (permissions.lead?.canRead !== false && permissions.leads?.canRead !== false);
 
-  const SidebarNavItem = ({ to, label, icon, gradient, isActive, onClick }) => {
+  const totalStandardCount = standardNavItems.length + (canReadForms ? 1 : 0) + (canReadLeadScanner ? 1 : 0);
+  const totalCustomCount = customNavItems.length;
+
+  const SidebarNavItem = ({ to, label, icon, gradient, isActive, onClick, hideArrow }) => {
     const [hov, setHov] = React.useState(false);
     return (
       <NavLink
@@ -220,7 +223,7 @@ function NavigationPage({ onNavigate }) {
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {label}
         </span>
-        {isActive && <ChevronRight size={13} style={{ color: 'rgba(255,255,255,0.35)', flexShrink: 0 }} />}
+        {isActive && !hideArrow && <ChevronRight size={13} style={{ color: 'rgba(255,255,255,0.35)', flexShrink: 0 }} />}
       </NavLink>
     );
   };
@@ -267,6 +270,61 @@ function NavigationPage({ onNavigate }) {
     </button>
   );
 
+  const ScrollableNavGroup = ({ children, itemCount }) => {
+    const containerRef = React.useRef(null);
+    const [showFade, setShowFade] = React.useState(false);
+
+    const checkScrollState = React.useCallback(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const isOverflowing = el.scrollHeight > el.clientHeight + 4;
+      const isAtBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 6;
+      setShowFade(isOverflowing && !isAtBottom);
+    }, []);
+
+    React.useEffect(() => {
+      checkScrollState();
+    }, [itemCount, checkScrollState]);
+
+    return (
+      <div style={{ position: 'relative', width: '100%', flexShrink: 0 }}>
+        <div
+          ref={containerRef}
+          onScroll={checkScrollState}
+          className="ultra-subtle-scrollbar"
+          style={{
+            maxHeight: '196px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            scrollBehavior: 'smooth',
+            paddingRight: 2,
+          }}
+        >
+          {children}
+        </div>
+
+        {/* Subtle bottom fade overlay when more content exists below */}
+        {showFade && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 18,
+              background: 'linear-gradient(to bottom, rgba(13,17,23,0), rgba(13,17,23,0.92))',
+              pointerEvents: 'none',
+              borderRadius: '0 0 8px 8px',
+              transition: 'opacity 0.2s ease',
+            }}
+          />
+        )}
+      </div>
+    );
+  };
+
   const isDashboardActive = location.pathname === '/workspace' || location.pathname === '/workspace/dashboard';
 
   return (
@@ -302,26 +360,31 @@ function NavigationPage({ onNavigate }) {
       </div>
 
       {/* Nav List */}
-      <nav style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, position:'relative', zIndex:1 }}>
-        {/* Dashboard */}
-        <SectionLabel>Main</SectionLabel>
-        <SidebarNavItem
-          to="/workspace/dashboard"
-          label="Dashboard"
-          icon={<LayoutDashboard size={15} color="#fff" />}
-          gradient="linear-gradient(135deg,#00b09b,#4facfe)"
-          isActive={isDashboardActive}
-          onClick={onNavigate}
-        />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3, position: 'relative', zIndex: 1, overflow: 'hidden', minHeight: 0 }}>
+        {/* Dashboard (FIXED) */}
+        <div style={{ flexShrink: 0 }}>
+          <SectionLabel>Main</SectionLabel>
+          <SidebarNavItem
+            to="/workspace/dashboard"
+            label="Dashboard"
+            icon={<LayoutDashboard size={15} color="#fff" />}
+            gradient="linear-gradient(135deg,#00b09b,#4facfe)"
+            isActive={isDashboardActive}
+            onClick={onNavigate}
+            hideArrow={true}
+          />
+        </div>
 
         {/* STANDARD MODULES SECTION */}
-        <CollapsibleSectionHeader
-          title="Standard"
-          isOpen={isStandardOpen}
-          onToggle={toggleStandard}
-        />
+        <div style={{ flexShrink: 0 }}>
+          <CollapsibleSectionHeader
+            title="Standard"
+            isOpen={isStandardOpen}
+            onToggle={toggleStandard}
+          />
+        </div>
         {isStandardOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <ScrollableNavGroup itemCount={totalStandardCount}>
             {loading ? (
               <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', padding: '6px 14px', fontStyle: 'italic' }}>Loading modules…</div>
             ) : standardNavItems.length === 0 ? (
@@ -366,17 +429,19 @@ function NavigationPage({ onNavigate }) {
                 onClick={onNavigate}
               />
             )}
-          </div>
+          </ScrollableNavGroup>
         )}
 
         {/* CUSTOM MODULES SECTION */}
-        <CollapsibleSectionHeader
-          title="Custom"
-          isOpen={isCustomOpen}
-          onToggle={toggleCustom}
-        />
+        <div style={{ flexShrink: 0 }}>
+          <CollapsibleSectionHeader
+            title="Custom"
+            isOpen={isCustomOpen}
+            onToggle={toggleCustom}
+          />
+        </div>
         {isCustomOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <ScrollableNavGroup itemCount={totalCustomCount}>
             {loading ? (
               <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', padding: '6px 14px', fontStyle: 'italic' }}>Loading modules…</div>
             ) : customNavItems.length === 0 ? (
@@ -399,13 +464,13 @@ function NavigationPage({ onNavigate }) {
                 );
               })
             )}
-          </div>
+          </ScrollableNavGroup>
         )}
 
-      </nav>
+      </div>
 
       {/* Footer */}
-      <div style={{ position:'relative', zIndex:1, marginTop:8 }}>
+      <div style={{ position:'relative', zIndex:1, marginTop:'auto', flexShrink: 0 }}>
         <div style={{ height:'1px', background:'rgba(255,255,255,0.07)', marginBottom:10 }} />
         <div style={{
           display:'flex', alignItems:'center', gap:10, padding:'8px 10px',

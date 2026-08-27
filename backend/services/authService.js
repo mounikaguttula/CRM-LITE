@@ -4,10 +4,10 @@ const supabase = require('../config/supabase');
 const auditService = require('./auditService');
 
 const login = async (email, password) => {
-  // Query users table joined with Organization
+  // Query users table joined with Organization and Roles
   const { data: user, error } = await supabase
     .from('users')
-    .select('*, organization(*)')
+    .select('*, organization(*), roles(*)')
     .eq('email', email)
     .single();
 
@@ -23,12 +23,13 @@ const login = async (email, password) => {
 
   const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email.split('@')[0];
   const initials = fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const resolvedRole = user.roles?.role_name || (user.role_id ? 'Administrator' : 'User');
 
   const tokenPayload = {
     id: user.id,
     email: user.email,
     name: fullName,
-    role: user.role_id ? 'Administrator' : 'User',
+    role: resolvedRole,
     role_id: user.role_id,
     organization_id: user.organization_id,
   };
@@ -39,7 +40,7 @@ const login = async (email, password) => {
     id: user.id,
     name: fullName,
     email: user.email,
-    role: user.role_id ? 'Administrator' : 'User',
+    role: resolvedRole,
     role_id: user.role_id,
     organization_id: user.organization_id,
     avatar: initials || 'U',
@@ -143,7 +144,7 @@ const registerOrganization = async ({ orgName, companyCode, organizationCode, ad
 const getUserProfile = async (userId) => {
   const { data: user, error } = await supabase
     .from('users')
-    .select('*, organization(*)')
+    .select('*, organization(*), roles(*)')
     .eq('id', userId)
     .single();
 
@@ -152,14 +153,16 @@ const getUserProfile = async (userId) => {
   }
 
   const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email.split('@')[0];
-  const initials = fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const initials = fullName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const roleName = user.roles?.role_name || (user.role_id ? 'Administrator' : 'User');
 
   return {
     id: user.id,
     name: fullName,
     email: user.email,
-    role: user.role_id ? 'Administrator' : 'User',
+    role: roleName,
     role_id: user.role_id,
+    status: user.status || 'active',
     organization_id: user.organization_id,
     avatar: initials || 'U',
     organization: user.organization ? {

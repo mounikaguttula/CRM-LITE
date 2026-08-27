@@ -1716,7 +1716,9 @@ function ObjectListContent({ objectTypeId }) {
   const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
   const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
 
-  const canDeleteRecord = permissions?.canDelete !== false && permissions?.[objectTypeId]?.canDelete !== false && permissions?.[cleanObjKey]?.canDelete !== false;
+  const canDeleteRecord = objPerm ? objPerm.canDelete !== false : true;
+  const canCreateRecord = objPerm ? objPerm.canCreate !== false : true;
+  const canUpdateRecord = objPerm ? (objPerm.canUpdate !== false && objPerm.canEdit !== false) : true;
 
   const [deleteModalRecord, setDeleteModalRecord] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -2110,7 +2112,7 @@ function ObjectListContent({ objectTypeId }) {
     }
   };
 
-  if (permissions && (!objPerm || objPerm.canRead !== true)) {
+  if (!loading && permissions && objPerm && objPerm.canRead === false) {
     return <AccessDenied moduleName={rawMeta?.pluralDisplayName || rawMeta?.displayName || objectTypeId} />;
   }
 
@@ -2151,48 +2153,52 @@ function ObjectListContent({ objectTypeId }) {
             <Download size={14} style={{ color: '#64748b' }} /> Export CSV
           </button>
 
-          <button
-            onClick={() => setImportModalOpen(true)}
-            className="glass glass-hover"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '9px 16px',
-              borderRadius: 10,
-              fontSize: 13,
-              fontWeight: 600,
-              color: '#4f46e5',
-              border: '1px solid rgba(99, 102, 241, 0.3)',
-              background: '#ffffff',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(99, 102, 241, 0.08)',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <UploadCloud size={15} style={{ color: '#6366f1' }} /> Import CSV
-          </button>
+          {canCreateRecord && (
+            <>
+              <button
+                onClick={() => setImportModalOpen(true)}
+                className="glass glass-hover"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '9px 16px',
+                  borderRadius: 10,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: '#4f46e5',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: '#ffffff',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(99, 102, 241, 0.08)',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <UploadCloud size={15} style={{ color: '#6366f1' }} /> Import CSV
+              </button>
 
-          <button
-            onClick={handleNewClick}
-            className="orbit-btn-primary"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '9px 18px',
-              borderRadius: 10,
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-              color: '#ffffff',
-              border: 'none',
-              boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
-            }}
-          >
-            <Plus size={15} /> New {meta.displayName}
-          </button>
+              <button
+                onClick={handleNewClick}
+                className="orbit-btn-primary"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '9px 18px',
+                  borderRadius: 10,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+                }}
+              >
+                <Plus size={15} /> New {meta.displayName}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
