@@ -545,24 +545,27 @@ const metadataService = {
 
 
     for (const obj of objectDefs) {
-      const dbPerm = permRecords.find(p => p.object_type_id === obj.id);
+      const matchingPerms = permRecords.filter(p => p.object_type_id === obj.id);
+      if (matchingPerms.length > 1) {
+        console.error(`⚠️ INTEGRITY WARNING: Encountered ${matchingPerms.length} duplicate permission rows for role_id=${roleId}, object_type_id=${obj.id} (${obj.api_name}). Resolving deterministically.`);
+      }
+      const dbPerm = matchingPerms.length > 0 ? matchingPerms[0] : null;
       const apiName = obj.api_name;
       const keySingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
-
 
       const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
 
       let objPerm;
       if (dbPerm) {
         objPerm = {
-          canCreate: dbPerm.can_create !== false,
-          canRead: dbPerm.can_read !== false,
-          canUpdate: dbPerm.can_update !== false,
-          canEdit: dbPerm.can_update !== false,
-          canDelete: dbPerm.can_delete !== false,
-          viewAll: dbPerm.view_all !== false,
-          modifyAll: dbPerm.modify_all !== false,
+          canCreate: Boolean(dbPerm.can_create),
+          canRead: Boolean(dbPerm.can_read),
+          canUpdate: Boolean(dbPerm.can_update),
+          canEdit: Boolean(dbPerm.can_update),
+          canDelete: Boolean(dbPerm.can_delete),
+          viewAll: Boolean(dbPerm.view_all),
+          modifyAll: Boolean(dbPerm.modify_all),
         };
       } else {
         objPerm = {
@@ -574,33 +577,33 @@ const metadataService = {
           viewAll: isSystemAdmin,
           modifyAll: isSystemAdmin,
         };
-      }
 
-      // Enforce Role Hierarchy baseline constraints
-      const lowerRole = (user?.role || '').toLowerCase();
-      if (lowerRole.includes('read only')) {
-        objPerm.canCreate = false;
-        objPerm.canUpdate = false;
-        objPerm.canEdit = false;
-        objPerm.canDelete = false;
-        objPerm.viewAll = false;
-        objPerm.modifyAll = false;
-      } else if (lowerRole.includes('relationship manager') || lowerRole.includes('executive')) {
-        objPerm.canCreate = true;
-        objPerm.canRead = true;
-        objPerm.canUpdate = true;
-        objPerm.canEdit = true;
-        objPerm.canDelete = false;
-        objPerm.viewAll = false;
-        objPerm.modifyAll = false;
-      } else if (lowerRole.includes('clone')) {
-        objPerm.canCreate = true;
-        objPerm.canRead = true;
-        objPerm.canUpdate = true;
-        objPerm.canEdit = true;
-        objPerm.canDelete = true;
-        objPerm.viewAll = false;
-        objPerm.modifyAll = false;
+        // Fallback baseline constraints ONLY applied when no explicit dbPerm record exists
+        const lowerRole = (user?.role || '').toLowerCase();
+        if (lowerRole.includes('read only')) {
+          objPerm.canCreate = false;
+          objPerm.canUpdate = false;
+          objPerm.canEdit = false;
+          objPerm.canDelete = false;
+          objPerm.viewAll = false;
+          objPerm.modifyAll = false;
+        } else if (lowerRole.includes('relationship manager') || lowerRole.includes('executive')) {
+          objPerm.canCreate = true;
+          objPerm.canRead = true;
+          objPerm.canUpdate = true;
+          objPerm.canEdit = true;
+          objPerm.canDelete = false;
+          objPerm.viewAll = false;
+          objPerm.modifyAll = false;
+        } else if (lowerRole.includes('clone')) {
+          objPerm.canCreate = true;
+          objPerm.canRead = true;
+          objPerm.canUpdate = true;
+          objPerm.canEdit = true;
+          objPerm.canDelete = true;
+          objPerm.viewAll = false;
+          objPerm.modifyAll = false;
+        }
       }
 
 
@@ -920,7 +923,11 @@ const metadataService = {
     };
 
     for (const obj of objectDefs) {
-      const dbPerm = permRecords.find(p => p.object_type_id === obj.id);
+      const matchingPerms = permRecords.filter(p => p.object_type_id === obj.id);
+      if (matchingPerms.length > 1) {
+        console.error(`⚠️ INTEGRITY WARNING: Encountered ${matchingPerms.length} duplicate permission rows for role_id=${roleId}, object_type_id=${obj.id} (${obj.api_name}) in getPlatformMetadata. Resolving deterministically.`);
+      }
+      const dbPerm = matchingPerms.length > 0 ? matchingPerms[0] : null;
       const apiName = obj.api_name;
       const keySingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
       const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;

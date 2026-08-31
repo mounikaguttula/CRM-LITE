@@ -380,7 +380,11 @@ const accessRequestService = {
     }
 
     if (targetRequest.status !== 'pending') {
-      throw { statusCode: 400, message: `This access request has already been ${targetRequest.status}.` };
+      return {
+        ...targetRequest,
+        alreadyProcessed: true,
+        previousStatus: targetRequest.status,
+      };
     }
 
     if (action === 'approve') {

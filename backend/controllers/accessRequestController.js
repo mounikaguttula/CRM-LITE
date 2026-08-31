@@ -97,12 +97,23 @@ const handleActionToken = async (req, res, next) => {
     const result = await accessRequestService.handleActionToken(token, action);
 
     // Render HTML response for browser clicks
-    const isApprove = action === 'approve';
+    const isAlreadyProcessed = result.alreadyProcessed;
+    const finalStatus = isAlreadyProcessed ? result.previousStatus : (action === 'approve' ? 'approved' : 'rejected');
+    const isApprove = finalStatus === 'approved';
+
     const statusColor = isApprove ? '#16a34a' : '#dc2626';
-    const title = isApprove ? 'Access Request Approved' : 'Access Request Rejected';
-    const description = isApprove
+    let title = isApprove ? 'Access Request Approved' : 'Access Request Rejected';
+    if (isAlreadyProcessed) {
+      title = isApprove ? 'Access Request Already Approved' : 'Access Request Already Rejected';
+    }
+
+    let description = isApprove
       ? `Access request for <strong>${result.first_name} ${result.last_name || ''}</strong> (${result.email}) has been approved and activated.`
       : `Access request for <strong>${result.first_name} ${result.last_name || ''}</strong> (${result.email}) has been rejected.`;
+
+    if (isAlreadyProcessed) {
+      description = `This access request for <strong>${result.first_name} ${result.last_name || ''}</strong> (${result.email}) was <strong>already ${isApprove ? 'approved' : 'rejected'}</strong> previously. No further action is required.`;
+    }
 
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const html = `

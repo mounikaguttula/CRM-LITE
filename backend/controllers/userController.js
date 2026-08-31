@@ -16,13 +16,16 @@ const getUsers = async (req, res, next) => {
   }
 };
 
+const roleService = require('../services/roleService');
+
 const inviteUser = async (req, res, next) => {
   try {
-    // Require Administrator role
-    await metadataService.checkAdminPermission(req.user);
-
     const organizationId = req.user?.organization_id;
     const { email, first_name, last_name, password, role_id } = req.body;
+
+    // Verify user role assignment authority
+    await roleService.canAssignUserRole(req.user, null, role_id, organizationId);
+
     const newUser = await userService.inviteUser(organizationId, { email, first_name, last_name, password, role_id });
 
     auditService.logSetupActivity({
@@ -37,6 +40,7 @@ const inviteUser = async (req, res, next) => {
 
     return res.status(201).json(newUser);
   } catch (err) {
+    if (err?.statusCode === 403) return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message });
     next(err);
   }
 };
@@ -45,23 +49,10 @@ const updateUser = async (req, res, next) => {
   try {
     const organizationId = req.user?.organization_id;
     const userId = req.params.id;
-    const currentUserId = req.user?.id;
     const { first_name, last_name, email, role_id, status } = req.body;
 
-    // Self Role Modification Protection (Requirement 7 & 10)
-    // A user cannot change their own assigned role under any circumstances
-    if (userId === currentUserId && role_id !== undefined && String(role_id) !== String(req.user?.role_id)) {
-      return res.status(403).json({
-        statusCode: 403,
-        error: 'Forbidden',
-        message: 'Users cannot change their own assigned role.',
-      });
-    }
-
-    // Require Administrator role if updating another user or updating user roles
-    if (userId !== currentUserId || role_id !== undefined) {
-      await metadataService.checkAdminPermission(req.user);
-    }
+    // Verify user role assignment authority (evaluates self-protection, target user rank, and new role rank)
+    await roleService.canAssignUserRole(req.user, userId, role_id, organizationId);
 
     const updatedUser = await userService.updateUser(organizationId, userId, { first_name, last_name, email, role_id, status });
 
@@ -77,6 +68,8 @@ const updateUser = async (req, res, next) => {
 
     return res.status(200).json(updatedUser);
   } catch (err) {
+    if (err?.statusCode === 403) return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message });
+    if (err?.statusCode === 404) return res.status(404).json({ statusCode: 404, error: 'Not Found', message: err.message });
     next(err);
   }
 };
