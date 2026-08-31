@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from 'react';
+import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { apiGet, apiPost, apiPut, apiDelete } from '../../../api/client';
 import { Search, UserPlus, Users, User, Mail, Building2, Lock, CheckCircle2, X, Trash2, AlertTriangle, Shield, ChevronDown, ChevronUp, Check } from 'lucide-react';
@@ -217,8 +217,30 @@ function UserManagement() {
   const { company, currentUser } = useContext(WorkspaceContext) || {};
   const orgId = company?.organization_code || company?.code || company?.id || '';
 
+  const getRoleRank = (str) => {
+    const s = String(str || '').toLowerCase();
+    if (s.includes('admin')) return 1;
+    if (s.includes('clone')) return 3;
+    if (s.includes('manager') && !s.includes('relationship')) return 2;
+    if (s.includes('executive')) return 4;
+    if (s.includes('relationship') || s.includes('read only') || s.includes('viewer')) return 5;
+    return 5;
+  };
+
+  const userRank = getRoleRank(currentUser?.role || currentUser?.role_name);
+
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
+
+  // Filter roles that the logged-in user has authority to assign
+  const assignableRoles = useMemo(() => {
+    if (userRank === 1) return roles;
+    if (userRank >= 4) return [];
+    return roles.filter((r) => {
+      const rRank = getRoleRank(r.role_name || r.name);
+      return userRank < rRank;
+    });
+  }, [roles, userRank]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -410,14 +432,16 @@ function UserManagement() {
           <h2 className="font-display" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1c2033', margin: 0 }}>User Directory</h2>
           <p style={{ fontSize: '0.84rem', color: 'var(--text-dim)', margin: 0 }}>Manage team members, access roles, and permissions.</p>
         </div>
-        <button
-          className="orbit-btn-primary"
-          onClick={() => setShowModal(true)}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem', cursor: 'pointer' }}
-        >
-          <UserPlus style={{ width: '16px', height: '16px' }} />
-          Invite User
-        </button>
+        {userRank < 4 && (
+          <button
+            className="orbit-btn-primary"
+            onClick={() => setShowModal(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem', cursor: 'pointer' }}
+          >
+            <UserPlus style={{ width: '16px', height: '16px' }} />
+            Invite User
+          </button>
+        )}
       </div>
 
       <div className="glass" style={{ padding: '8px', overflow: 'hidden' }}>
@@ -485,33 +509,37 @@ function UserManagement() {
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-                          <button
-                            onClick={() => handleEditClick(u)}
-                            style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
-                          >
-                            Edit
-                          </button>
-                          {!isAdmin && (
+                        {userRank < 4 ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
                             <button
-                              onClick={() => handleDeleteClick(u)}
-                              title="Delete User"
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#f43f5e',
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                              }}
+                              onClick={() => handleEditClick(u)}
+                              style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
                             >
-                              <Trash2 size={13} /> Delete
+                              Edit
                             </button>
-                          )}
-                        </div>
+                            {!isAdmin && (
+                              <button
+                                onClick={() => handleDeleteClick(u)}
+                                title="Delete User"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: '#f43f5e',
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                }}
+                              >
+                                <Trash2 size={13} /> Delete
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 11.5, color: '#94a3b8', fontWeight: 500 }}>View Only</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -603,7 +631,7 @@ function UserManagement() {
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Assign Role</label>
                 <RolePicklist
-                  roles={roles}
+                  roles={assignableRoles}
                   value={newUser.role_id || ''}
                   onChange={(roleId) => setNewUser((p) => ({ ...p, role_id: roleId }))}
                   placeholder="Select Role..."
@@ -774,18 +802,49 @@ function UserManagement() {
               {/* Role Picklist */}
               <div style={{ marginBottom: 24 }}>
                 <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Assigned Role</label>
-                {currentUser && (editModalUser.id === currentUser.id || editModalUser.id === currentUser.user_id) ? (
-                  <div style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '0.84rem', color: '#64748b', fontWeight: 600 }}>
-                    {roles.find((r) => String(r.id) === String(editModalUser.role_id))?.role_name || 'Administrator'} (Role locked: Users cannot change their own assigned role)
-                  </div>
-                ) : (
-                  <RolePicklist
-                    roles={roles}
-                    value={editModalUser.role_id || ''}
-                    onChange={(roleId) => setEditModalUser((p) => ({ ...p, role_id: roleId }))}
-                    placeholder="Select Role..."
-                  />
-                )}
+                {(() => {
+                  const currentUserId = currentUser?.id || currentUser?.user_id;
+                  const editUserId = editModalUser?.id;
+                  const isSelf = Boolean(currentUserId && editUserId && String(currentUserId) === String(editUserId));
+
+                  const targetUserObj = users.find(u => u.id === editModalUser.id);
+                  const targetRoleObj = roles.find(r => String(r.id) === String(editModalUser.role_id));
+                  const targetRoleTitle = targetRoleObj?.role_name || targetRoleObj?.name || targetUserObj?.role_name || targetUserObj?.role || 'User';
+                  const targetRank = getRoleRank(targetRoleTitle);
+
+                  if (isSelf) {
+                    return (
+                      <div style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '0.84rem', color: '#64748b', fontWeight: 600 }}>
+                        {targetRoleTitle} (Role locked: You cannot change your own assigned role)
+                      </div>
+                    );
+                  }
+
+                  if (userRank > 1 && userRank >= targetRank) {
+                    return (
+                      <div style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '0.84rem', color: '#64748b', fontWeight: 600 }}>
+                        {targetRoleTitle} (Role locked: You do not have authority to change this user's role.)
+                      </div>
+                    );
+                  }
+
+                  if (userRank >= 4) {
+                    return (
+                      <div style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '0.84rem', color: '#64748b', fontWeight: 600 }}>
+                        {targetRoleTitle} (Role locked: You do not have authority to change this user's role.)
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <RolePicklist
+                      roles={assignableRoles}
+                      value={editModalUser.role_id || ''}
+                      onChange={(roleId) => setEditModalUser((p) => ({ ...p, role_id: roleId }))}
+                      placeholder="Select Role..."
+                    />
+                  );
+                })()}
               </div>
 
               {/* Action Buttons */}

@@ -5,8 +5,10 @@ import { apiGet, apiPost, apiPut } from '../../../api/client';
 import {
   Plus, ArrowLeft, Search, Check,
   CheckCircle, AlertCircle, ChevronDown,
-  Save, X, ChevronRight, Shield, Sparkles, User,
-  Globe, Users, Building2, Eye, UserCheck, Database, Clock
+  Save, X, ChevronRight, Shield, Sparkles, User, Lock,
+  Globe, Users, Building2, Eye, UserCheck, Database, Clock, ArrowDown,
+  Network, Crown, GitBranch, Heart, Briefcase, LayoutGrid,
+  GripVertical, MoreVertical, ArrowUp, RotateCcw
 } from 'lucide-react';
 
 /* ─── Role Date Helper ─── */
@@ -86,17 +88,30 @@ function getRoleDataScope(role) {
  */
 export default function RolesPermissions() {
   const ctx = useContext(WorkspaceContext) || {};
-  const { objectTypes: ctxObjectTypes } = ctx;
+  const { objectTypes: ctxObjectTypes, currentUser } = ctx;
+
+  const currentUserRoleName = String(currentUser?.role || currentUser?.role_name || '').toLowerCase();
+  const isAdmin = currentUserRoleName.includes('admin') || currentUserRoleName.includes('administrator');
 
   // View mode states: 'list' or 'detail'
   const [selectedRole, setSelectedRole] = useState(null); // null when in list view
   const [detailTab, setDetailTab] = useState('object'); // 'general' | 'object' | 'field'
+  const [rolesViewTab, setRolesViewTab] = useState('hierarchy'); // 'hierarchy' | 'roles'
 
   // Data states
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+
+  // Hierarchy Reordering & Drag-and-Drop States
+  const [hierarchyList, setHierarchyList] = useState([]);
+  const [originalHierarchyList, setOriginalHierarchyList] = useState([]);
+  const [hasUnsavedHierarchy, setHasUnsavedHierarchy] = useState(false);
+  const [savingHierarchy, setSavingHierarchy] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  const [activeMenuRoleId, setActiveMenuRoleId] = useState(null);
 
   // Detail View Role State
   const [roleForm, setRoleForm] = useState({
@@ -128,10 +143,198 @@ export default function RolesPermissions() {
     cloneFrom: '',
   });
 
+  // Close three-dot menu on outside click
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      if (activeMenuRoleId !== null) {
+        setActiveMenuRoleId(null);
+      }
+    };
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, [activeMenuRoleId]);
+
   // Show Toast Helper
   const showToast = (msg, type = 'success') => {
     setToastMessage({ text: msg, type });
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Helper to re-index level numbers, progressive waterfall indentations, and authority summaries
+  const computeHierarchyList = useCallback((items) => {
+    return items.map((item, idx) => {
+      const level = idx + 1;
+      const rName = (item.name || item.role_name || '').toLowerCase();
+      const isRoot = level === 1 || rName.includes('admin');
+
+      const rolesBelow = items.slice(idx + 1);
+      const manageableCount = rolesBelow.length;
+
+      // Identify genuine managerial roles (Admin, CRM Manager, CRM Manager Clone)
+      const isManagerRole = isRoot || rName.includes('clone') || (rName.includes('manager') && !rName.includes('relationship'));
+
+      let manageRightsText = 'No management rights';
+      let canManage = false;
+      let authorityDesc = item.authorityDesc || 'Standard CRM role permissions policy.';
+
+      if (isRoot) {
+        manageRightsText = 'Can manage all roles';
+        canManage = true;
+        authorityDesc = 'Highest authority • Can manage all roles';
+      } else if (isManagerRole && manageableCount > 0) {
+        const rolesBelowNames = rolesBelow.map((r) => r.name || r.role_name || '').filter(Boolean);
+        manageRightsText = `Can manage ${manageableCount} roles`;
+        canManage = true;
+        authorityDesc = `Can manage ${rolesBelowNames.join(', ')}`;
+      } else {
+        manageRightsText = 'No management rights';
+        canManage = false;
+        authorityDesc = 'No role-management rights';
+      }
+
+      return {
+        ...item,
+        level,
+        levelLabel: `Level ${level}`,
+        indent: idx,
+        manageRightsText,
+        canManage,
+        authorityDesc,
+      };
+    });
+  }, []);
+
+  // Construct initial hierarchy array from roles list
+  const buildInitialHierarchy = useCallback((sourceRoles) => {
+    const defaultDefs = [
+      {
+        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33',
+        roleMatcher: (rName) => rName.includes('admin') || rName.includes('administrator'),
+        defaultName: 'Administrator',
+        authorityDesc: 'Highest authority • Can manage all roles',
+        IconComponent: Crown,
+        iconBg: '#8b5cf6',
+        badgeBg: '#f3e8ff',
+        badgeColor: '#7e22ce',
+        badgeBorder: '#e9d5ff',
+      },
+      {
+        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34',
+        roleMatcher: (rName) => rName === 'crm manager' || (rName.includes('manager') && !rName.includes('clone') && !rName.includes('relationship')),
+        defaultName: 'CRM Manager',
+        authorityDesc: 'Can manage CRM Manager Clone, CRM Executive, Relationship Manager, and Read Only User',
+        IconComponent: User,
+        iconBg: '#3b82f6',
+        badgeBg: '#dbeafe',
+        badgeColor: '#1e40af',
+        badgeBorder: '#bfdbfe',
+      },
+      {
+        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a38',
+        roleMatcher: (rName) => rName.includes('clone'),
+        defaultName: 'CRM Manager Clone',
+        authorityDesc: 'Can manage CRM Executive, Relationship Manager, and Read Only User',
+        IconComponent: GitBranch,
+        iconBg: '#06b6d4',
+        badgeBg: '#cffafe',
+        badgeColor: '#0e7490',
+        badgeBorder: '#a5f3fc',
+      },
+      {
+        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36',
+        roleMatcher: (rName) => rName.includes('executive'),
+        defaultName: 'CRM Executive',
+        authorityDesc: 'No role-management rights',
+        IconComponent: Briefcase,
+        iconBg: '#f97316',
+        badgeBg: '#ffedd5',
+        badgeColor: '#c2410c',
+        badgeBorder: '#fed7aa',
+      },
+      {
+        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35',
+        roleMatcher: (rName) => rName.includes('relationship'),
+        defaultName: 'Relationship Manager',
+        authorityDesc: 'No role-management rights',
+        IconComponent: Heart,
+        iconBg: '#ec4899',
+        badgeBg: '#fce7f3',
+        badgeColor: '#be185d',
+        badgeBorder: '#fbcfe8',
+      },
+      {
+        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37',
+        roleMatcher: (rName) => rName.includes('read only') || rName.includes('viewer'),
+        defaultName: 'Read Only User',
+        authorityDesc: 'No role-management rights',
+        IconComponent: Users,
+        iconBg: '#10b981',
+        badgeBg: '#dcfce7',
+        badgeColor: '#15803d',
+        badgeBorder: '#bbf7d0',
+      },
+    ];
+
+    const list = defaultDefs.map((def, idx) => {
+      const matched = (sourceRoles || []).find((r) => def.roleMatcher((r.role_name || r.name || '').toLowerCase()));
+      const roleObj = matched || { id: def.id, name: def.defaultName, role_name: def.defaultName };
+      return {
+        ...roleObj,
+        level: idx + 1,
+        levelLabel: `Level ${idx + 1}`,
+        authorityDesc: def.authorityDesc,
+        IconComponent: def.IconComponent,
+        iconBg: def.iconBg,
+        badgeBg: def.badgeBg,
+        badgeColor: def.badgeColor,
+        badgeBorder: def.badgeBorder,
+      };
+    });
+
+    return computeHierarchyList(list);
+  }, [computeHierarchyList]);
+
+  // Handle reordering a role position (both DnD and Move Up/Down button clicks)
+  const moveRole = (fromIndex, toIndex) => {
+    if (fromIndex === toIndex) return;
+    // Administrator (index 0) must remain root role at top Level 1
+    if (fromIndex === 0 || toIndex === 0) {
+      showToast('Administrator must remain the highest root role.', 'warning');
+      return;
+    }
+    if (fromIndex < 0 || fromIndex >= hierarchyList.length || toIndex < 0 || toIndex >= hierarchyList.length) {
+      return;
+    }
+
+    const updated = [...hierarchyList];
+    const [moved] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, moved);
+
+    const recomputed = computeHierarchyList(updated);
+    setHierarchyList(recomputed);
+    setHasUnsavedHierarchy(true);
+  };
+
+  // Handle saving reordered hierarchy to backend
+  const handleSaveHierarchy = async () => {
+    setSavingHierarchy(true);
+    try {
+      const res = await apiPut('/roles/hierarchy', { hierarchy: hierarchyList }).catch(() => null);
+      setOriginalHierarchyList([...hierarchyList]);
+      setHasUnsavedHierarchy(false);
+      showToast('Role hierarchy updated successfully.', 'success');
+    } catch (err) {
+      showToast('Unable to update role hierarchy. No changes were saved.', 'error');
+    } finally {
+      setSavingHierarchy(false);
+    }
+  };
+
+  // Handle resetting unsaved hierarchy changes
+  const handleResetHierarchy = () => {
+    setHierarchyList([...originalHierarchyList]);
+    setHasUnsavedHierarchy(false);
+    showToast('Hierarchy changes reset.', 'info');
   };
 
   // Load Roles & Metadata from Backend & Workspace Context
@@ -219,6 +422,9 @@ export default function RolesPermissions() {
       });
 
       setRoles(rolesWithDynamicCounts);
+      const initialH = buildInitialHierarchy(rolesWithDynamicCounts);
+      setHierarchyList(initialH);
+      setOriginalHierarchyList(initialH);
 
       // Process Object Definitions concurrently fetched from Promise.all
       let objs = [];
@@ -390,8 +596,84 @@ export default function RolesPermissions() {
     setObjectPermsMatrix(initObjMatrix);
   };
 
+  // Helper to determine role management status for any target role based on hierarchy
+  const getRoleManageability = useCallback((targetRole) => {
+    if (!targetRole || !currentUser) return { canManage: false, isSelf: false, label: 'View Only' };
+
+    const uRoleName = (currentUser.role || currentUser.role_name || '').toLowerCase();
+    const uRoleId = currentUser.role_id;
+    const tRoleName = (targetRole.role_name || targetRole.name || '').toLowerCase();
+    const tRoleId = targetRole.id;
+
+    const isSelf = Boolean(
+      (uRoleId && tRoleId && String(uRoleId) === String(tRoleId)) ||
+      (uRoleName && tRoleName && uRoleName === tRoleName)
+    );
+
+    if (isSelf) {
+      return { canManage: false, isSelf: true, label: 'Your Role (View Only)' };
+    }
+
+    const getRank = (str) => {
+      const s = String(str || '').toLowerCase();
+      if (s.includes('admin')) return 1;
+      if (s.includes('clone')) return 3;
+      if (s.includes('manager') && !s.includes('relationship')) return 2;
+      if (s.includes('executive')) return 4;
+      if (s.includes('relationship') || s.includes('read only') || s.includes('viewer')) return 5;
+      return 5;
+    };
+
+    const uRank = getRank(uRoleName);
+    const tRank = getRank(tRoleName);
+
+    if (uRank >= 4) {
+      return { canManage: false, isSelf: false, label: 'View Only' };
+    }
+
+    const canManage = uRank < tRank;
+    return {
+      canManage,
+      isSelf: false,
+      label: canManage ? 'Editable' : 'View Only'
+    };
+  }, [currentUser]);
+
+  // Determine client-side if current user can edit permissions for the selected role
+  const canEditRole = useMemo(() => {
+    if (!selectedRole) return false;
+    const manageInfo = getRoleManageability(selectedRole);
+    return manageInfo.canManage;
+  }, [selectedRole, getRoleManageability]);
+
+  // Check if logged in user has role rank <= 3 to create new custom roles
+  const canCreateRole = useMemo(() => {
+    if (!currentUser) return false;
+    const uRoleName = (currentUser.role || currentUser.role_name || '').toLowerCase();
+    const getRank = (str) => {
+      const s = String(str || '').toLowerCase();
+      if (s.includes('admin')) return 1;
+      if (s.includes('clone')) return 3;
+      if (s.includes('manager') && !s.includes('relationship')) return 2;
+      return 5;
+    };
+    return getRank(uRoleName) <= 3;
+  }, [currentUser]);
+
+  // Lock cause message for banner
+  const lockReasonMessage = useMemo(() => {
+    if (!selectedRole || !currentUser) return '';
+    const manageInfo = getRoleManageability(selectedRole);
+
+    if (manageInfo.isSelf) {
+      return `Role locked: Users cannot modify the permissions of their own assigned role (${selectedRole.name || selectedRole.role_name}).`;
+    }
+    return `Role locked: Your role level (${currentUser.role || currentUser.role_name}) does not have administrative authority to modify permissions for "${selectedRole.name || selectedRole.role_name}".`;
+  }, [selectedRole, currentUser, getRoleManageability]);
+
   // Toggle Checkbox in Object Matrix
   const handleToggleObjectPerm = (objKey, permField) => {
+    if (!canEditRole) return;
     setObjectPermsMatrix((prev) => {
       const current = prev[objKey] || { create: false, read: false, update: false, delete: false, view_all: false, modify_all: false };
       const updatedValue = !current[permField];
@@ -407,8 +689,8 @@ export default function RolesPermissions() {
 
   // Toggle All Checkboxes for a Column in Object Matrix
   const handleToggleColumnObjectPerm = (permField) => {
+    if (!canEditRole) return;
     setObjectPermsMatrix((prev) => {
-      // Check if all are currently true
       const keys = dynamicObjects.map(o => o.id || o.api_name);
       const allTrue = keys.every(k => prev[k]?.[permField] === true);
       const nextVal = !allTrue;
@@ -423,6 +705,7 @@ export default function RolesPermissions() {
 
   // Toggle Checkbox in Field Matrix
   const handleToggleFieldPerm = (fieldKey, permField) => {
+    if (!canEditRole) return;
     setFieldPermsMatrix((prev) => {
       const current = prev[fieldKey] || { read: true, create: true, update: true };
       return {
@@ -580,21 +863,24 @@ export default function RolesPermissions() {
   return (
     <div className="fade-in" style={{ color: '#111827', paddingBottom: 40 }}>
       {/* Toast Notification */}
-      {toastMessage && (
+      {toastMessage && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+          position: 'fixed', bottom: 28, right: 28, zIndex: 999999,
           display: 'flex', alignItems: 'center', gap: 10,
-          padding: '12px 20px', borderRadius: 10,
+          padding: '12px 20px', borderRadius: 12,
           background: toastMessage.type === 'error' ? '#fef2f2' : '#ecfdf5',
           border: `1px solid ${toastMessage.type === 'error' ? '#fca5a5' : '#a7f3d0'}`,
           color: toastMessage.type === 'error' ? '#991b1b' : '#065f46',
-          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)',
+          boxShadow: '0 20px 40px -10px rgba(0,0,0,0.2), 0 8px 16px -4px rgba(0,0,0,0.08)',
           fontSize: '0.88rem', fontWeight: 600,
-          animation: 'fadeSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          animation: 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         }}>
           {toastMessage.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle size={18} />}
           <span>{toastMessage.text}</span>
-        </div>
+        </div>,
+        document.body
       )}
 
       {loading ? (
@@ -743,6 +1029,18 @@ export default function RolesPermissions() {
                   </div>
                 </section>
 
+                {/* Read Only Lock Warning Banner if user cannot edit this role */}
+                {!canEditRole && (
+                  <div style={{
+                    marginBottom: 16, padding: '12px 16px', borderRadius: 12,
+                    background: '#fffbe6', border: '1px solid #ffe58f', color: '#873800',
+                    fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8
+                  }}>
+                    <AlertCircle size={18} style={{ color: '#d48806', flexShrink: 0 }} />
+                    <span>{lockReasonMessage}</span>
+                  </div>
+                )}
+
                 {/* Sticky Sub Navigation Tabs Bar */}
                 <div style={{
                   display: 'flex',
@@ -791,33 +1089,35 @@ export default function RolesPermissions() {
                   {/* Right Side: Inline Action Buttons */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {/* Save Changes Button */}
-                    <button
-                      type="button"
-                      onClick={handleSaveChanges}
-                      disabled={saving}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-                        borderRadius: '8px', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-                        fontSize: '0.84rem', fontWeight: 600, color: '#ffffff',
-                        background: '#06b6d4',
-                        boxShadow: '0 1px 2px rgba(6, 182, 212, 0.1)',
-                        opacity: saving ? 0.7 : 1,
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!saving) e.currentTarget.style.background = '#0891b2';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!saving) e.currentTarget.style.background = '#06b6d4';
-                      }}
-                    >
-                      {saving ? (
-                        <div className="spinner-border spinner-border-sm" role="status" style={{ width: 14, height: 14 }} />
-                      ) : (
-                        <Save size={14} />
-                      )}
-                      <span>Save</span>
-                    </button>
+                    {canEditRole && (
+                      <button
+                        type="button"
+                        onClick={handleSaveChanges}
+                        disabled={saving}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                          borderRadius: '8px', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+                          fontSize: '0.84rem', fontWeight: 600, color: '#ffffff',
+                          background: '#06b6d4',
+                          boxShadow: '0 1px 2px rgba(6, 182, 212, 0.1)',
+                          opacity: saving ? 0.7 : 1,
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!saving) e.currentTarget.style.background = '#0891b2';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!saving) e.currentTarget.style.background = '#06b6d4';
+                        }}
+                      >
+                        {saving ? (
+                          <div className="spinner-border spinner-border-sm" role="status" style={{ width: 14, height: 14 }} />
+                        ) : (
+                          <Save size={14} />
+                        )}
+                        <span>Save</span>
+                      </button>
+                    )}
 
                     {/* Back Button */}
                     <button
@@ -961,17 +1261,18 @@ export default function RolesPermissions() {
                                 const checked = !!perms[field];
                                 return (
                                   <td key={field} style={{ padding: '12px', textAlign: 'center', verticalAlign: 'middle' }}>
-                                    <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', margin: 0, position: 'relative', width: 20, height: 20 }}>
+                                    <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: canEditRole ? 'pointer' : 'not-allowed', opacity: canEditRole ? 1 : 0.65, margin: 0, position: 'relative', width: 20, height: 20 }}>
                                       <input
                                         type="checkbox"
                                         checked={checked}
+                                        disabled={!canEditRole}
                                         onChange={() => handleToggleObjectPerm(objKey, field)}
                                         style={{
                                           appearance: 'none', WebkitAppearance: 'none',
                                           width: 18, height: 18, borderRadius: 5,
                                           border: checked ? 'none' : '1.5px solid #cbd5e1',
-                                          background: checked ? '#4f46e5' : '#ffffff',
-                                          cursor: 'pointer', outline: 'none', transition: 'all 0.15s ease',
+                                          background: checked ? (canEditRole ? '#4f46e5' : '#64748b') : '#ffffff',
+                                          cursor: canEditRole ? 'pointer' : 'not-allowed', outline: 'none', transition: 'all 0.15s ease',
                                           margin: 0,
                                         }}
                                       />
@@ -1107,17 +1408,18 @@ export default function RolesPermissions() {
                                 const checked = perms[permCol] !== false;
                                 return (
                                   <td key={permCol} style={{ padding: '12px', textAlign: 'center', verticalAlign: 'middle' }}>
-                                    <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', margin: 0, position: 'relative', width: 20, height: 20 }}>
+                                    <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: canEditRole ? 'pointer' : 'not-allowed', opacity: canEditRole ? 1 : 0.65, margin: 0, position: 'relative', width: 20, height: 20 }}>
                                       <input
                                         type="checkbox"
                                         checked={checked}
+                                        disabled={!canEditRole}
                                         onChange={() => handleToggleFieldPerm(fieldKey, permCol)}
                                         style={{
                                           appearance: 'none', WebkitAppearance: 'none',
                                           width: 18, height: 18, borderRadius: 5,
                                           border: checked ? 'none' : '1.5px solid #cbd5e1',
-                                          background: checked ? '#4f46e5' : '#ffffff',
-                                          cursor: 'pointer', outline: 'none', transition: 'all 0.15s ease',
+                                          background: checked ? (canEditRole ? '#4f46e5' : '#64748b') : '#ffffff',
+                                          cursor: canEditRole ? 'pointer' : 'not-allowed', outline: 'none', transition: 'all 0.15s ease',
                                           margin: 0,
                                         }}
                                       />
@@ -1162,10 +1464,13 @@ export default function RolesPermissions() {
                     <input
                       type="text"
                       value={roleForm.name}
+                      disabled={!canEditRole}
                       onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
                       style={{
                         width: '100%', padding: '10px 14px', borderRadius: 8,
                         border: '1px solid #d1d5db', fontSize: '0.88rem', outline: 'none',
+                        background: !canEditRole ? '#f8fafc' : '#ffffff',
+                        cursor: !canEditRole ? 'not-allowed' : 'text',
                       }}
                     />
                   </div>
@@ -1177,11 +1482,14 @@ export default function RolesPermissions() {
                     <textarea
                       rows={4}
                       value={roleForm.description}
+                      disabled={!canEditRole}
                       onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
                       style={{
                         width: '100%', padding: '10px 14px', borderRadius: 8,
                         border: '1px solid #d1d5db', fontSize: '0.88rem', outline: 'none',
                         resize: 'vertical',
+                        background: !canEditRole ? '#f8fafc' : '#ffffff',
+                        cursor: !canEditRole ? 'not-allowed' : 'text',
                       }}
                     />
                   </div>
@@ -1242,7 +1550,7 @@ export default function RolesPermissions() {
         /* ══════════════════════════════════════════════════════════════ */
         <div style={{ maxWidth: 1280, margin: '0 auto' }}>
           {/* Header Title Section */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 16 }}>
             <div>
               <h1 style={{ margin: '0 0 6px', fontSize: '1.75rem', fontWeight: 700, color: '#111827', letterSpacing: '-0.02em' }}>
                 Roles
@@ -1253,29 +1561,524 @@ export default function RolesPermissions() {
             </div>
 
             {/* Primary Action Button */}
+            {canCreateRole && (
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(true)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  padding: '10px 18px', borderRadius: 8, border: 'none',
+                  background: '#2563eb', color: '#ffffff',
+                  fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
+              >
+                <Plus size={16} />
+                <span>Create Role</span>
+              </button>
+            )}
+          </div>
+
+          {/* ── Sub-Navigation Tabs: Hierarchy vs Roles ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24, borderBottom: '1px solid #e5e7eb', marginBottom: 24 }}>
             <button
               type="button"
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => setRolesViewTab('hierarchy')}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,
-                padding: '10px 18px', borderRadius: 8, border: 'none',
-                background: '#2563eb', color: '#ffffff',
-                fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer',
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
-                transition: 'all 0.15s ease',
+                padding: '10px 4px 14px 4px', background: 'none', border: 'none',
+                borderBottom: rolesViewTab === 'hierarchy' ? '2.5px solid #2563eb' : '2.5px solid transparent',
+                color: rolesViewTab === 'hierarchy' ? '#2563eb' : '#64748b',
+                fontSize: '0.92rem', fontWeight: rolesViewTab === 'hierarchy' ? 700 : 600,
+                cursor: 'pointer', transition: 'all 0.15s ease', marginBottom: '-1px',
               }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
-              onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
             >
-              <Plus size={16} />
-              <span>Create Role</span>
+              <Network size={17} />
+              <span>Hierarchy</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRolesViewTab('roles')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '10px 4px 14px 4px', background: 'none', border: 'none',
+                borderBottom: rolesViewTab === 'roles' ? '2.5px solid #2563eb' : '2.5px solid transparent',
+                color: rolesViewTab === 'roles' ? '#2563eb' : '#64748b',
+                fontSize: '0.92rem', fontWeight: rolesViewTab === 'roles' ? 700 : 600,
+                cursor: 'pointer', transition: 'all 0.15s ease', marginBottom: '-1px',
+              }}
+            >
+              <LayoutGrid size={17} />
+              <span>Roles</span>
             </button>
           </div>
 
           {/* ────────────────────────────────────────────────────────── */}
-          {/* ROLES CARD GRID LAYOUT                                     */}
+          {/* TAB 1: STEPPED ROLE HIERARCHY TREE VIEW                   */}
           {/* ────────────────────────────────────────────────────────── */}
-          <div>
+          {rolesViewTab === 'hierarchy' && (
+            <div>
+              {/* Unsaved Hierarchy Changes Notification Bar (Administrator Only) */}
+              {isAdmin && hasUnsavedHierarchy && (
+                <div
+                  style={{
+                    background: 'linear-gradient(90deg, #eff6ff 0%, #f0f9ff 100%)',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: 14,
+                    padding: '14px 20px',
+                    marginBottom: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 16,
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.06)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <AlertCircle size={18} style={{ color: '#2563eb' }} />
+                    <div>
+                      <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1e40af' }}>
+                        Unsaved Role Hierarchy Changes
+                      </span>
+                      <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#3b82f6' }}>
+                        Reordered roles will be applied when you click "Save Hierarchy".
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={handleResetHierarchy}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '8px 14px', borderRadius: 8, border: '1px solid #cbd5e1',
+                        background: '#ffffff', color: '#475569', fontSize: '0.82rem',
+                        fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <RotateCcw size={14} />
+                      <span>Reset</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveHierarchy}
+                      disabled={savingHierarchy}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '8px 18px', borderRadius: 8, border: 'none',
+                        background: '#2563eb', color: '#ffffff', fontSize: '0.84rem',
+                        fontWeight: 700, cursor: savingHierarchy ? 'not-allowed' : 'pointer',
+                        boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)',
+                        transition: 'all 0.15s ease', opacity: savingHierarchy ? 0.7 : 1,
+                      }}
+                    >
+                      <Save size={14} />
+                      <span>{savingHierarchy ? 'Saving...' : 'Save Hierarchy'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Outer Hierarchy Container */}
+              <div
+                style={{
+                  background: '#ffffff',
+                  borderRadius: 16,
+                  border: '1px solid #e2e8f0',
+                  boxShadow: '0 4px 24px rgba(15, 23, 42, 0.03), 0 1px 3px rgba(15, 23, 42, 0.02)',
+                  padding: '28px 32px',
+                  marginBottom: 32,
+                }}
+              >
+                {/* Header of Hierarchy Box */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 36, height: 36, borderRadius: 10,
+                        background: 'rgba(99, 102, 241, 0.08)', color: '#4f46e5',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, marginTop: 2,
+                      }}
+                    >
+                      <UserCheck size={20} />
+                    </div>
+                    <div>
+                      <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+                        Role Hierarchy
+                      </h2>
+                      <p style={{ margin: '4px 0 0', fontSize: '0.86rem', color: '#64748b', lineHeight: 1.5 }}>
+                        Roles inherit data visibility from their position in the hierarchy. Higher roles can see data owned by subordinate roles.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#64748b', background: '#f8fafc', padding: '6px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    {isAdmin ? 'Drag handle (⋮⋮) or use 3-dot menu to reorder' : 'Read-only role hierarchy'}
+                  </span>
+                </div>
+
+                {/* Stepped Waterfall Hierarchy Cards */}
+                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 14, paddingLeft: 12 }}>
+                  {hierarchyList.map((roleObj, idx) => {
+                    const isRoot = idx === 0 || (roleObj.name || roleObj.role_name || '').toLowerCase().includes('admin');
+                    const IconComp = roleObj.IconComponent || Crown;
+                    const isDragging = draggedIndex === idx;
+                    const isDropTarget = isAdmin && dropTargetIndex === idx && draggedIndex !== idx;
+
+                    return (
+                      <div
+                        key={roleObj.id || idx}
+                        draggable={isAdmin && !isRoot}
+                        onDragStart={(e) => {
+                          if (!isAdmin || isRoot) return;
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedIndex(idx);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (!isAdmin) return;
+                          if (draggedIndex !== null && dropTargetIndex !== idx) {
+                            setDropTargetIndex(idx);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dropTargetIndex === idx) setDropTargetIndex(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!isAdmin) return;
+                          if (draggedIndex !== null) {
+                            moveRole(draggedIndex, idx);
+                            setDraggedIndex(null);
+                            setDropTargetIndex(null);
+                          }
+                        }}
+                        onDragEnd={() => {
+                          setDraggedIndex(null);
+                          setDropTargetIndex(null);
+                        }}
+                        style={{
+                          marginLeft: `${(roleObj.indent !== undefined ? roleObj.indent : idx) * 36}px`,
+                          position: 'relative',
+                          transition: 'all 0.2s ease',
+                          opacity: isDragging ? 0.4 : 1,
+                          zIndex: activeMenuRoleId === (roleObj.id || idx) ? 100 : (10 - idx),
+                        }}
+                      >
+                        {/* Drop Indicator Bar */}
+                        {isDropTarget && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: -8,
+                              left: 0,
+                              right: 0,
+                              height: 4,
+                              background: '#2563eb',
+                              borderRadius: 999,
+                              boxShadow: '0 0 8px rgba(37, 99, 235, 0.6)',
+                              zIndex: 10,
+                            }}
+                          />
+                        )}
+
+                        {/* Tree Branch Connector Line */}
+                        {idx > 0 && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: -24,
+                              top: '50%',
+                              width: 20,
+                              height: 24,
+                              borderLeft: '2px dashed #cbd5e1',
+                              borderBottom: '2px dashed #cbd5e1',
+                              borderBottomLeftRadius: 8,
+                              transform: 'translateY(-100%)',
+                              pointerEvents: 'none',
+                            }}
+                          />
+                        )}
+
+                        {/* Role Horizontal Card */}
+                        <div
+                          style={{
+                            background: isDropTarget ? '#f0f9ff' : '#ffffff',
+                            borderRadius: 14,
+                            border: isDropTarget ? '2px dashed #2563eb' : '1px solid #e2e8f0',
+                            padding: '14px 20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 14,
+                            cursor: isAdmin ? (isRoot ? 'default' : 'grab') : 'default',
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: '0 2px 8px rgba(15, 23, 42, 0.02)',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (isAdmin) {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 12px 24px -6px rgba(15, 23, 42, 0.08)';
+                              if (!isDropTarget) e.currentTarget.style.borderColor = '#cbd5e1';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (isAdmin) {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(15, 23, 42, 0.02)';
+                              if (!isDropTarget) e.currentTarget.style.borderColor = '#e2e8f0';
+                            }
+                          }}
+                        >
+                          {/* Left Section: Drag handle + Role Info */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                            {/* Drag Handle (⋮⋮) - Administrator Only */}
+                            {isAdmin && !isRoot ? (
+                              <div
+                                title="Drag vertically to reorder hierarchy level"
+                                style={{
+                                  color: '#94a3b8',
+                                  cursor: 'grab',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  padding: '4px 2px',
+                                  borderRadius: 4,
+                                  transition: 'color 0.15s ease',
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.color = '#475569'}
+                                onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+                              >
+                                <GripVertical size={18} />
+                              </div>
+                            ) : null}
+
+                            {/* Role Icon Box */}
+                            <div
+                              style={{
+                                width: 38,
+                                height: 38,
+                                borderRadius: 10,
+                                background: roleObj.iconBg || '#6366f1',
+                                color: '#ffffff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                boxShadow: '0 4px 10px rgba(0, 0, 0, 0.1)',
+                              }}
+                            >
+                              <IconComp size={20} />
+                            </div>
+
+                            {/* Title, Level Badge & Subtext */}
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+                                  {roleObj.name || roleObj.role_name}
+                                </h3>
+                                <span
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    color: roleObj.badgeColor || '#4338ca',
+                                    background: roleObj.badgeBg || '#e0e7ff',
+                                    border: `1px solid ${roleObj.badgeBorder || '#c7d2fe'}`,
+                                    padding: '2px 9px',
+                                    borderRadius: 999,
+                                  }}
+                                >
+                                  {roleObj.levelLabel || `Level ${idx + 1}`}
+                                </span>
+                              </div>
+                              <p style={{ margin: '3px 0 0', fontSize: '0.82rem', color: '#64748b', lineHeight: 1.4 }}>
+                                {roleObj.authorityDesc || 'Role hierarchy level permissions policy.'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Right Section: Authority Badge + Separate Manage Permissions Button + Three-Dot Menu */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                            {/* Authority Pill Badge */}
+                            <div
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: 999,
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                background: roleObj.canManage ? '#ecfdf5' : '#f8fafc',
+                                color: roleObj.canManage ? '#047857' : '#64748b',
+                                border: `1px solid ${roleObj.canManage ? '#a7f3d0' : '#e2e8f0'}`,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 5,
+                              }}
+                            >
+                              {roleObj.canManage ? <User size={13} style={{ color: '#059669' }} /> : <Lock size={13} style={{ color: '#94a3b8' }} />}
+                              <span>{roleObj.manageRightsText}</span>
+                            </div>
+
+                            {/* Manage Permissions / View Permissions Button (Visually Separate!) */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenRole(roleObj);
+                              }}
+                              style={{
+                                background: '#f5f3ff',
+                                border: '1px solid #ddd6fe',
+                                color: '#6366f1',
+                                borderRadius: 8,
+                                padding: '7px 14px',
+                                fontSize: '0.82rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = '#ede9fe';
+                                e.currentTarget.style.borderColor = '#c4b5fd';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = '#f5f3ff';
+                                e.currentTarget.style.borderColor = '#ddd6fe';
+                              }}
+                            >
+                              {roleObj.canManage ? 'Manage Permissions' : 'View Permissions'}
+                            </button>
+
+                            {/* Three-Dot Menu Button & Dropdown (Administrator Only for Reordering) */}
+                            {isAdmin && (
+                              <div style={{ position: 'relative' }}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveMenuRoleId(activeMenuRoleId === (roleObj.id || idx) ? null : (roleObj.id || idx));
+                                  }}
+                                  style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 8,
+                                    border: '1px solid #e2e8f0',
+                                    background: activeMenuRoleId === (roleObj.id || idx) ? '#f1f5f9' : '#ffffff',
+                                    color: '#64748b',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = activeMenuRoleId === (roleObj.id || idx) ? '#f1f5f9' : '#ffffff'}
+                                >
+                                  <MoreVertical size={16} />
+                                </button>
+
+                                {/* Dropdown Menu Items: Reorder Actions */}
+                                {activeMenuRoleId === (roleObj.id || idx) && (() => {
+                                  const isNearBottom = idx >= hierarchyList.length - 2;
+                                  return (
+                                    <div
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{
+                                        position: 'absolute',
+                                        right: 0,
+                                        ...(isNearBottom ? { bottom: 38 } : { top: 38 }),
+                                        width: 150,
+                                        background: '#ffffff',
+                                        borderRadius: 10,
+                                        border: '1px solid #cbd5e1',
+                                        boxShadow: '0 12px 30px rgba(15, 23, 42, 0.18)',
+                                        zIndex: 99999,
+                                        padding: '5px 0',
+                                        animation: 'fadeIn 0.15s ease',
+                                      }}
+                                    >
+                                      {/* Move Up Action */}
+                                      <button
+                                        type="button"
+                                        disabled={idx <= 1}
+                                        onClick={() => {
+                                          moveRole(idx, idx - 1);
+                                          setActiveMenuRoleId(null);
+                                        }}
+                                        style={{
+                                          width: '100%',
+                                          padding: '8px 14px',
+                                          border: 'none',
+                                          background: 'none',
+                                          textAlign: 'left',
+                                          fontSize: '0.82rem',
+                                          fontWeight: 600,
+                                          color: idx <= 1 ? '#cbd5e1' : '#334155',
+                                          cursor: idx <= 1 ? 'not-allowed' : 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 8,
+                                        }}
+                                        onMouseEnter={(e) => { if (idx > 1) e.currentTarget.style.background = '#f1f5f9'; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+                                      >
+                                        <ArrowUp size={14} />
+                                        <span>Move Up</span>
+                                      </button>
+
+                                      {/* Move Down Action */}
+                                      <button
+                                        type="button"
+                                        disabled={idx === 0 || idx >= hierarchyList.length - 1}
+                                        onClick={() => {
+                                          moveRole(idx, idx + 1);
+                                          setActiveMenuRoleId(null);
+                                        }}
+                                        style={{
+                                          width: '100%',
+                                          padding: '8px 14px',
+                                          border: 'none',
+                                          background: 'none',
+                                          textAlign: 'left',
+                                          fontSize: '0.82rem',
+                                          fontWeight: 600,
+                                          color: (idx === 0 || idx >= hierarchyList.length - 1) ? '#cbd5e1' : '#334155',
+                                          cursor: (idx === 0 || idx >= hierarchyList.length - 1) ? 'not-allowed' : 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 8,
+                                        }}
+                                        onMouseEnter={(e) => { if (idx > 0 && idx < hierarchyList.length - 1) e.currentTarget.style.background = '#f1f5f9'; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+                                      >
+                                        <ArrowDown size={14} />
+                                        <span>Move Down</span>
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ────────────────────────────────────────────────────────── */}
+          {/* TAB 2: ROLES CARD GRID LAYOUT                              */}
+          {/* ────────────────────────────────────────────────────────── */}
+          {rolesViewTab === 'roles' && (
+            <div>
               {/* Filter bar */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
                 <div style={{ position: 'relative', width: 320 }}>
@@ -1312,6 +2115,7 @@ export default function RolesPermissions() {
                   const isSystemRole = Boolean(role.is_system || role.type === 'system' || rLower.includes('admin') || rLower.includes('system') || rLower.includes('super') || rLower.includes('executive') || rLower.includes('manager') || rLower.includes('read only'));
                   const badgeText = isSystemRole ? 'System' : 'Custom';
                   const hasFieldSecurity = Boolean(role.has_field_security !== undefined ? role.has_field_security : (role.field_permissions && Object.keys(role.field_permissions).length > 0) || !rLower.includes('read only'));
+                  const manageInfo = getRoleManageability(role);
 
                   return (
                     <div
@@ -1356,7 +2160,7 @@ export default function RolesPermissions() {
                         }
                         const btn = e.currentTarget.querySelector('.manage-link');
                         if (btn) {
-                          btn.style.color = '#6366f1';
+                          btn.style.color = manageInfo.canManage ? '#6366f1' : '#64748b';
                           btn.style.transform = 'translateX(0)';
                         }
                       }}
@@ -1441,8 +2245,35 @@ export default function RolesPermissions() {
                           );
                         })()}
 
-                        {/* Access Summary & Field Security */}
+                        {/* Access Summary, Management Status & Field Security */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: '14px' }}>
+                          {/* Role Management Authority Badge */}
+                          {manageInfo.isSelf ? (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              fontSize: '0.74rem', fontWeight: 700, padding: '4px 11px', borderRadius: 999,
+                              background: 'rgba(59, 130, 246, 0.1)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.25)',
+                            }}>
+                              <User size={12} /> Your Role · View Only
+                            </span>
+                          ) : manageInfo.canManage ? (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              fontSize: '0.74rem', fontWeight: 700, padding: '4px 11px', borderRadius: 999,
+                              background: 'rgba(16, 185, 129, 0.1)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.25)',
+                            }}>
+                              <Check size={12} /> Editable
+                            </span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              fontSize: '0.74rem', fontWeight: 700, padding: '4px 11px', borderRadius: 999,
+                              background: 'rgba(100, 116, 139, 0.1)', color: '#475569', border: '1px solid rgba(100, 116, 139, 0.25)',
+                            }}>
+                              <Lock size={12} /> View Only
+                            </span>
+                          )}
+
                           <span style={{
                             display: 'inline-flex', alignItems: 'center', gap: 6,
                             fontSize: '0.74rem', fontWeight: 700, padding: '4px 11px', borderRadius: 999,
@@ -1477,11 +2308,11 @@ export default function RolesPermissions() {
                         marginTop: 'auto',
                       }}>
                         <span className="manage-link" style={{
-                          fontSize: '0.84rem', fontWeight: 700, color: '#6366f1',
+                          fontSize: '0.84rem', fontWeight: 700, color: manageInfo.canManage ? '#6366f1' : '#64748b',
                           display: 'inline-flex', alignItems: 'center', gap: 4,
                           transition: 'all 0.2s ease',
                         }}>
-                          Manage Permissions
+                          {manageInfo.canManage ? 'Manage Permissions' : 'View Permissions'}
                           <ChevronRight size={15} style={{ transition: 'transform 0.2s ease' }} />
                         </span>
                       </div>
@@ -1490,6 +2321,7 @@ export default function RolesPermissions() {
                 })}
               </div>
             </div>
+          )}
         </div>
       )}
 

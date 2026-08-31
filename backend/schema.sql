@@ -85,10 +85,12 @@ CREATE TABLE IF NOT EXISTS public.roles (
   organization_id uuid NOT NULL,
   role_name text NOT NULL,
   description text NULL,
+  parent_role_id uuid NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT roles_pkey PRIMARY KEY (id),
-  CONSTRAINT roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES "Organization" (id) ON DELETE CASCADE
+  CONSTRAINT roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES "Organization" (id) ON DELETE CASCADE,
+  CONSTRAINT roles_parent_role_id_fkey FOREIGN KEY (parent_role_id) REFERENCES roles (id) ON DELETE SET NULL
 ) TABLESPACE pg_default;
 
 -- ---------------------------------------------------------

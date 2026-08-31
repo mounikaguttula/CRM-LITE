@@ -609,6 +609,14 @@ function Setup() {
   const customFldVal = setupStats.customFieldCount ?? 0;
   const roleVal = setupStats.roleCount ?? 0;
 
+  const userRoleStr = String(user?.role || currentUser?.role || currentUser?.role_name || userProfileData?.role_name || userProfileData?.role || '').toLowerCase();
+  const isAdministrator = userRoleStr.includes('admin') || userRoleStr.includes('administrator');
+  const isCrmManager = userRoleStr === 'crm manager' || (userRoleStr.includes('manager') && !userRoleStr.includes('clone') && !userRoleStr.includes('relationship'));
+  const isCrmManagerClone = userRoleStr.includes('clone');
+  const isCrmExecutive = userRoleStr.includes('executive');
+  const isRelationshipManager = userRoleStr.includes('relationship');
+  const isReadOnlyUser = userRoleStr.includes('read only') || userRoleStr.includes('viewer');
+
   const kpiCards = [
     {
       value: String(userVal),
@@ -652,14 +660,46 @@ function Setup() {
     },
   ];
 
-  const quickActions = [
-    { label: 'Manage Modules', desc: 'Fields & schemas', icon: Boxes, color: '#00b09b', bg: 'rgba(0,176,155,0.07)', tab: 'modules' },
-    { label: 'User Management', desc: 'Roles & access', icon: Users, color: '#f5576c', bg: 'rgba(245,87,108,0.07)', tab: 'users' },
-    { label: 'Security Roles', desc: 'Permissions', icon: Shield, color: '#4facfe', bg: 'rgba(79,172,254,0.07)', tab: 'roles' },
-    { label: 'Company Profile', desc: 'Org settings', icon: Building2, color: '#764ba2', bg: 'rgba(118,75,162,0.07)', tab: 'company' },
-    { label: 'Record Rules', desc: 'Field policies', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation' },
-    { label: 'General Config', desc: 'Workspace prefs', icon: Settings, color: '#a18cd1', bg: 'rgba(161,140,209,0.07)', tab: 'general' },
-  ];
+  const getQuickActionsForRole = () => {
+    if (isAdministrator) {
+      return [
+        { label: 'Manage Modules', desc: 'Fields & schemas', icon: Boxes, color: '#00b09b', bg: 'rgba(0,176,155,0.07)', tab: 'modules', badge: 'Full Access' },
+        { label: 'User Management', desc: 'Roles & access', icon: Users, color: '#f5576c', bg: 'rgba(245,87,108,0.07)', tab: 'users', badge: 'Full Access' },
+        { label: 'Security Roles', desc: 'Permissions & hierarchy', icon: Shield, color: '#4facfe', bg: 'rgba(79,172,254,0.07)', tab: 'roles', badge: 'Full Access' },
+        { label: 'Company Profile', desc: 'Org settings', icon: Building2, color: '#764ba2', bg: 'rgba(118,75,162,0.07)', tab: 'company', badge: 'Admin' },
+        { label: 'Record Rules', desc: 'Field policies', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation', badge: 'Full Access' },
+        { label: 'General Config', desc: 'Workspace prefs', icon: Settings, color: '#a18cd1', bg: 'rgba(161,140,209,0.07)', tab: 'general', badge: 'Admin' },
+      ];
+    } else if (isCrmManager || isCrmManagerClone) {
+      return [
+        { label: 'User Management', desc: 'Manage subordinate users', icon: Users, color: '#f5576c', bg: 'rgba(245,87,108,0.07)', tab: 'users', badge: 'Subordinate Scope' },
+        { label: 'Security Roles', desc: 'Subordinate permissions', icon: Shield, color: '#4facfe', bg: 'rgba(79,172,254,0.07)', tab: 'roles', badge: 'Subordinate Scope' },
+        { label: 'Manage Modules', desc: 'Fields & schemas', icon: Boxes, color: '#00b09b', bg: 'rgba(0,176,155,0.07)', tab: 'modules', badge: 'Custom Fields' },
+        { label: 'Record Rules', desc: 'Field policies', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation', badge: 'Manager' },
+        { label: 'Company Profile', desc: 'Org profile', icon: Building2, color: '#764ba2', bg: 'rgba(118,75,162,0.07)', tab: 'company', badge: 'Read Only' },
+        { label: 'General Config', desc: 'Workspace prefs', icon: Settings, color: '#a18cd1', bg: 'rgba(161,140,209,0.07)', tab: 'general', badge: 'Read Only' },
+      ];
+    } else if (isCrmExecutive || isRelationshipManager) {
+      return [
+        { label: 'User Directory', desc: 'View team members', icon: Users, color: '#f5576c', bg: 'rgba(245,87,108,0.07)', tab: 'users', badge: 'View Only' },
+        { label: 'Security Roles', desc: 'View role hierarchy', icon: Shield, color: '#4facfe', bg: 'rgba(79,172,254,0.07)', tab: 'roles', badge: 'View Only' },
+        { label: 'Modules & Fields', desc: 'View schema definitions', icon: Boxes, color: '#00b09b', bg: 'rgba(0,176,155,0.07)', tab: 'modules', badge: 'View Only' },
+        { label: 'Record Rules', desc: 'View validation rules', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation', badge: 'View Only' },
+        { label: 'Company Profile', desc: 'Org profile details', icon: Building2, color: '#764ba2', bg: 'rgba(118,75,162,0.07)', tab: 'company', badge: 'Read Only' },
+      ];
+    } else {
+      // Read Only User
+      return [
+        { label: 'User Directory', desc: 'View team directory', icon: Users, color: '#f5576c', bg: 'rgba(245,87,108,0.07)', tab: 'users', badge: 'Read Only' },
+        { label: 'Security Roles', desc: 'View role structure', icon: Shield, color: '#4facfe', bg: 'rgba(79,172,254,0.07)', tab: 'roles', badge: 'Read Only' },
+        { label: 'Modules', desc: 'View active modules', icon: Boxes, color: '#00b09b', bg: 'rgba(0,176,155,0.07)', tab: 'modules', badge: 'Read Only' },
+        { label: 'Record Rules', desc: 'View active rules', icon: CheckCircle, color: '#f6d365', bg: 'rgba(246,211,101,0.07)', tab: 'validation', badge: 'Read Only' },
+        { label: 'Company Profile', desc: 'Org info', icon: Building2, color: '#764ba2', bg: 'rgba(118,75,162,0.07)', tab: 'company', badge: 'Read Only' },
+      ];
+    }
+  };
+
+  const quickActions = getQuickActionsForRole();
 
   const healthItems = [
     { label: 'API Gateway', value: 'Operational', icon: Server, ok: true },
@@ -845,7 +885,9 @@ function Setup() {
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, background: 'rgba(0,176,155,0.12)', backdropFilter: 'blur(12px)', border: '1px solid rgba(0,176,155,0.3)', marginBottom: 12, animation: 'fadeSlideIn 0.5s 0.1s both' }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d699', animation: 'pulseGlow 2s ease-in-out infinite' }} />
                     <Cpu size={11} style={{ color: '#00b09b' }} />
-                    <span style={{ fontSize: '0.66rem', fontWeight: 700, color: '#00d699', letterSpacing: '0.07em', textTransform: 'uppercase' }}>Enterprise Administration Console</span>
+                    <span style={{ fontSize: '0.66rem', fontWeight: 700, color: '#00d699', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+                      {userRoleStr ? `${userRoleStr.toUpperCase()} CONSOLE` : 'ADMINISTRATION CONSOLE'}
+                    </span>
                   </div>
                   <h1 style={{ margin: '0 0 8px', fontSize: '1.5rem', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.15, animation: 'fadeSlideIn 0.5s 0.2s both' }}>
                     Setup & <span style={{ background: 'linear-gradient(90deg, #00b09b, #4facfe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Administration</span>
@@ -906,7 +948,14 @@ function Setup() {
                           <Icon size={18} style={{ color: a.color }} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#0d1117' }}>{a.label}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#0d1117' }}>{a.label}</div>
+                            {a.badge && (
+                              <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: `${a.color}18`, color: a.color, border: `1px solid ${a.color}30` }}>
+                                {a.badge}
+                              </span>
+                            )}
+                          </div>
                           <div style={{ fontSize: '0.7rem', color: '#8a9bb0', marginTop: 1 }}>{a.desc}</div>
                         </div>
                         <ArrowUpRight size={14} style={{ color: a.color, opacity: 0.5, flexShrink: 0 }} />
@@ -1207,8 +1256,8 @@ function Setup() {
             ? <ObjectDetail objectKey={selectedObject} onBack={() => setSelectedObject(null)} />
             : <ObjectManager onSelectObject={(key) => setSelectedObject(key)} />
         )}
-        {activeTab === 'users' && (isAdmin ? <UserManagement /> : <AccessDenied message="User Administration is restricted to System Administrators." moduleName="Users" />)}
-        {(activeTab === 'roles' || activeTab === 'profiles') && (isAdmin ? <RolesPermissions /> : <AccessDenied message="Role & Security Administration is restricted to System Administrators." moduleName="Roles & Permissions" />)}
+        {activeTab === 'users' && <UserManagement />}
+        {(activeTab === 'roles' || activeTab === 'profiles') && <RolesPermissions />}
         {activeTab === 'company' && <CompanyInfo />}
         {activeTab === 'general' && <CompanyInfo />}
         {activeTab === 'validation' && <ValidationRulesPage />}

@@ -134,6 +134,9 @@ function CompanyInfo() {
   const planColor   = PLAN_COLORS[org.subscription_plan]   || PLAN_COLORS.trial;
   const statusColor = STATUS_COLORS[org.status] || STATUS_COLORS.active;
 
+  const userRoleStr = String(currentUser?.role || currentUser?.role_name || '').toLowerCase();
+  const isUserAdmin = userRoleStr.includes('admin') || userRoleStr.includes('administrator');
+
   return (
     <div className="fade-in" style={{ maxWidth: 820, margin: '0 auto' }}>
 
@@ -282,7 +285,7 @@ function CompanyInfo() {
 
       {/* ══ Editable form ══ */}
       <form
-        onSubmit={handleSave}
+        onSubmit={isUserAdmin ? handleSave : (e) => e.preventDefault()}
         style={{
           background:'rgba(255,255,255,0.88)', backdropFilter:'blur(24px)',
           border:'1px solid rgba(255,255,255,0.9)',
@@ -292,8 +295,12 @@ function CompanyInfo() {
         }}
       >
         <div style={{ marginBottom:22 }}>
-          <div style={{ fontSize:'0.98rem', fontWeight:800, color:'#0d1117', marginBottom:3 }}>Edit Organization Details</div>
-          <div style={{ fontSize:'0.78rem', color:'#9ca3af' }}>Update the organization name and workspace code</div>
+          <div style={{ fontSize:'0.98rem', fontWeight:800, color:'#0d1117', marginBottom:3 }}>
+            {isUserAdmin ? 'Edit Organization Details' : 'Organization Details'}
+          </div>
+          <div style={{ fontSize:'0.78rem', color:'#9ca3af' }}>
+            {isUserAdmin ? 'Update the organization name and workspace code' : 'View organization profile details'}
+          </div>
         </div>
 
         {/* Organization Name */}
@@ -304,12 +311,17 @@ function CompanyInfo() {
             <input
               type="text"
               required
+              readOnly={!isUserAdmin}
               value={org.name || ''}
               onChange={(e) => setOrg((p) => ({ ...p, name: e.target.value }))}
-              style={inputSt}
+              style={{
+                ...inputSt,
+                cursor: !isUserAdmin ? 'default' : 'text',
+                background: !isUserAdmin ? '#f8fafc' : 'rgba(255,255,255,0.88)',
+              }}
               placeholder="e.g. Acme Corporation"
-              onFocus={focusIn}
-              onBlur={focusOut}
+              onFocus={isUserAdmin ? focusIn : undefined}
+              onBlur={isUserAdmin ? focusOut : undefined}
             />
           </div>
         </div>
@@ -322,12 +334,17 @@ function CompanyInfo() {
             <input
               type="text"
               required
+              readOnly={!isUserAdmin}
               value={org.code || ''}
               onChange={(e) => setOrg((p) => ({ ...p, code: e.target.value }))}
-              style={inputSt}
+              style={{
+                ...inputSt,
+                cursor: !isUserAdmin ? 'default' : 'text',
+                background: !isUserAdmin ? '#f8fafc' : 'rgba(255,255,255,0.88)',
+              }}
               placeholder="e.g. ACME-001"
-              onFocus={focusIn}
-              onBlur={focusOut}
+              onFocus={isUserAdmin ? focusIn : undefined}
+              onBlur={isUserAdmin ? focusOut : undefined}
             />
           </div>
           <div style={{ fontSize:11.5, color:'#c4cdd6', marginTop:5, paddingLeft:2 }}>
@@ -337,22 +354,28 @@ function CompanyInfo() {
 
         {/* Footer */}
         <div style={{ display:'flex', justifyContent:'flex-end', paddingTop:18, borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-          <button
-            type="submit"
-            disabled={saving}
-            style={{
-              display:'inline-flex', alignItems:'center', gap:8,
-              padding:'10px 24px', borderRadius:11, fontSize:13.5, fontWeight:700,
-              cursor: saving ? 'not-allowed' : 'pointer', border:'none',
-              background: saving ? '#e5e7eb' : 'linear-gradient(135deg, #00b09b, #4facfe)',
-              color: saving ? '#9ca3af' : '#fff',
-              boxShadow: saving ? 'none' : '0 4px 16px rgba(0,176,155,0.32)',
-              transition:'all 0.2s ease',
-            }}
-          >
-            <Save size={14} />
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          {isUserAdmin ? (
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                display:'inline-flex', alignItems:'center', gap:8,
+                padding:'10px 24px', borderRadius:11, fontSize:13.5, fontWeight:700,
+                cursor: saving ? 'not-allowed' : 'pointer', border:'none',
+                background: saving ? '#e5e7eb' : 'linear-gradient(135deg, #00b09b, #4facfe)',
+                color: saving ? '#9ca3af' : '#fff',
+                boxShadow: saving ? 'none' : '0 4px 16px rgba(0,176,155,0.32)',
+                transition:'all 0.2s ease',
+              }}
+            >
+              <Save size={14} />
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          ) : (
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#94a3b8', padding: '6px 12px', background: '#f1f5f9', borderRadius: 8 }}>
+              Read Only (Administrator Managed)
+            </span>
+          )}
         </div>
       </form>
     </div>
