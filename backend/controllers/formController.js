@@ -204,9 +204,9 @@ const formController = {
     try {
       const { id } = req.params;
       const organizationId = req.user?.organization_id;
-      const { subject, body, targetAudience, attendanceFilter, submission_ids } = req.body || {};
+      const { subject, body, targetAudience, attendanceFilter, submission_ids, custom_emails } = req.body || {};
 
-      const result = await formService.sendFormRegistrantsEmail(id, { subject, body, targetAudience, attendanceFilter, submission_ids }, organizationId);
+      const result = await formService.sendFormRegistrantsEmail(id, { subject, body, targetAudience, attendanceFilter, submission_ids, custom_emails }, organizationId);
       return res.status(200).json(result);
     } catch (err) {
       return res.status(400).json({
