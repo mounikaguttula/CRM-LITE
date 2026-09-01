@@ -35,6 +35,7 @@ function PublicFormPage() {
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [formErrors, setFormErrors] = useState({});
+  const [globalErrorMsg, setGlobalErrorMsg] = useState('');
   const [focusedFieldId, setFocusedFieldId] = useState(null);
 
   // Dynamic field responses state
@@ -71,6 +72,9 @@ function PublicFormPage() {
     setFieldValues((prev) => ({ ...prev, [apiName]: value }));
     if (formErrors[apiName]) {
       setFormErrors((prev) => ({ ...prev, [apiName]: null }));
+    }
+    if (globalErrorMsg) {
+      setGlobalErrorMsg('');
     }
   };
 
@@ -126,6 +130,8 @@ function PublicFormPage() {
     e.preventDefault();
     if (!form) return;
 
+    setGlobalErrorMsg('');
+
     const errors = {};
     (form.fields_config || []).forEach((f) => {
       const val = fieldValues[f.api_name];
@@ -177,16 +183,17 @@ function PublicFormPage() {
         setSubmittedSuccess(true);
         setSubmitMessage(res.message || form.appearance?.success_message || 'Thank you! Your response has been submitted.');
       } else {
-        alert(res.message || 'Submission failed. Please try again.');
+        setGlobalErrorMsg(res.message || 'Submission failed. Please try again.');
       }
     } catch (err) {
       console.error('Submission error:', err);
-      const msg = err.message || 'An error occurred while submitting the form.';
+      let msg = err.message || 'An error occurred while submitting the form.';
       if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('duplicate')) {
+        msg = 'This email address is already registered.';
         const emailFieldKey = Object.keys(fieldValues).find(k => k.toLowerCase().includes('email')) || 'email';
         setFormErrors((prev) => ({ ...prev, [emailFieldKey]: msg }));
       }
-      alert(msg);
+      setGlobalErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
@@ -287,9 +294,11 @@ function PublicFormPage() {
                 {navLink2Text && <a href={navLink2Target} style={{ color: '#475569', textDecoration: 'none', transition: 'color 0.15s ease' }}>{navLink2Text}</a>}
               </>
             )}
-            <a href="#register" style={{ border: 'none', background: primaryColor, color: '#fff', borderRadius: 8, padding: '8px 18px', fontWeight: 800, fontSize: '0.82rem', textDecoration: 'none', transition: 'all 0.15s ease' }}>
-              {appearance.submit_button_text || 'Register Now'}
-            </a>
+            {!submittedSuccess && (
+              <a href="#register" style={{ border: 'none', background: primaryColor, color: '#fff', borderRadius: 8, padding: '8px 18px', fontWeight: 800, fontSize: '0.82rem', textDecoration: 'none', transition: 'all 0.15s ease' }}>
+                {appearance.submit_button_text || 'Register Now'}
+              </a>
+            )}
           </div>
         </div>
 
@@ -414,6 +423,16 @@ function PublicFormPage() {
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {globalErrorMsg && (
+                    <div style={{
+                      padding: '12px 16px', borderRadius: 10, background: '#fef2f2',
+                      border: '1.5px solid #fca5a5', color: '#991b1b', fontSize: '0.85rem',
+                      fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10, lineHeight: 1.4
+                    }}>
+                      <AlertTriangle size={18} color="#dc2626" style={{ flexShrink: 0 }} />
+                      <span>{globalErrorMsg}</span>
+                    </div>
+                  )}
                   {fields.map((field) => {
                     const errorMsg = formErrors[field.api_name];
                     const isRequired = field.required;
@@ -683,6 +702,16 @@ function PublicFormPage() {
                   </div>
                 ) : (
                   <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {globalErrorMsg && (
+                      <div style={{
+                        padding: '12px 16px', borderRadius: 10, background: '#fef2f2',
+                        border: '1.5px solid #fca5a5', color: '#991b1b', fontSize: '0.85rem',
+                        fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10, lineHeight: 1.4
+                      }}>
+                        <AlertTriangle size={18} color="#dc2626" style={{ flexShrink: 0 }} />
+                        <span>{globalErrorMsg}</span>
+                      </div>
+                    )}
                     {fields.map((field) => {
                       const errorMsg = formErrors[field.api_name];
                       const isRequired = field.required;

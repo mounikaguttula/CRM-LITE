@@ -26,7 +26,8 @@ function FormSubmissionsPage() {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
-  const [targetAudience, setTargetAudience] = useState('unsent'); // 'selected' | 'unsent' | 'all'
+  const [targetAudience, setTargetAudience] = useState('unsent'); // 'selected' | 'unsent' | 'all' | 'custom'
+  const [customEmailsInput, setCustomEmailsInput] = useState('');
   const [emailAttendanceFilter, setEmailAttendanceFilter] = useState('ALL'); // 'ALL' | 'Registered' | 'Attended' | 'No Show' | 'Unknown'
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState(null);
@@ -156,11 +157,20 @@ function FormSubmissionsPage() {
     document.body.removeChild(link);
   };
 
+  const parseCustomEmails = (inputStr) => {
+    if (!inputStr || !inputStr.trim()) return [];
+    const list = inputStr.split(/[,;\n]/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const valid = list.filter((e) => EMAIL_REGEX.test(e));
+    return Array.from(new Set(valid));
+  };
+
   const openEmailModal = (audience = 'unsent') => {
     setShowEmailModal(true);
     setEmailResult(null);
     setTargetAudience(audience);
     setEmailAttendanceFilter('ALL');
+    setCustomEmailsInput('');
     if (audience === 'unsent') {
       setSelectedSubmissions(new Set());
     }
@@ -192,6 +202,7 @@ function FormSubmissionsPage() {
         body: emailBody.trim(),
         targetAudience: targetAudience === 'selected' ? 'all' : targetAudience,
         attendanceFilter: emailAttendanceFilter !== 'ALL' ? emailAttendanceFilter : null,
+        custom_emails: customEmailsInput.trim(),
       };
       // When targeting selected registrants, pass their IDs to the backend
       if (targetAudience === 'selected' && selectedSubmissions.size > 0) {
@@ -241,6 +252,10 @@ function FormSubmissionsPage() {
 
   // Calculate target audience email count in modal based on combined filters
   const getModalTargetCount = () => {
+    const customList = parseCustomEmails(customEmailsInput);
+    if (targetAudience === 'custom') {
+      return customList.length;
+    }
     let pool = submissions;
     // If targeting selected registrants, start with only selected ones
     if (targetAudience === 'selected') {
@@ -252,7 +267,9 @@ function FormSubmissionsPage() {
     if (targetAudience === 'unsent') {
       pool = pool.filter((s) => !s.email_sent && !s.data?.email_sent);
     }
-    return pool.length;
+    const registrantEmails = new Set(pool.map((s) => (s.email || '').trim().toLowerCase()).filter(Boolean));
+    const extraCustom = customList.filter((e) => !registrantEmails.has(e));
+    return pool.length + extraCustom.length;
   };
 
   const getAttendanceBadgeStyle = (status) => {
@@ -711,7 +728,7 @@ function FormSubmissionsPage() {
               <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 8 }}>
                 Who should receive this email?
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: selectedSubmissions.size > 0 ? '1fr 1fr 1fr' : '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: selectedSubmissions.size > 0 ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: 12 }}>
                 {selectedSubmissions.size > 0 && (
                   <div
                     onClick={() => setTargetAudience('selected')}
@@ -719,13 +736,14 @@ function FormSubmissionsPage() {
                       padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                       border: targetAudience === 'selected' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
                       background: targetAudience === 'selected' ? '#f5f3ff' : '#ffffff',
+                      transition: 'all 0.15s ease'
                     }}
                   >
-                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Users size={14} color="#7c3aed" />
                       Selected Only
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                    <div style={{ fontSize: '0.76rem', color: '#475569' }}>
                       Send to {selectedSubmissions.size} selected registrant{selectedSubmissions.size !== 1 ? 's' : ''} only.
                     </div>
                   </div>
@@ -737,12 +755,13 @@ function FormSubmissionsPage() {
                     padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                     border: targetAudience === 'unsent' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
                     background: targetAudience === 'unsent' ? '#eef2ff' : '#ffffff',
+                    transition: 'all 0.15s ease'
                   }}
                 >
-                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a', marginBottom: 4 }}>
                     Unsent Only
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                  <div style={{ fontSize: '0.76rem', color: '#475569' }}>
                     Send only to registrants who haven't received an email yet.
                   </div>
                 </div>
@@ -753,15 +772,60 @@ function FormSubmissionsPage() {
                     padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                     border: targetAudience === 'all' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
                     background: targetAudience === 'all' ? '#eef2ff' : '#ffffff',
+                    transition: 'all 0.15s ease'
                   }}
                 >
-                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a', marginBottom: 4 }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a', marginBottom: 4 }}>
                     All Registrants
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                  <div style={{ fontSize: '0.76rem', color: '#475569' }}>
                     Send to all registrants regardless of past email status.
                   </div>
                 </div>
+
+                <div
+                  onClick={() => setTargetAudience('custom')}
+                  style={{
+                    padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                    border: targetAudience === 'custom' ? '2px solid #059669' : '1px solid #cbd5e1',
+                    background: targetAudience === 'custom' ? '#ecfdf5' : '#ffffff',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Mail size={14} color="#059669" />
+                    Custom Emails
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: '#475569' }}>
+                    Send to custom email addresses entered below.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Emails Input Textarea */}
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ display: 'block', fontWeight: 700, color: '#334155', fontSize: '0.85rem', marginBottom: 6 }}>
+                {targetAudience === 'custom' ? 'Custom Recipient Email Addresses (Comma-Separated) *' : 'Additional Recipient Email Addresses (Comma-Separated, Optional)'}
+              </label>
+              <textarea
+                rows={2}
+                value={customEmailsInput}
+                onChange={(e) => setCustomEmailsInput(e.target.value)}
+                placeholder="e.g. john@company.com, sarah@partner.com, manager@client.com"
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: 8,
+                  border: '1px solid #cbd5e1', fontSize: '0.88rem', outline: 'none',
+                  fontFamily: 'inherit', resize: 'vertical'
+                }}
+              />
+              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Separate multiple email addresses with commas, semicolons, or newlines.</span>
+                {customEmailsInput.trim() && (
+                  <span style={{ color: '#059669', fontWeight: 700 }}>
+                    ✓ {parseCustomEmails(customEmailsInput).length} custom email(s) detected
+                  </span>
+                )}
               </div>
             </div>
 
@@ -771,10 +835,12 @@ function FormSubmissionsPage() {
               alignItems: 'center', justifyContent: 'space-between'
             }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
-                Target Recipients: <strong>{getModalTargetCount()} registrant(s)</strong>
+                Target Recipients: <strong>{getModalTargetCount()} recipient(s)</strong>
+                {targetAudience === 'custom' && ` [Custom Emails Only]`}
                 {targetAudience === 'selected' && ` [Selected Only]`}
-                {emailAttendanceFilter !== 'ALL' && ` [Attendance: ${emailAttendanceFilter}]`}
-                {targetAudience !== 'selected' && ` [Email Status: ${targetAudience === 'unsent' ? 'Unsent Only' : 'All'}]`}
+                {emailAttendanceFilter !== 'ALL' && targetAudience !== 'custom' && ` [Attendance: ${emailAttendanceFilter}]`}
+                {targetAudience !== 'selected' && targetAudience !== 'custom' && ` [Email Status: ${targetAudience === 'unsent' ? 'Unsent Only' : 'All'}]`}
+                {customEmailsInput.trim() && targetAudience !== 'custom' && ` (+ Custom Emails)`}
               </span>
             </div>
 
@@ -828,7 +894,7 @@ function FormSubmissionsPage() {
                 }}
               >
                 <Send size={15} />
-                {sendingEmail ? 'Sending...' : `Send to ${getModalTargetCount()} Registrants`}
+                {sendingEmail ? 'Sending...' : `Send to ${getModalTargetCount()} Recipient${getModalTargetCount() !== 1 ? 's' : ''}`}
               </button>
             </div>
           </div>

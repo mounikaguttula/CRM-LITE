@@ -602,7 +602,7 @@ const formService = {
       if (duplicate) {
         throw {
           statusCode: 400,
-          message: `The email address '${email}' is already registered for this form. Multiple submissions with the same email are not allowed.`,
+          message: `This email address is already registered.`,
         };
       }
     }
@@ -906,15 +906,15 @@ const formService = {
    * Dispatches personalized emails to form registrants with audience targeting ('unsent' | 'all')
    * Tracks email_sent and last_email_sent_at per submission to prevent duplicate spamming
    */
-  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent', attendanceFilter = null, submission_ids = null }, organizationId) => {
+  sendFormRegistrantsEmail: async (formId, { subject, body, targetAudience = 'unsent', attendanceFilter = null, submission_ids = null, custom_emails = null }, organizationId) => {
     if (!subject || !subject.trim()) {
       throw new Error('Email subject is required.');
     }
     if (!body || !body.trim()) {
       throw new Error('Email message body is required.');
     }
-    if (!['unsent', 'all'].includes(targetAudience)) {
-      throw new Error("Invalid targetAudience parameter. Must be 'unsent' or 'all'.");
+    if (!['unsent', 'all', 'custom'].includes(targetAudience)) {
+      throw new Error("Invalid targetAudience parameter. Must be 'unsent', 'all', or 'custom'.");
     }
 
     const VALID_ATTENDANCE_VALUES = ['Registered', 'Attended', 'Not Attended'];
@@ -923,74 +923,95 @@ const formService = {
     }
 
     const form = await formService.getFormById(formId, organizationId);
-    const allSubmissions = await formService.listSubmissions(formId, organizationId);
-
-    if (allSubmissions.length === 0) {
-      throw new Error('No registrants/submissions found for this form.');
-    }
-
-    let targetSubmissions = allSubmissions;
+    let validRecipients = [];
     let skippedCount = 0;
-
-    // Filter to specific submission IDs if provided (for "Email Selected" feature)
-    if (Array.isArray(submission_ids) && submission_ids.length > 0) {
-      const idsSet = new Set(submission_ids);
-      targetSubmissions = targetSubmissions.filter((sub) => idsSet.has(sub.id));
-      if (targetSubmissions.length === 0) {
-        throw new Error('None of the selected submissions were found.');
-      }
-    }
-
-    // Apply attendance_status filter first (if specified)
-    if (attendanceFilter) {
-      targetSubmissions = targetSubmissions.filter((sub) => {
-        const subAttendance = sub.attendance_status || sub.data?.attendance_status || null;
-        return subAttendance === attendanceFilter;
-      });
-    }
-
-    // Then apply email-sent filter
-    if (targetAudience === 'unsent') {
-      targetSubmissions = targetSubmissions.filter((sub) => sub.email_sent !== true && sub.data?.email_sent !== true);
-      skippedCount = allSubmissions.length - targetSubmissions.length;
-
-      if (targetSubmissions.length === 0) {
-        const filterNote = attendanceFilter ? ` with attendance status '${attendanceFilter}'` : '';
-        throw new Error(`No unsent registrants found${filterNote}. All matching registrants have already received an email update. Select "All Registrants" if you wish to re-send.`);
-      }
-    }
-
-    // Extract & deduplicate recipient list (grouping all matching submission IDs per email)
-    const validRecipients = [];
     let invalidCount = 0;
 
-    for (const sub of targetSubmissions) {
-      const email = (sub.email || '').trim();
-      if (email && email.includes('@')) {
-        const lowerEmail = email.toLowerCase();
-        let recipient = validRecipients.find((r) => r.email.toLowerCase() === lowerEmail);
-        if (!recipient) {
-          const fullName = sub.name || 'Registrant';
-          const firstName = fullName.split(' ')[0] || fullName;
-          const lastName = fullName.split(' ').slice(1).join(' ') || '';
-          recipient = {
-            subIds: [sub.id],
-            email,
-            firstName,
-            lastName,
-            fullName,
-          };
-          validRecipients.push(recipient);
-        } else {
-          recipient.subIds.push(sub.id);
+    if (targetAudience !== 'custom') {
+      const allSubmissions = await formService.listSubmissions(formId, organizationId);
+      let targetSubmissions = allSubmissions;
+
+      // Filter to specific submission IDs if provided (for "Email Selected" feature)
+      if (Array.isArray(submission_ids) && submission_ids.length > 0) {
+        const idsSet = new Set(submission_ids);
+        targetSubmissions = targetSubmissions.filter((sub) => idsSet.has(sub.id));
+        if (targetSubmissions.length === 0 && !custom_emails) {
+          throw new Error('None of the selected submissions were found.');
         }
-      } else {
-        invalidCount++;
+      }
+
+      // Apply attendance_status filter first (if specified)
+      if (attendanceFilter) {
+        targetSubmissions = targetSubmissions.filter((sub) => {
+          const subAttendance = sub.attendance_status || sub.data?.attendance_status || null;
+          return subAttendance === attendanceFilter;
+        });
+      }
+
+      // Then apply email-sent filter
+      if (targetAudience === 'unsent') {
+        targetSubmissions = targetSubmissions.filter((sub) => sub.email_sent !== true && sub.data?.email_sent !== true);
+        skippedCount = allSubmissions.length - targetSubmissions.length;
+      }
+
+      // Extract & deduplicate recipient list
+      for (const sub of targetSubmissions) {
+        const email = (sub.email || '').trim();
+        if (email && email.includes('@')) {
+          const lowerEmail = email.toLowerCase();
+          let recipient = validRecipients.find((r) => r.email.toLowerCase() === lowerEmail);
+          if (!recipient) {
+            const fullName = sub.name || 'Registrant';
+            const firstName = fullName.split(' ')[0] || fullName;
+            const lastName = fullName.split(' ').slice(1).join(' ') || '';
+            recipient = {
+              subIds: [sub.id],
+              email,
+              firstName,
+              lastName,
+              fullName,
+            };
+            validRecipients.push(recipient);
+          } else {
+            recipient.subIds.push(sub.id);
+          }
+        } else {
+          invalidCount++;
+        }
+      }
+    }
+
+    // Process custom emails if provided
+    if (custom_emails) {
+      let customList = [];
+      if (Array.isArray(custom_emails)) {
+        customList = custom_emails;
+      } else if (typeof custom_emails === 'string') {
+        customList = custom_emails.split(/[,;\n]/).map((e) => e.trim()).filter(Boolean);
+      }
+
+      for (const rawEmail of customList) {
+        const cleanEmail = rawEmail.trim();
+        if (cleanEmail && cleanEmail.includes('@')) {
+          const lowerEmail = cleanEmail.toLowerCase();
+          let recipient = validRecipients.find((r) => r.email.toLowerCase() === lowerEmail);
+          if (!recipient) {
+            const namePart = cleanEmail.split('@')[0];
+            const capitalizedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+            validRecipients.push({
+              subIds: [],
+              email: cleanEmail,
+              firstName: capitalizedName,
+              lastName: '',
+              fullName: capitalizedName,
+            });
+          }
+        }
       }
     }
 
     if (validRecipients.length === 0) {
-      throw new Error('No valid email addresses found among the selected registrants.');
+      throw new Error('No valid email recipients found. Please select registrants or enter custom email addresses.');
     }
 
     let sentCount = 0;
