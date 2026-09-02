@@ -171,35 +171,54 @@ const objectService = {
 
     const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
 
-    let query = supabase
-      .from('universal_table')
-      .select('*')
-      .eq('is_deleted', false)
-      .order('created_at', { ascending: false });
-
-    if (objDef && objDef.id) {
-      query = query.eq('object_type_id', objDef.id);
-    } else if (isUuid(objectKey)) {
-      query = query.eq('object_type_id', objectKey);
-    } else {
+    const targetTypeId = objDef ? objDef.id : (isUuid(objectKey) ? objectKey : null);
+    if (!targetTypeId) {
       return [];
     }
 
-    if (organizationId) {
-      query = query.eq('organization_id', organizationId);
+    let allRows = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      let query = supabase
+        .from('universal_table')
+        .select('*')
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: false });
+
+      query = query.eq('object_type_id', targetTypeId);
+
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+
+      if (options.owner_id) {
+        query = query.eq('owner_id', options.owner_id);
+      }
+
+      query = query.range(page * pageSize, (page + 1) * pageSize - 1);
+
+      const { data: rows, error } = await query;
+
+      if (error) {
+        throw { statusCode: 500, message: `Failed to fetch records for '${objectKey}': ${error.message}` };
+      }
+
+      if (!rows || rows.length === 0) {
+        hasMore = false;
+      } else {
+        allRows = allRows.concat(rows);
+        if (rows.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      }
     }
 
-    if (options.owner_id) {
-      query = query.eq('owner_id', options.owner_id);
-    }
-
-    const { data: rows, error } = await query;
-
-    if (error) {
-      throw { statusCode: 500, message: `Failed to fetch records for '${objectKey}': ${error.message}` };
-    }
-
-    return (rows || []).map(objectService.normalizeRecord);
+    return allRows.map(objectService.normalizeRecord);
   },
 
   /**

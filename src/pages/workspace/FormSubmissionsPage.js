@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
 import {
   ArrowLeft, Users, Mail, Search, Download, Send, RefreshCw,
-  ExternalLink, Trash2
+  ExternalLink, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 
 function FormSubmissionsPage() {
@@ -21,6 +21,10 @@ function FormSubmissionsPage() {
   const [attendanceFilter, setAttendanceFilter] = useState('ALL');
   const [selectedSubmissions, setSelectedSubmissions] = useState(new Set());
   const [updatingAttendance, setUpdatingAttendance] = useState(false);
+
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // Email Registrants Modal State
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -247,6 +251,32 @@ function FormSubmissionsPage() {
 
     return matchesSearch && matchesSource && matchesAttendance;
   });
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, sourceFilter, attendanceFilter, pageSize]);
+
+  const totalSubmissions = filteredSubmissions.length;
+  const totalPages = Math.max(1, Math.ceil(totalSubmissions / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalSubmissions);
+
+  const currentSubmissionsPage = filteredSubmissions.slice(startIndex, endIndex);
+
+  const getPageNumbers = (current, total) => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
 
   const uniqueSources = Array.from(new Set(submissions.map((s) => s.source || s.data?.source).filter(Boolean)));
 
@@ -518,7 +548,7 @@ function FormSubmissionsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredSubmissions.map((sub) => {
+              {currentSubmissionsPage.map((sub) => {
                 const isEmailed = sub.email_sent || sub.data?.email_sent;
                 const sentAt = sub.last_email_sent_at || sub.data?.last_email_sent_at;
                 const currentAttendance = sub.attendance_status || (isWebinarForm ? 'Registered' : '—');
@@ -625,6 +655,176 @@ function FormSubmissionsPage() {
               })}
             </tbody>
           </table>
+
+          {/* Form Submissions Pagination Footer */}
+          {!loading && totalSubmissions > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 18px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.82rem', color: '#475569', fontWeight: 600 }}>
+                  Showing <strong style={{ color: '#0f172a' }}>{startIndex + 1}</strong>–<strong style={{ color: '#0f172a' }}>{endIndex}</strong> of <strong style={{ color: '#0f172a' }}>{totalSubmissions}</strong> registrants
+                </span>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Per page:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      color: '#1e293b',
+                      cursor: 'pointer',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={safeCurrentPage === 1}
+                  title="First Page"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    background: safeCurrentPage === 1 ? '#f1f5f9' : '#ffffff',
+                    color: safeCurrentPage === 1 ? '#94a3b8' : '#334155',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <ChevronsLeft size={15} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={safeCurrentPage === 1}
+                  title="Previous Page"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    background: safeCurrentPage === 1 ? '#f1f5f9' : '#ffffff',
+                    color: safeCurrentPage === 1 ? '#94a3b8' : '#334155',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <ChevronLeft size={15} />
+                </button>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '0 4px' }}>
+                  {getPageNumbers(safeCurrentPage, totalPages).map((p, idx) => {
+                    if (p === '...') {
+                      return (
+                        <span key={`dots-${idx}`} style={{ padding: '0 4px', fontSize: 12, color: '#94a3b8' }}>
+                          …
+                        </span>
+                      );
+                    }
+
+                    const isActive = p === safeCurrentPage;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setCurrentPage(p)}
+                        style={{
+                          minWidth: 32,
+                          height: 32,
+                          padding: '0 8px',
+                          borderRadius: 6,
+                          border: isActive ? '1px solid #4f46e5' : '1px solid #cbd5e1',
+                          background: isActive ? '#4f46e5' : '#ffffff',
+                          color: isActive ? '#ffffff' : '#334155',
+                          fontSize: '0.8rem',
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={safeCurrentPage === totalPages}
+                  title="Next Page"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    background: safeCurrentPage === totalPages ? '#f1f5f9' : '#ffffff',
+                    color: safeCurrentPage === totalPages ? '#94a3b8' : '#334155',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <ChevronRight size={15} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={safeCurrentPage === totalPages}
+                  title="Last Page"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    background: safeCurrentPage === totalPages ? '#f1f5f9' : '#ffffff',
+                    color: safeCurrentPage === totalPages ? '#94a3b8' : '#334155',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <ChevronsRight size={15} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

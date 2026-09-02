@@ -41,6 +41,10 @@ import {
   Trash2,
   PlusCircle,
   Clock,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -1654,8 +1658,16 @@ function ObjectListContent({ objectTypeId }) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   const [backendFields, setBackendFields] = useState([]);
   const [lookupMap, setLookupMap] = useState({});
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [objectTypeId, query, pageSize]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1827,12 +1839,38 @@ function ObjectListContent({ objectTypeId }) {
     return cols;
   }, [rawMeta, allColumns, records, isDealObjList]);
 
-  const filteredRecords = records.filter((r) => {
-    if (!query) return true;
-    return Object.values(r).some((val) =>
-      String(val || '').toLowerCase().includes(query.toLowerCase())
-    );
-  });
+  const filteredRecords = useMemo(() => {
+    return records.filter((r) => {
+      if (!query) return true;
+      return Object.values(r).some((val) =>
+        String(val || '').toLowerCase().includes(query.toLowerCase())
+      );
+    });
+  }, [records, query]);
+
+  const totalRecords = filteredRecords.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalRecords);
+
+  const currentRecordsPage = useMemo(() => {
+    return filteredRecords.slice(startIndex, endIndex);
+  }, [filteredRecords, startIndex, endIndex]);
+
+  const getPageNumbers = (current, total) => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
 
   const getInitials = (str) => {
     if (!str) return 'U';
@@ -2011,9 +2049,9 @@ function ObjectListContent({ objectTypeId }) {
       const mapHeader = (h) => {
         if (h.includes('first') || h === 'fname') return 'first_name';
         if (h.includes('last') || h === 'lname') return 'last_name';
-        if (h.includes('alternate') || h.includes('duplicate') || h.includes('secondary') || h.includes('alt_email')) return 'alternate_email';
+        if (h.includes('alternate') || h.includes('duplicate') || h.includes('secondary') || h.includes('alt_email') || h.includes('alt email')) return 'alternate_email';
         if (h.includes('email')) return 'email';
-        if (h.includes('phone') || h.includes('tel') || h.includes('mobile') || h.includes('alt')) return 'phone';
+        if (h.includes('phone') || h.includes('tel') || h.includes('mobile') || h === 'alt_phone' || h === 'alt phone') return 'phone';
         if (h.includes('company') || h.includes('organization') || h.includes('org')) return 'company';
         if (h.includes('title') || h.includes('job') || h.includes('position')) return 'title';
         if (h.includes('source') || h.includes('lead source')) return 'lead_source';
@@ -2088,14 +2126,29 @@ function ObjectListContent({ objectTypeId }) {
     let successCount = 0;
     const newAdded = [];
 
-    for (const recordPayload of parsedRecords) {
-      try {
-        const created = await apiPost(`/objects/${objectTypeId}`, recordPayload);
-        const item = created?.data || created || recordPayload;
-        newAdded.push(item);
-        successCount++;
-      } catch (err) {
-        console.error('Import error for row:', err);
+    // Send array payload to bulk endpoint
+    try {
+      const createdBulk = await apiPost(`/objects/${objectTypeId}`, parsedRecords);
+      const bulkData = Array.isArray(createdBulk) ? createdBulk : createdBulk?.data;
+      if (Array.isArray(bulkData) && bulkData.length > 0) {
+        newAdded.push(...bulkData);
+        successCount = bulkData.length;
+      }
+    } catch (bulkErr) {
+      console.warn('Bulk endpoint API post failed, falling back to item-by-item creation:', bulkErr.message);
+    }
+
+    // Fallback item-by-item if batch request returned empty
+    if (successCount === 0) {
+      for (const recordPayload of parsedRecords) {
+        try {
+          const created = await apiPost(`/objects/${objectTypeId}`, recordPayload);
+          const item = created?.data || created || recordPayload;
+          newAdded.push(item);
+          successCount++;
+        } catch (err) {
+          console.error('Import error for row:', err);
+        }
       }
     }
 
@@ -2105,7 +2158,19 @@ function ObjectListContent({ objectTypeId }) {
     setParsedRecords([]);
 
     if (successCount > 0) {
-      setRecords((prev) => [...newAdded, ...prev]);
+      // Re-fetch all records to guarantee complete list and proper ordering
+      setLoading(true);
+      apiGet(`/objects/${objectTypeId}`)
+        .then((recRes) => {
+          const dataList = Array.isArray(recRes) ? recRes : recRes?.data || [];
+          setRecords(dataList);
+        })
+        .catch(() => {
+          setRecords((prev) => [...newAdded, ...prev]);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
       showToast(`🎉 Successfully imported ${successCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
     } else {
       showToast(`⚠️ Failed to import. Please check CSV format.`, 'error');
@@ -2285,7 +2350,7 @@ function ObjectListContent({ objectTypeId }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.map((r) => {
+                {currentRecordsPage.map((r) => {
                   const titleVal = r.name || r.lead_name || r.contact_name || r.first_name || 'Untitled Record';
                   const emailVal = r.email || r.email_address || (r.data && r.data.email) || '—';
                   const phoneVal = r.phone || r.mobile || r.phone_number || (r.data && r.data.phone) || '—';
@@ -2509,6 +2574,193 @@ function ObjectListContent({ objectTypeId }) {
             </table>
           )}
         </div>
+
+        {/* Module Pagination Footer Bar */}
+        {!loading && !error && totalRecords > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 18px',
+              borderTop: '1px solid var(--panel-border)',
+              background: 'rgba(255, 255, 255, 0.4)',
+              borderBottomLeftRadius: 16,
+              borderBottomRightRadius: 16,
+              flexWrap: 'wrap',
+              gap: 12,
+              marginTop: 4,
+            }}
+          >
+            {/* Left: Showing range & Rows per page */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-dim)', fontWeight: 500 }}>
+                Showing <strong style={{ color: '#0f172a' }}>{startIndex + 1}</strong>–<strong style={{ color: '#0f172a' }}>{endIndex}</strong> of <strong style={{ color: '#0f172a' }}>{totalRecords}</strong> {meta.pluralDisplayName.toLowerCase()}
+              </span>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>Per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 8,
+                    border: '1px solid var(--panel-border)',
+                    background: '#ffffff',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: '#1e293b',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Right: Page Navigation Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* First Page */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={safeCurrentPage === 1}
+                title="First Page"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: '1px solid var(--panel-border)',
+                  background: safeCurrentPage === 1 ? 'transparent' : '#ffffff',
+                  color: safeCurrentPage === 1 ? '#cbd5e1' : '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <ChevronsLeft size={15} />
+              </button>
+
+              {/* Previous Page */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={safeCurrentPage === 1}
+                title="Previous Page"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: '1px solid var(--panel-border)',
+                  background: safeCurrentPage === 1 ? 'transparent' : '#ffffff',
+                  color: safeCurrentPage === 1 ? '#cbd5e1' : '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <ChevronLeft size={15} />
+              </button>
+
+              {/* Page Numbers */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '0 4px' }}>
+                {getPageNumbers(safeCurrentPage, totalPages).map((p, idx) => {
+                  if (p === '...') {
+                    return (
+                      <span key={`dots-${idx}`} style={{ padding: '0 4px', fontSize: 12, color: '#94a3b8' }}>
+                        …
+                      </span>
+                    );
+                  }
+
+                  const isActive = p === safeCurrentPage;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setCurrentPage(p)}
+                      style={{
+                        minWidth: 32,
+                        height: 32,
+                        padding: '0 8px',
+                        borderRadius: 8,
+                        border: isActive ? '1px solid #4f46e5' : '1px solid var(--panel-border)',
+                        background: isActive ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : '#ffffff',
+                        color: isActive ? '#ffffff' : '#334155',
+                        fontSize: 12.5,
+                        fontWeight: isActive ? 700 : 500,
+                        cursor: 'pointer',
+                        boxShadow: isActive ? '0 2px 8px rgba(99, 102, 241, 0.3)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Next Page */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={safeCurrentPage === totalPages}
+                title="Next Page"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: '1px solid var(--panel-border)',
+                  background: safeCurrentPage === totalPages ? 'transparent' : '#ffffff',
+                  color: safeCurrentPage === totalPages ? '#cbd5e1' : '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <ChevronRight size={15} />
+              </button>
+
+              {/* Last Page */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={safeCurrentPage === totalPages}
+                title="Last Page"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: '1px solid var(--panel-border)',
+                  background: safeCurrentPage === totalPages ? 'transparent' : '#ffffff',
+                  color: safeCurrentPage === totalPages ? '#cbd5e1' : '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <ChevronsRight size={15} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* CSV Import Modal (Portal with Banner & Unified Design Tokens) */}

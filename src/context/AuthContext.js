@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { apiGet, apiPost } from '../api/client';
 import { getAuthToken, setAuthSession, clearAuthSession, getStoredUser } from '../utils/authStorage';
 
@@ -270,8 +271,8 @@ export function AuthProvider({ children }) {
     >
       {children}
 
-      {/* 30-Second Session Expiry Warning Modal */}
-      {showWarningModal && (
+      {/* 30-Second Session Expiry Warning Modal (Portaled directly to document.body) */}
+      {showWarningModal && ReactDOM.createPortal(
         <div
           style={{
             position: 'fixed',
@@ -279,9 +280,10 @@ export function AuthProvider({ children }) {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(6px)',
-            zIndex: 99999,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 999999,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -295,7 +297,7 @@ export function AuthProvider({ children }) {
               background: '#ffffff',
               borderRadius: '20px',
               padding: '28px 24px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
               border: '1px solid #e2e8f0',
               textAlign: 'center',
             }}
@@ -365,7 +367,8 @@ export function AuthProvider({ children }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </AuthContext.Provider>
   );
