@@ -39,7 +39,7 @@ const apiFetch = async (endpoint, options = {}) => {
     if (res.status === 401) {
       clearAuthSession();
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-        window.location.assign('/login');
+        window.location.assign('/login?reason=idle_timeout');
       }
     }
 

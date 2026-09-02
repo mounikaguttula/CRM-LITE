@@ -58,7 +58,8 @@ function Login() {
   const [isIdleTimeoutReason] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      return params.get('reason') === 'idle_timeout';
+      const reason = params.get('reason');
+      return reason === 'idle_timeout' || reason === 'session_expired';
     }
     return false;
   });

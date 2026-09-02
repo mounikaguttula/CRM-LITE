@@ -1263,11 +1263,30 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const currentLeadStatus = String(record?.status || record?.data?.status || record?.stage || record?.data?.stage || '').toLowerCase();
   const isAlreadyConverted = currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted);
 
+  const companyPerm = permissions ? (permissions['company'] || permissions['companies']) : null;
+  const contactPerm = permissions ? (permissions['contact'] || permissions['contacts']) : null;
+  const dealPerm = permissions ? (permissions['deal'] || permissions['deals']) : null;
+
+  const canUpdateLead = objPerm ? (objPerm.canUpdate !== false && objPerm.canEdit !== false) : true;
+  const canCreateCompany = companyPerm ? companyPerm.canCreate !== false : true;
+  const canCreateContact = contactPerm ? contactPerm.canCreate !== false : true;
+  const canCreateDeal = dealPerm ? dealPerm.canCreate !== false : true;
+
   const handleOpenConvertModal = () => {
     if (!record || converting) return;
 
     if (isAlreadyConverted) {
       showToast('This Lead has already been converted into a Company, Contact, and Deal.', 'error');
+      return;
+    }
+
+    if (!canUpdateLead || !canCreateCompany || !canCreateContact || !canCreateDeal) {
+      const missing = [];
+      if (!canUpdateLead) missing.push('Edit Lead');
+      if (!canCreateCompany) missing.push('Create Company');
+      if (!canCreateContact) missing.push('Create Contact');
+      if (!canCreateDeal) missing.push('Create Deal');
+      showToast(`Access Denied: You lack required permissions (${missing.join(', ')}) to convert this Lead.`, 'error');
       return;
     }
 
@@ -1281,7 +1300,18 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     setConverting(true);
     setConvertError(null);
 
+    // Track newly created record IDs for automatic rollback if conversion fails midway
+    let createdNewCompanyId = null;
+    let createdNewContactId = null;
+    let createdNewDealId = null;
+
     try {
+      // Pre-flight Permission Checks
+      if (!canUpdateLead) throw new Error('Access Denied: You do not have permission to edit/update Lead records.');
+      if (!canCreateCompany) throw new Error('Access Denied: You do not have permission to create Company records.');
+      if (!canCreateContact) throw new Error('Access Denied: You do not have permission to create Contact records.');
+      if (!canCreateDeal) throw new Error('Access Denied: You do not have permission to create Deal records.');
+
       // Step 1: Resolve Company ID and Company Name
       let companyId = null;
       let actualCompanyName = '';
@@ -1376,6 +1406,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           if (!companyId || !isUuid(companyId)) {
             throw new Error('Failed to create Company during Lead conversion.');
           }
+          createdNewCompanyId = companyId;
           actualCompanyName = companyRecord?.name || companyRecord?.data?.name || extractedCompanyName;
           console.log('[ConvertLead] Created new Company:', companyId, actualCompanyName);
         }
@@ -1425,6 +1456,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       if (!contactId || !isUuid(contactId)) {
         throw new Error('Failed to create Contact during Lead conversion.');
       }
+      createdNewContactId = contactId;
       console.log('[ConvertLead] Created Contact:', contactId, contactName);
 
       // Step 3: Resolve Deal Name
@@ -1459,6 +1491,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       if (!dealId || !isUuid(dealId)) {
         throw new Error('Failed to create Deal during Lead conversion.');
       }
+      createdNewDealId = dealId;
       console.log('[ConvertLead] Created Deal:', dealId, dealName);
 
       // Update Lead Status to Converted with linked references
@@ -1482,6 +1515,16 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       }
     } catch (err) {
       console.error('[ConvertLead] Conversion failed:', err);
+      // Clean up any newly created records if conversion fails midway to prevent orphaned records in DB
+      if (createdNewDealId) {
+        await apiDelete(`/objects/deal/${createdNewDealId}`).catch(() => apiDelete(`/deals/${createdNewDealId}`)).catch(() => null);
+      }
+      if (createdNewContactId) {
+        await apiDelete(`/objects/contact/${createdNewContactId}`).catch(() => apiDelete(`/contacts/${createdNewContactId}`)).catch(() => null);
+      }
+      if (createdNewCompanyId) {
+        await apiDelete(`/objects/company/${createdNewCompanyId}`).catch(() => apiDelete(`/companies/${createdNewCompanyId}`)).catch(() => null);
+      }
       setConvertError(err.message || 'Lead conversion failed.');
     } finally {
       setConverting(false);
@@ -2161,14 +2204,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 ) : (
                   <button
                     onClick={handleOpenConvertModal}
-                    disabled={converting}
+                    disabled={converting || !canUpdateLead || !canCreateCompany || !canCreateContact || !canCreateDeal}
+                    title={(!canUpdateLead || !canCreateCompany || !canCreateContact || !canCreateDeal) ? "You do not have permissions to convert leads (requires Lead edit, Company create, Contact create, and Deal create permissions)." : "Convert Lead"}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 7,
                       padding: '10px 18px', borderRadius: 12,
                       fontSize: 13, fontWeight: 700, color: '#fff',
-                      background: converting ? '#94a3b8' : 'linear-gradient(135deg, #f97316, #ef4444)',
-                      border: 'none', cursor: converting ? 'not-allowed' : 'pointer',
-                      boxShadow: converting ? 'none' : '0 8px 20px -10px rgba(249,115,22,0.55)',
+                      background: (converting || !canUpdateLead || !canCreateCompany || !canCreateContact || !canCreateDeal) ? '#cbd5e1' : 'linear-gradient(135deg, #f97316, #ef4444)',
+                      border: 'none', cursor: (converting || !canUpdateLead || !canCreateCompany || !canCreateContact || !canCreateDeal) ? 'not-allowed' : 'pointer',
+                      boxShadow: (converting || !canUpdateLead || !canCreateCompany || !canCreateContact || !canCreateDeal) ? 'none' : '0 8px 20px -10px rgba(249,115,22,0.55)',
                     }}
                   >
                     {converting ? 'Converting…' : 'Convert'}

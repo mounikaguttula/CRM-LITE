@@ -73,6 +73,29 @@ const createRecord = async (req, res, next) => {
     // Enforce permission check
     await metadataService.checkPermission(req.user, objectType, 'create');
 
+    if (Array.isArray(req.body)) {
+      const createdRecords = [];
+      for (const itemPayload of req.body) {
+        try {
+          const record = await objectService.createRecord(objectType, itemPayload, organizationId, userId);
+          if (record) createdRecords.push(record);
+        } catch (err) {
+          console.error(`Error creating row in bulk import for ${objectType}:`, err.message);
+        }
+      }
+
+      auditService.logUserActivity({
+        organization_id: organizationId,
+        user_id: userId,
+        action: 'CREATE',
+        module: objectType,
+        record_id: null,
+        description: `Bulk created ${createdRecords.length} ${objectType} record(s)`,
+      }).catch((auditErr) => console.error('❌ Audit log error in bulk createRecord:', auditErr.message));
+
+      return successResponse(res, createdRecords, `Bulk ${objectType} records created successfully.`, 201);
+    }
+
     const record = await objectService.createRecord(objectType, req.body, organizationId, userId);
 
     // Log audit activity after successful creation
