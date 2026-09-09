@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost, apiDelete } from '../../api/client';
 import {
@@ -146,13 +147,14 @@ function MetricCard({ label, value, sub, icon, color, bg }) {
 }
 
 /* ── Campaign Row Card ── */
-function CampaignCard({ campaign, onTrack, onDelete, canDelete = true }) {
+function CampaignCard({ campaign, onTrack, onDelete, canDelete = true, onCardClick }) {
   const [hov, setHov] = useState(false);
   const badge = getStatusBadge(campaign.status);
   const recipientCount = campaign.target_emails?.length || campaign.total_sent || 0;
 
   return (
     <div
+      onClick={onCardClick}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
@@ -221,7 +223,7 @@ function CampaignCard({ campaign, onTrack, onDelete, canDelete = true }) {
 
         {/* Tracking button */}
         <button
-          onClick={() => onTrack(campaign)}
+          onClick={(e) => { e.stopPropagation(); onTrack(campaign); }}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
             padding: '7px 14px', borderRadius: 11,
@@ -260,6 +262,7 @@ function CampaignCard({ campaign, onTrack, onDelete, canDelete = true }) {
    MAIN PAGE COMPONENT
 ──────────────────────────────────────────────────── */
 function CampaignsPage() {
+  const navigate = useNavigate();
   const workspace = useWorkspace() || {};
   const permissions = workspace.permissions;
   const campaignPerm = permissions?.campaign || permissions?.campaigns;
@@ -308,7 +311,7 @@ function CampaignsPage() {
     const t = EMAIL_TEMPLATES[0];
     setSelectedTemplate(t);
     setFormData({ name: '', subject: t.subject, body: t.body, target_emails: '' });
-    setStep(1);
+    setStep(0);
     setErrorMsg('');
     setSuccessMsg('');
     setModalOpen(true);
@@ -626,17 +629,18 @@ function CampaignsPage() {
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map(c => (
-            <CampaignCard
-              key={c.id}
-              campaign={c}
-              onTrack={setTrackingCampaign}
-              onDelete={handleDeleteCampaign}
-              canDelete={canDelete}
-            />
-          ))}
-        </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {filtered.map(campaign => (
+              <CampaignCard
+                key={campaign.id}
+                campaign={campaign}
+                onTrack={setTrackingCampaign}
+                onDelete={handleDeleteCampaign}
+                canDelete={canDelete}
+                onCardClick={() => navigate(`/workspace/object/campaign/${campaign.id}`)}
+              />
+            ))}
+          </div>
       )}
 
       {/* ══════════════════════════════════════════════
@@ -661,31 +665,33 @@ function CampaignsPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
               <div>
                 <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
-                  {step === 1 ? 'Choose Email Template' : 'Campaign Details & Recipients'}
+                  {step === 0 ? 'Select Campaign Type' : step === 1 ? 'Choose Email Template' : 'Campaign Details & Recipients'}
                 </h2>
                 <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>
-                  {step === 1 ? 'Pick a pre-designed template for your campaign' : 'Customize your message and add target recipients'}
+                  {step === 0 ? 'Choose the type of campaign you want to create' : step === 1 ? 'Pick a pre-designed template for your campaign' : 'Customize your message and add target recipients'}
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {/* Step Indicator */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {[1, 2].map(s => (
-                    <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: step >= s ? 'linear-gradient(135deg, #6366f1, #3b82f6)' : '#f1f5f9',
-                        color: step >= s ? '#fff' : '#94a3b8',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 12, fontWeight: 800,
-                        boxShadow: step >= s ? '0 4px 10px rgba(99,102,241,0.3)' : 'none',
-                      }}>
-                        {s}
+                {step > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {[1, 2].map(s => (
+                      <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{
+                          width: 28, height: 28, borderRadius: '50%',
+                          background: step >= s ? 'linear-gradient(135deg, #6366f1, #3b82f6)' : '#f1f5f9',
+                          color: step >= s ? '#fff' : '#94a3b8',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 12, fontWeight: 800,
+                          boxShadow: step >= s ? '0 4px 10px rgba(99,102,241,0.3)' : 'none',
+                        }}>
+                          {s}
+                        </div>
+                        {s === 1 && <div style={{ width: 28, height: 2, borderRadius: 99, background: step === 2 ? '#6366f1' : '#e2e8f0' }} />}
                       </div>
-                      {s === 1 && <div style={{ width: 28, height: 2, borderRadius: 99, background: step === 2 ? '#6366f1' : '#e2e8f0' }} />}
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
                 <button
                   onClick={() => setModalOpen(false)}
                   style={{ width: 34, height: 34, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -698,6 +704,45 @@ function CampaignsPage() {
             {errorMsg && (
               <div style={{ padding: '12px 16px', borderRadius: 12, background: '#fff1f2', border: '1px solid #fecdd3', color: '#be123c', fontSize: 13, fontWeight: 600, marginBottom: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AlertCircle size={16} /> {errorMsg}
+              </div>
+            )}
+
+            {/* STEP 0: Campaign Type */}
+            {step === 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
+                <div
+                  onClick={() => setStep(1)}
+                  style={{
+                    borderRadius: 18, border: '1.5px solid #f1f5f9', background: '#ffffff',
+                    padding: 32, cursor: 'pointer', textAlign: 'center',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.04)', transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = '#6366f1'}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = '#f1f5f9'}
+                >
+                  <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(99,102,241,0.1)', color: '#6366f1', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Mail size={28} />
+                  </div>
+                  <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Email Campaign</h3>
+                  <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>Send rich emails and track open rates directly from the CRM.</p>
+                </div>
+
+                <div
+                  onClick={() => navigate('/workspace/object/campaign/new')}
+                  style={{
+                    borderRadius: 18, border: '1.5px solid #f1f5f9', background: '#ffffff',
+                    padding: 32, cursor: 'pointer', textAlign: 'center',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.04)', transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = '#3b82f6'}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = '#f1f5f9'}
+                >
+                  <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <CheckCircle2 size={28} />
+                  </div>
+                  <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Standard Campaign (Form)</h3>
+                  <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>Create a Salesforce-style campaign object for tracking leads and forms.</p>
+                </div>
               </div>
             )}
 

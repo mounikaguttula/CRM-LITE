@@ -23,6 +23,7 @@ import {
   Search,
   X,
   Tag,
+  LayoutTemplate,
   CheckCircle2,
   DollarSign,
   TrendingUp,
@@ -47,17 +48,6 @@ const C = {
   border: '#e6e9f2',
   card: '#ffffff',
 };
-
-/* ─── Standard Product Catalog ─── */
-const DEFAULT_PRODUCTS = [
-  { id: 'prod-1', name: 'CRM Starter', code: 'CRM-001', listPrice: 9999, description: 'Basic CRM for small teams', family: 'Software' },
-  { id: 'prod-2', name: 'CRM Professional', code: 'CRM-002', listPrice: 29999, description: 'Advanced CRM with automation', family: 'Software' },
-  { id: 'prod-3', name: 'CRM Enterprise', code: 'CRM-003', listPrice: 79999, description: 'Full-suite enterprise CRM', family: 'Software' },
-  { id: 'prod-4', name: 'Onboarding Pack', code: 'SVC-001', listPrice: 15000, description: 'Dedicated onboarding & training', family: 'Services' },
-  { id: 'prod-5', name: 'Priority Support', code: 'SVC-002', listPrice: 12000, description: '24/7 priority support plan', family: 'Services' },
-  { id: 'prod-6', name: 'Data Migration', code: 'SVC-003', listPrice: 25000, description: 'Full data migration service', family: 'Services' },
-  { id: 'prod-7', name: 'API Add-on', code: 'ADD-001', listPrice: 8000, description: 'Extended API access & webhooks', family: 'Add-ons' },
-];
 
 /* ─── Avatar helper ───────────── */
 function getInitials(str) {
@@ -962,11 +952,17 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [lookupMap, setLookupMap] = useState({ users: {}, companies: {}, contacts: {}, deals: {}, all: {} });
   const [relatedDeals, setRelatedDeals] = useState([]);
   const [relatedContacts, setRelatedContacts] = useState([]);
+  const [relatedForms, setRelatedForms] = useState([]);
+  const [allForms, setAllForms] = useState([]);
+  const [showLinkFormModal, setShowLinkFormModal] = useState(false);
+  const [selectedFormToLink, setSelectedFormToLink] = useState('');
+  const [linkingForm, setLinkingForm] = useState(false);
   const [parentCompany, setParentCompany] = useState(null);
   const [primaryContact, setPrimaryContact] = useState(null);
 
   /* Products & Line Items state */
   const [lineItems, setLineItems] = useState([]);
+  const [catalogProducts, setCatalogProducts] = useState([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
@@ -988,8 +984,12 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       apiGet('/objects/contacts').catch(() => apiGet('/contacts')).catch(() => []),
       apiGet('/objects/deals').catch(() => apiGet('/deals')).catch(() => []),
       apiGet('/users').catch(() => []),
+      String(objectTypeId).toLowerCase().includes('deal') ? apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9').catch(() => []) : Promise.resolve([]),
+      String(objectTypeId).toLowerCase().includes('deal') ? apiGet('/objects/8790325a-b8d5-4445-bccb-ebe354a46919').catch(() => []) : Promise.resolve([]),
+      String(objectTypeId).toLowerCase().includes('campaign') ? apiGet('/objects/d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45').catch(() => []) : Promise.resolve([]),
+      String(objectTypeId).toLowerCase().includes('form') ? apiGet('/objects/d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41').catch(() => []) : Promise.resolve([])
     ])
-      .then(([rec, fList, compListRes, contactListRes, dealListRes, userListRes]) => {
+      .then(([rec, fList, compListRes, contactListRes, dealListRes, userListRes, prodRes, lineItemRes, formRes, leadRes]) => {
         if (!isMounted) return;
         const recData = (rec?.data && typeof rec.data === 'object' && rec.data.id) ? rec.data : rec;
         setRecord(recData);
@@ -1032,6 +1032,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         if (compId && compMap[compId]) setParentCompany(compMap[compId]);
         if (contactId && contMap[contactId]) setPrimaryContact(contMap[contactId]);
 
+        const prodList = Array.isArray(prodRes) ? prodRes : prodRes?.data || [];
+        setCatalogProducts(prodList);
+        const allLineItems = Array.isArray(lineItemRes) ? lineItemRes : lineItemRes?.data || [];
+
         // Calculate Related Lists based on object type
         if (currentObjKey.includes('company') || currentObjKey.includes('account')) {
           const matchedDeals = dealList.filter(
@@ -1058,41 +1062,55 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               (compId && (String(d.company_id) === String(compId) || String(d.parent_id) === String(compId)))
           );
           setRelatedDeals(matchedDeals);
+        } else if (currentObjKey.includes('campaign')) {
+          const formList = Array.isArray(formRes) ? formRes : formRes?.data || [];
+          setAllForms(formList);
+          const matchedForms = formList.filter(
+            (f) => String(f.campaign_id) === String(curId) || String(f.data?.campaign_id) === String(curId)
+          );
+          setRelatedForms(matchedForms);
+        } else if (currentObjKey.includes('form')) {
+          const leadList = Array.isArray(leadRes) ? leadRes : leadRes?.data || [];
+          const matchedLeads = leadList.filter(
+            (l) => String(l.form_id) === String(curId) || String(l.data?.form_id) === String(curId)
+          );
+          // Find deals from these converted leads
+          const dealIds = matchedLeads
+            .filter((l) => l.status?.toLowerCase() === 'converted' || l.data?.status?.toLowerCase() === 'converted' || l.converted_deal_id || l.data?.converted_deal_id || l.deal_id || l.data?.deal_id)
+            .map((l) => String(l.converted_deal_id || l.data?.converted_deal_id || l.deal_id || l.data?.deal_id))
+            .filter(Boolean);
+
+          const matchedDeals = dealList.filter((d) => dealIds.includes(String(d.id)));
+          setRelatedDeals(matchedDeals);
         } else if (currentObjKey.includes('deal')) {
           if (compId && compMap[compId]) setParentCompany(compMap[compId]);
           if (contactId && contMap[contactId]) setPrimaryContact(contMap[contactId]);
 
           // Load Line Items for Deal (DB state as primary source of truth)
-          let loadedItems = [];
-          if (recData?.line_items && Array.isArray(recData.line_items)) {
-            loadedItems = recData.line_items;
-          } else if (recData?.data?.line_items && Array.isArray(recData.data.line_items)) {
-            loadedItems = recData.data.line_items;
-          } else {
-            try {
-              const saved = localStorage.getItem(`crm_line_items_${curId}`);
-              if (saved) {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed)) loadedItems = parsed;
-              }
-            } catch (e) { }
-          }
+          let loadedItems = allLineItems.filter(
+            (li) => String(li.deal_id) === String(curId) || String(li.data?.deal_id) === String(curId)
+          ).map((li) => {
+            const data = li.data || {};
+            const productId = li.product_id || data.product_id;
+            const p = prodList.find((p) => String(p.id) === String(productId));
+            return {
+              id: li.id,
+              productId: productId,
+              name: p?.name || data.product_name || 'Unknown Product',
+              code: p?.code || data.product_code || p?.data?.code || '',
+              quantity: li.quantity || data.quantity || 1,
+              salesPrice: li.unit_price || data.unit_price || 0,
+              discount: li.discount || data.discount || 0,
+              total: li.total_price || data.total_price || 0,
+              description: li.description || data.description || ''
+            };
+          });
 
           setLineItems(loadedItems);
 
           if (currentObjKey.includes('deal') && loadedItems && loadedItems.length > 0) {
             const calcTotal = loadedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
             setRecord((prev) => (prev ? { ...prev, amount: calcTotal } : prev));
-            if (recData?.amount !== calcTotal) {
-              const payloadToSync = {
-                ...(recData || {}),
-                amount: calcTotal,
-                line_items: loadedItems,
-              };
-              apiPut(`/objects/${objectTypeId}/${curId}`, payloadToSync)
-                .catch(() => apiPut(`/deals/${curId}`, payloadToSync))
-                .catch((err) => console.warn('Auto-syncing deal amount failed soft:', err));
-            }
           }
         }
       })
@@ -1106,42 +1124,136 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   }, [objectTypeId, recordId]);
 
   /* Synchronize line items & update Deal Amount conditionally */
-  const syncLineItemsAndAmount = (newItems) => {
+  const syncLineItemsAndAmount = async (newItems) => {
     setLineItems(newItems);
-    if (recordId) {
-      try {
-        localStorage.setItem(`crm_line_items_${recordId}`, JSON.stringify(newItems));
-        localStorage.setItem(`crm_line_items_visited_${recordId}`, 'true');
-      } catch (e) { }
-    }
+    
+    const grandTotal = newItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+    setRecord((prev) => (prev ? { ...prev, amount: grandTotal } : prev));
 
     const currentObjKey = String(objectTypeId).toLowerCase();
-    if (newItems && newItems.length > 0) {
-      const grandTotal = newItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-      setRecord((prev) => (prev ? { ...prev, amount: grandTotal } : prev));
-
-      if (recordId && currentObjKey.includes('deal')) {
-        const updatedPayload = {
+    if (currentObjKey.includes('deal') && recordId) {
+      try {
+        const lineItemObjId = '8790325a-b8d5-4445-bccb-ebe354a46919';
+        
+        const currentItemsMap = {};
+        lineItems.forEach(item => {
+          if (item.id) currentItemsMap[item.id] = item;
+        });
+        
+        const newItemsMap = {};
+        const ops = [];
+        
+        for (const item of newItems) {
+          if (item.id) {
+            newItemsMap[item.id] = item;
+            ops.push(apiPut(`/objects/${lineItemObjId}/${item.id}`, {
+              name: item.name || 'Line Item',
+              deal_id: recordId,
+              product_id: item.productId,
+              quantity: item.quantity,
+              unit_price: item.salesPrice,
+              discount: item.discount,
+              total_price: item.total,
+              description: item.description,
+            }));
+          } else {
+            ops.push(apiPost(`/objects/${lineItemObjId}`, {
+              name: item.name || 'Line Item',
+              deal_id: recordId,
+              product_id: item.productId,
+              quantity: item.quantity,
+              unit_price: item.salesPrice,
+              discount: item.discount,
+              total_price: item.total,
+              description: item.description,
+            }));
+          }
+        }
+        
+        for (const oldItem of lineItems) {
+          if (oldItem.id && !newItemsMap[oldItem.id]) {
+            ops.push(apiDelete(`/objects/${lineItemObjId}/${oldItem.id}`));
+          }
+        }
+        
+        await Promise.all(ops);
+        
+        // Re-fetch to ensure we have the correct DB IDs assigned
+        const freshRes = await apiGet(`/objects/${lineItemObjId}`);
+        const allLineItems = Array.isArray(freshRes?.data || freshRes) ? (freshRes?.data || freshRes) : [];
+        const loadedItems = allLineItems.filter(
+          (li) => String(li.deal_id) === String(recordId) || String(li.data?.deal_id) === String(recordId)
+        ).map((li) => {
+          const data = li.data || {};
+          const pid = li.product_id || data.product_id;
+          const p = catalogProducts.find((p) => String(p.id) === String(pid));
+          return {
+            id: li.id,
+            productId: pid,
+            name: p?.name || data.product_name || 'Unknown Product',
+            code: p?.code || data.product_code || p?.data?.code || '',
+            quantity: li.quantity || data.quantity || 1,
+            salesPrice: li.unit_price || data.unit_price || 0,
+            discount: li.discount || data.discount || 0,
+            total: li.total_price || data.total_price || 0,
+            description: li.description || data.description || ''
+          };
+        });
+        
+        setLineItems(loadedItems);
+        const calcTotal = loadedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+        setRecord((prev) => (prev ? { ...prev, amount: calcTotal } : prev));
+        
+        const payloadToSync = {
           ...(record || {}),
           amount: grandTotal,
-          line_items: newItems,
         };
-        apiPut(`/objects/${objectTypeId}/${recordId}`, updatedPayload)
-          .catch(() => apiPut(`/deals/${recordId}`, updatedPayload))
-          .catch((err) => console.warn('Syncing deal amount failed soft:', err));
+        apiPut(`/objects/${objectTypeId}/${recordId}`, payloadToSync).catch(console.warn);
+        
+        const res = await apiGet(`/objects/${lineItemObjId}`);
+        const allLI = Array.isArray(res) ? res : res?.data || [];
+        const freshItems = allLI.filter(li => String(li.deal_id) === String(recordId) || String(li.data?.deal_id) === String(recordId)).map((li) => {
+          const data = li.data || {};
+          const productId = li.product_id || data.product_id;
+          const p = catalogProducts.find((p) => String(p.id) === String(productId));
+          return {
+            id: li.id,
+            productId: productId,
+            name: p?.name || data.product_name || 'Unknown Product',
+            code: p?.code || p?.data?.code || data.product_code || '',
+            quantity: li.quantity || data.quantity || 1,
+            salesPrice: li.unit_price || data.unit_price || 0,
+            discount: li.discount || data.discount || 0,
+            total: li.total_price || data.total_price || 0,
+            description: li.description || data.description || ''
+          };
+        });
+        setLineItems(freshItems);
+      } catch (err) {
+        console.error('Failed to sync line items to backend', err);
       }
-    } else {
-      // If all line items are removed, line_items is empty.
-      // Retain current manually set amount and preserve editability.
-      if (recordId && currentObjKey.includes('deal')) {
-        const updatedPayload = {
-          ...(record || {}),
-          line_items: [],
-        };
-        apiPut(`/objects/${objectTypeId}/${recordId}`, updatedPayload)
-          .catch(() => apiPut(`/deals/${recordId}`, updatedPayload))
-          .catch((err) => console.warn('Syncing empty line items failed soft:', err));
+    }
+  };
+
+  const handleLinkForm = async () => {
+    if (!selectedFormToLink || linkingForm) return;
+    setLinkingForm(true);
+    try {
+      await apiPut(`/objects/d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45/${selectedFormToLink}`, { campaign_id: recordId });
+      showToast('Form linked successfully.', 'success');
+      
+      // Update local state
+      const formToMove = allForms.find(f => String(f.id) === String(selectedFormToLink));
+      if (formToMove) {
+        setRelatedForms(prev => [...prev, { ...formToMove, campaign_id: recordId }]);
       }
+      setShowLinkFormModal(false);
+      setSelectedFormToLink('');
+    } catch (err) {
+      console.error('Error linking form:', err);
+      showToast('Failed to link form.', 'error');
+    } finally {
+      setLinkingForm(false);
     }
   };
 
@@ -1501,6 +1613,9 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         contact_id: contactId,
         contact: contactId,
         contact_name: contactName,
+        converted_deal_id: dealId,
+        deal_id: dealId,
+        deal: dealId,
         ...(companyId && isUuid(companyId) ? { company_id: companyId, company: companyId, company_name: actualCompanyName } : {}),
       };
       await apiPut(`/objects/${objectTypeId}/${recordId}`, leadPayload).catch(() => apiPut(`/${objectTypeId}/${recordId}`, leadPayload));
@@ -1914,17 +2029,18 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
     const newEditList = selectedProdIds.map((id) => {
       if (existingMap[id]) return { ...existingMap[id] };
-      const prod = DEFAULT_PRODUCTS.find((p) => p.id === id);
+      const prod = catalogProducts.find((p) => p.id === id) || {};
+      const price = prod.unit_price || prod.data?.unit_price || 0;
       return {
         productId: prod.id,
         name: prod.name,
-        code: prod.code,
+        code: prod.code || prod.data?.code || '',
         quantity: 1,
-        salesPrice: prod.listPrice,
+        salesPrice: price,
         discount: 0,
-        total: prod.listPrice,
+        total: price,
         date: '',
-        description: prod.description || '',
+        description: prod.description || prod.data?.description || '',
       };
     });
 
@@ -1949,17 +2065,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const grandTotalAmount = lineItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
 
   /* Filter products for Step 1 modal search & family tabs */
-  const filteredCatalogProducts = DEFAULT_PRODUCTS.filter((prod) => {
-    if (selectedFamilyFilter !== 'All' && String(prod.family).toLowerCase() !== selectedFamilyFilter.toLowerCase()) {
+  const filteredCatalogProducts = catalogProducts.filter((prod) => {
+    const family = prod.family || prod.data?.family || '';
+    if (selectedFamilyFilter !== 'All' && family.toLowerCase() !== selectedFamilyFilter.toLowerCase()) {
       return false;
     }
     if (!productSearch) return true;
     const q = productSearch.toLowerCase();
+    const code = prod.code || prod.data?.code || '';
+    const desc = prod.description || prod.data?.description || '';
     return (
-      prod.name.toLowerCase().includes(q) ||
-      prod.code.toLowerCase().includes(q) ||
-      (prod.family || '').toLowerCase().includes(q) ||
-      (prod.description || '').toLowerCase().includes(q)
+      (prod.name || '').toLowerCase().includes(q) ||
+      code.toLowerCase().includes(q) ||
+      family.toLowerCase().includes(q) ||
+      desc.toLowerCase().includes(q)
     );
   });
 
@@ -1977,62 +2096,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             <span style={{ fontWeight: 700, color: C.text }}>{String(recordTitle)}</span>
           </nav>
 
-          {/* ── Header Banner ── 
-        <section style={{
-          position: 'relative', overflow: 'hidden', borderRadius: 24,
-          background: C.bannerGrad, padding: 28,
-          boxShadow: '0 30px 60px -30px rgba(11,18,32,.65)',
-        }}>
-          <div style={{ position: 'absolute', right: -70, top: -110, width: 260, height: 260, borderRadius: '50%', background: 'rgba(34,211,238,.20)', filter: 'blur(70px)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', left: 90, bottom: -120, width: 240, height: 240, borderRadius: '50%', background: 'rgba(99,102,241,.28)', filter: 'blur(70px)', pointerEvents: 'none' }} />
-
-          <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 22 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-              {avatarFor(String(recordTitle), 66, true)}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
-                  padding: '5px 12px', borderRadius: 999, fontSize: 10.5, fontWeight: 800,
-                  letterSpacing: '0.14em', color: C.success,
-                  background: 'rgba(52,211,153,.12)', border: '1px solid rgba(52,211,153,.32)',
-                }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.success }} />
-                  {String(meta.displayName).toUpperCase()} RECORD
-                </span>
-                <h2 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: '#f4f7ff', letterSpacing: '-0.02em' }}>
-                  {String(recordTitle)}
-                </h2>
-                {subtitleVal && <p style={{ margin: 0, fontSize: 14, color: '#9fb0c9' }}>{subtitleVal}</p>}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-              {emailVal && (
-                <a href={`mailto:${emailVal}`} style={ghostBtn}>
-                  <Mail size={16} /> Email
-                </a>
-              )}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {emailVal && (
-              <a
-                href={`mailto:${emailVal}`}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 7,
-                  padding: '8px 16px', borderRadius: 11,
-                  fontSize: 13, fontWeight: 700, color: '#475569',
-                  background: '#ffffff', border: '1.5px solid #e2e8f0',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                  textDecoration: 'none', transition: 'all 0.15s ease',
-                }}
-              >
-                <Mail size={15} color="#6366f1" /> Email
-              </a>
-            )}
-          </div>
-        </div>
-
-        {/* ── Header banner (Exact Setup.js Hero Banner Theme, Height & Animations) ── */}
           <section
             style={{
               borderRadius: 22,
@@ -2047,7 +2110,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               alignItems: 'center',
             }}
           >
-            {/* Global Keyframe Animations */}
             <style>{`
             @keyframes dp-slideUp {
               from { opacity: 0; transform: translateY(24px); }
@@ -2073,7 +2135,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             }
           `}</style>
 
-            {/* Animated particle dots */}
             {[...Array(6)].map((_, i) => (
               <div
                 key={i}
@@ -2091,16 +2152,13 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               />
             ))}
 
-            {/* Glow orbs */}
             <div style={{ position: 'absolute', top: -80, right: 60, width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.2), transparent 65%)', animation: 'dp-float 7s ease-in-out infinite', pointerEvents: 'none' }} />
             <div style={{ position: 'absolute', bottom: -60, right: 200, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.15), transparent 65%)', animation: 'dp-float 9s ease-in-out infinite reverse', pointerEvents: 'none' }} />
             <div style={{ position: 'absolute', top: 20, right: 340, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle, rgba(245,87,108,0.1), transparent 65%)', animation: 'dp-float 6s ease-in-out infinite 1s', pointerEvents: 'none' }} />
 
-            {/* Grid texture */}
             <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)', backgroundSize: '48px 48px', pointerEvents: 'none' }} />
 
             <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 24, width: '100%' }}>
-              {/* Left: Avatar + Badge + Title + Rich Metadata */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 0, flex: 1 }}>
                 <div style={{ position: 'relative', flexShrink: 0 }}>
                   {avatarFor(String(recordTitle), 72, true)}
@@ -2125,7 +2183,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </div>
               </div>
 
-              {/* Right: Stat Tiles */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', animation: 'dp-fadeSlideIn 0.5s 0.4s both', justifyContent: 'flex-end' }}>
                 {deriveHeaderTiles(objectTypeId, record, currentUser, organization, company, lookupMap).map((tile, i) => (
                   <div
@@ -2152,7 +2209,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             </div>
           </section>
 
-          {/* ── Stage Progress Pipeline (Deals Only) ── */}
           {String(objectTypeId || '').toLowerCase().includes('deal') && (
             <StageProgress
               record={record}
@@ -2165,7 +2221,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             />
           )}
 
-          {/* ── Tab strip ── */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: 'flex', gap: 8 }}> 
               {tabs.map((tab) => {
@@ -2262,7 +2317,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             </div>
           </div>
 
-          {/* ── DETAILS TAB (Plain View - Merged Record & System Information at END) ── */}
           {(activeTab === 'Details' || activeTab === 'Overview') && (
             <section
               style={{
@@ -2282,7 +2336,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </span>
               </header>
 
-              {/* Flat / Plain Key-Value Grid Layout (Created & Modified pushed to END) */}
               <div
                 style={{
                   display: 'grid',
@@ -2323,11 +2376,9 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             </section>
           )}
 
-          {/* ── RELATED TAB CONTENT ── */}
           {activeTab === 'Related' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-              {/* 1. Products / Line Items Section (For Deals / Opportunities) */}
               {currentObjKey.includes('deal') && (
                 <section style={{
                   borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
@@ -2415,7 +2466,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                         </table>
                       </div>
 
-                      {/* Grand Total Footer */}
                       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 14, padding: '20px 24px', background: '#fafafc', borderTop: `1px solid ${C.border}` }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: C.dim, textTransform: 'uppercase', letterSpacing: '.06em' }}>
                           Grand Total
@@ -2433,10 +2483,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </section>
               )}
 
-              {/* 2. Related Sections for COMPANY / ACCOUNT */}
               {(currentObjKey.includes('company') || currentObjKey.includes('account')) && (
                 <>
-                  {/* Related Deals */}
                   <section style={{
                     borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
                     boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
@@ -2518,7 +2566,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     )}
                   </section>
 
-                  {/* Related Contacts */}
                   <section style={{
                     borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
                     boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
@@ -2596,10 +2643,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </>
               )}
 
-              {/* 3. Related Sections for CONTACT */}
               {currentObjKey.includes('contact') && (
                 <>
-                  {/* Parent Company Card */}
                   {parentCompany ? (
                     <section style={{
                       borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
@@ -2630,7 +2675,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     </section>
                   ) : null}
 
-                  {/* Related Deals for Contact */}
                   <section style={{
                     borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
                     boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
@@ -2703,10 +2747,149 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </>
               )}
 
-              {/* 4. Linked Cards for DEAL (OPPORTUNITY) */}
+              {currentObjKey.includes('campaign') && (
+                <section style={{
+                  borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                  boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                }}>
+                  <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        <LayoutTemplate size={18} />
+                      </span>
+                      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                        FORMS
+                      </h3>
+                      <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        {relatedForms.length}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => setShowLinkFormModal(true)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                          borderRadius: 10, border: `1px solid ${C.indigo}`, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                          color: C.indigo, background: 'rgba(99,102,241,.06)',
+                        }}
+                      >
+                        <Plus size={15} /> Link Existing
+                      </button>
+                      <button
+                        onClick={() => navigate(`/workspace/forms/new?campaign_id=${recordId}`)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                          borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                          color: '#fff', background: C.primaryGrad,
+                        }}
+                      >
+                        <Plus size={15} /> New Form
+                      </button>
+                    </div>
+                  </header>
+
+                  {relatedForms.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                            <th style={{ padding: '12px 20px' }}>Form Name</th>
+                            <th style={{ padding: '12px 16px' }}>Status</th>
+                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatedForms.map((f) => (
+                            <tr key={f.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '14px 20px', fontWeight: 700 }}>
+                                <Link to={`/workspace/object/form/${f.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <LayoutTemplate size={14} />
+                                  {f.name || 'Untitled Form'}
+                                </Link>
+                              </td>
+                              <td style={{ padding: '14px 16px' }}>{statusBadge(f.status || 'Active')}</td>
+                              <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                <Link to={`/workspace/object/form/${f.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                  View <ChevronRight size={14} />
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No forms associated with this campaign yet.
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {currentObjKey.includes('form') && (
+                <section style={{
+                  borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                  boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                }}>
+                  <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        <Briefcase size={18} />
+                      </span>
+                      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                        CONVERTED DEALS
+                      </h3>
+                      <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        {relatedDeals.length}
+                      </span>
+                    </div>
+                  </header>
+
+                  {relatedDeals.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                            <th style={{ padding: '12px 20px' }}>Deal Name</th>
+                            <th style={{ padding: '12px 16px' }}>Stage</th>
+                            <th style={{ padding: '12px 16px' }}>Amount</th>
+                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatedDeals.map((deal) => (
+                            <tr key={deal.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '14px 20px', fontWeight: 700 }}>
+                                <Link to={`/workspace/object/deal/${deal.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <Briefcase size={14} />
+                                  {deal.name || deal.title || 'Untitled Deal'}
+                                </Link>
+                              </td>
+                              <td style={{ padding: '14px 16px' }}>{statusBadge(deal.stage || deal.status)}</td>
+                              <td style={{ padding: '14px 16px', fontWeight: 700, color: C.text }}>
+                                {deal.amount ? `$${Number(deal.amount).toLocaleString()}` : '—'}
+                              </td>
+                              <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                <Link to={`/workspace/object/deal/${deal.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                  View <ChevronRight size={14} />
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No deals created from leads submitted via this form yet.
+                    </div>
+                  )}
+                </section>
+              )}
+
               {currentObjKey.includes('deal') && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
-                  {/* Linked Company Card */}
                   <section style={{
                     borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
                     boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', padding: 24,
@@ -2737,7 +2920,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     ) : null}
                   </section>
 
-                  {/* Linked Primary Contact Card */}
                   <section style={{
                     borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
                     boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', padding: 24,
@@ -2770,7 +2952,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </div>
               )}
 
-              {/* Fallback for standard/custom objects */}
               {!currentObjKey.includes('company') && !currentObjKey.includes('account') && !currentObjKey.includes('contact') && !currentObjKey.includes('deal') && (
                 <section style={{
                   borderRadius: 22, border: `1px dashed ${C.border}`, background: 'rgba(255,255,255,.6)',
@@ -2785,9 +2966,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════
-         STEP 1 MODAL: ADD PRODUCTS (Enhanced Premium UI)
-         ═══════════════════════════════════════════════════════════════ */}
       {isAddModalOpen && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
@@ -2800,7 +2978,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             boxShadow: '0 30px 60px -15px rgba(15,23,42,0.3)', border: '1px solid rgba(226,232,240,0.9)',
             overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh',
           }}>
-            {/* Modal Header */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '24px 32px 18px', borderBottom: '1px solid #f1f5f9',
@@ -2841,14 +3018,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center',
                   justifyContent: 'center', transition: 'all 0.15s ease',
                 }}
-                onMouseOver={(e) => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
-                onMouseOut={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
               >
                 <X size={18} />
               </button>
             </div>
 
-            {/* Search & Family Filter Bar */}
             <div style={{ padding: '20px 32px 14px', background: '#fafafc', borderBottom: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ position: 'relative' }}>
                 <Search size={18} style={{ position: 'absolute', left: 16, top: 13, color: '#94a3b8' }} />
@@ -2863,12 +3037,9 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     background: '#ffffff', boxShadow: '0 2px 8px rgba(15,23,42,0.04)',
                     transition: 'all 0.2s ease',
                   }}
-                  onFocus={(e) => { e.target.style.borderColor = '#2563eb'; e.target.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.12)'; }}
-                  onBlur={(e) => { e.target.style.borderColor = '#cbd5e1'; e.target.style.boxShadow = '0 2px 8px rgba(15,23,42,0.04)'; }}
                 />
               </div>
 
-              {/* Family Filter Pills */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.06em', marginRight: 4 }}>
                   Family:
@@ -2900,7 +3071,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   <CheckCircle2 size={16} /> Selected ({selectedProdIds.length})
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>
-                  Showing {filteredCatalogProducts.length} of {DEFAULT_PRODUCTS.length} products
+                  Showing {filteredCatalogProducts.length} of {catalogProducts.length} products
                 </span>
               </div>
 
@@ -2969,16 +3140,16 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                           {prod.name}
                         </td>
                         <td style={{ padding: '14px 14px', color: '#64748b', fontWeight: 600, fontFamily: 'monospace', fontSize: 13 }}>
-                          {prod.code}
+                          {prod.code || prod.data?.code || 'N/A'}
                         </td>
                         <td style={{ padding: '14px 14px', fontWeight: 800, color: '#0f172a' }}>
-                          ${prod.listPrice.toLocaleString()}
+                          ${(prod.unit_price || prod.data?.unit_price || 0).toLocaleString()}
                         </td>
                         <td style={{ padding: '14px 14px', color: '#475569' }}>
-                          {prod.description}
+                          {prod.description || prod.data?.description || '—'}
                         </td>
                         <td style={{ padding: '14px 14px' }}>
-                          {familyBadge(prod.family)}
+                          {familyBadge(prod.family || prod.data?.family)}
                         </td>
                       </tr>
                     );
@@ -3450,6 +3621,57 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             {(typeof toastMessage === 'object' && toastMessage.type === 'error') ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           </div>
           <span>{typeof toastMessage === 'object' ? toastMessage.text : toastMessage}</span>
+        </div>,
+        document.body
+      )}
+      )}
+
+      {showLinkFormModal && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,.4)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, padding: 20 }}>
+          <div style={{ background: '#fff', borderRadius: 24, width: '100%', maxWidth: 440, boxShadow: '0 20px 40px -10px rgba(15,23,42,.2)', overflow: 'hidden' }}>
+            <header style={{ padding: '24px', borderBottom: '1px solid #e2e8f0', position: 'relative' }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Link Existing Form</h3>
+              <p style={{ margin: '6px 0 0', fontSize: 13, color: '#64748b' }}>Select a form to associate with this campaign.</p>
+              <button
+                onClick={() => { if (!linkingForm) setShowLinkFormModal(false); }}
+                style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6 }}
+              >
+                <X size={20} />
+              </button>
+            </header>
+            <div style={{ padding: 24 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 700, color: '#334155' }}>Select Form</label>
+              <select
+                value={selectedFormToLink}
+                onChange={(e) => setSelectedFormToLink(e.target.value)}
+                style={{
+                  width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e2e8f0',
+                  fontSize: 14, color: '#0f172a', backgroundColor: '#f8fafc', outline: 'none'
+                }}
+              >
+                <option value="">-- Choose a Form --</option>
+                {allForms.filter(f => String(f.campaign_id) !== String(recordId) && String(f.data?.campaign_id) !== String(recordId)).map(f => (
+                  <option key={f.id} value={f.id}>{f.name || 'Untitled Form'}</option>
+                ))}
+              </select>
+            </div>
+            <footer style={{ padding: '16px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button
+                onClick={() => { if (!linkingForm) setShowLinkFormModal(false); }}
+                style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+                disabled={linkingForm}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLinkForm}
+                style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: !selectedFormToLink ? '#cbd5e1' : 'linear-gradient(135deg, #6366f1, #a855f7)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: !selectedFormToLink ? 'not-allowed' : 'pointer', boxShadow: selectedFormToLink ? '0 8px 16px -8px rgba(99,102,241,0.5)' : 'none' }}
+                disabled={!selectedFormToLink || linkingForm}
+              >
+                {linkingForm ? 'Linking...' : 'Link Form'}
+              </button>
+            </footer>
+          </div>
         </div>,
         document.body
       )}

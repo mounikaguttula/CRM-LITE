@@ -79,7 +79,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
   const [formData, setFormData] = useState({});
   const [fields, setFields] = useState([]);
-  const [lookupData, setLookupData] = useState({ users: [], companies: [] });
+  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [], deals: [], products: [] });
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -101,8 +101,10 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       apiGet('/users').catch(() => apiGet('/user')).catch(() => ({ data: [] })),
       apiGet('/objects/companies').catch(() => apiGet('/objects/company')).catch(() => apiGet('/companies')).catch(() => apiGet('/company')).catch(() => ({ data: [] })),
       apiGet('/objects/contacts').catch(() => apiGet('/objects/contact')).catch(() => apiGet('/contacts')).catch(() => apiGet('/contact')).catch(() => ({ data: [] })),
+      apiGet('/objects/deals').catch(() => apiGet('/deals')).catch(() => ({ data: [] })),
+      apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9').catch(() => ({ data: [] }))
     ])
-      .then(([rec, fList, uRes, cRes, ctRes]) => {
+      .then(([rec, fList, uRes, cRes, ctRes, dRes, pRes]) => {
         if (!isMounted) return;
         const recData = rec?.data || rec;
 
@@ -116,9 +118,19 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         const contactList = Array.isArray(ctRes)
           ? ctRes
           : (ctRes?.data || ctRes?.contacts || ctRes?.results || ctRes?.items || []);
+        const dealsList = Array.isArray(dRes) ? dRes : (dRes?.data || []);
+        const productsList = Array.isArray(pRes) ? pRes : (pRes?.data || []);
 
         const finalUsers = usersList.length > 0 ? usersList : (currentUser ? [currentUser] : []);
         const finalCompanies = compList;
+        
+        setLookupData({
+          users: finalUsers,
+          companies: finalCompanies,
+          contacts: contactList,
+          deals: dealsList,
+          products: productsList,
+        });
         const humanName = (isUuid(recData?.name) || !recData?.name)
           ? (recData?.company_name || recData?.account_name || recData?.data?.company_name || recData?.data?.name || recData?.title || '')
           : recData.name;
@@ -529,8 +541,6 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   /* ── Field Renderers ── */
   const renderField = (f) => {
     const hasError = Boolean(errors[f.name]);
-    const isNotes = f.name === 'notes' || f.name === 'description' || f.name === 'note' || f.type === 'address' || (f.name || '').toLowerCase().includes('address') || (f.name || '').toLowerCase().includes('street');
-
     const fp = permissions?.fieldPermissions?.[f.id];
     const canUpdate = f.canUpdate !== undefined ? f.canUpdate : (fp ? fp.canUpdate !== false : true);
     const isReadOnly = canUpdate === false;
@@ -539,6 +549,9 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     const isOwner = fieldName.includes('owner') || fieldName.includes('created_by') || fieldName.includes('updated_by') || fieldName.includes('user');
     const isCompany = fieldName.includes('company') || fieldName.includes('account') || fieldName.includes('organization');
     const isContact = fieldName.includes('contact');
+    const isDeal = fieldName.includes('deal');
+    const isProduct = fieldName.includes('product');
+    const isNotes = fieldName.includes('notes') || fieldName.includes('description') || f.type === 'textarea' || fieldName.includes('address') || fieldName.includes('street');
 
     const isAmountField = fieldName === 'amount' || fieldName === 'deal_amount' || fieldName === 'value' || fieldName === 'deal_value';
     const isAmountLocked = isAmountField && lineItemsCount > 0;
@@ -589,13 +602,17 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
           hasError={hasError}
         />
       );
-    } else if (f.type === 'lookup' || isOwner || isCompany || isContact) {
+    } else if (f.type === 'lookup' || isOwner || isCompany || isContact || isDeal || isProduct) {
       const options = isOwner
         ? lookupData.users
         : isContact
         ? (lookupData.contacts || [])
         : isCompany
         ? (lookupData.companies || [])
+        : isDeal
+        ? (lookupData.deals || [])
+        : isProduct
+        ? (lookupData.products || [])
         : [];
 
       let rawFieldVal = formData[f.name];
