@@ -4,8 +4,10 @@
 -- roles, users, and universal_table
 -- =========================================================
 
+
 -- Enable UUID Extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 
 -- ---------------------------------------------------------
 -- 1. ORGANIZATION TABLE
@@ -28,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public."Organization" (
   )
 ) TABLESPACE pg_default;
 
+
 -- ---------------------------------------------------------
 -- 2. OBJECT TYPE DEFINITIONS TABLE
 -- ---------------------------------------------------------
@@ -44,8 +47,10 @@ CREATE TABLE IF NOT EXISTS public.object_type_definitions (
   CONSTRAINT object_type_definitions_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES "Organization" (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_object_type_definitions_organization_api 
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_type_definitions_organization_api
   ON public.object_type_definitions USING btree (organization_id, api_name) TABLESPACE pg_default;
+
 
 -- ---------------------------------------------------------
 -- 3. FIELD DEFINITIONS TABLE
@@ -74,8 +79,10 @@ CREATE TABLE IF NOT EXISTS public.field_definitions (
   CONSTRAINT field_definitions_object_type_id_fkey FOREIGN KEY (object_type_id) REFERENCES object_type_definitions (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_field_definitions_object_api 
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_field_definitions_object_api
   ON public.field_definitions USING btree (object_type_id, api_name) TABLESPACE pg_default;
+
 
 -- ---------------------------------------------------------
 -- 4. ROLES TABLE
@@ -85,13 +92,12 @@ CREATE TABLE IF NOT EXISTS public.roles (
   organization_id uuid NOT NULL,
   role_name text NOT NULL,
   description text NULL,
-  parent_role_id uuid NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT roles_pkey PRIMARY KEY (id),
-  CONSTRAINT roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES "Organization" (id) ON DELETE CASCADE,
-  CONSTRAINT roles_parent_role_id_fkey FOREIGN KEY (parent_role_id) REFERENCES roles (id) ON DELETE SET NULL
+  CONSTRAINT roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES "Organization" (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
+
 
 -- ---------------------------------------------------------
 -- 5. USERS TABLE
@@ -115,8 +121,10 @@ CREATE TABLE IF NOT EXISTS public.users (
   )
 ) TABLESPACE pg_default;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_organization_email 
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_organization_email
   ON public.users USING btree (organization_id, lower(email)) TABLESPACE pg_default;
+
 
 -- ---------------------------------------------------------
 -- 6. UNIVERSAL TABLE (Storage Engine for Records)
@@ -186,8 +194,10 @@ CREATE TABLE IF NOT EXISTS public.validation_rules (
   )
 ) TABLESPACE pg_default;
 
-CREATE INDEX IF NOT EXISTS idx_validation_rules_org_object_active 
+
+CREATE INDEX IF NOT EXISTS idx_validation_rules_org_object_active
   ON public.validation_rules USING btree (organization_id, object_name, is_active) TABLESPACE pg_default;
+
 
 -- ---------------------------------------------------------
 -- 8. OBJECT PERMISSIONS TABLE
@@ -209,8 +219,10 @@ CREATE TABLE IF NOT EXISTS public.object_permissions (
   CONSTRAINT object_permissions_object_type_id_fkey FOREIGN KEY (object_type_id) REFERENCES object_type_definitions (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_object_permissions_role_object 
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_permissions_role_object
   ON public.object_permissions USING btree (role_id, object_type_id) TABLESPACE pg_default;
+
 
 -- ---------------------------------------------------------
 -- 9. FIELD PERMISSIONS TABLE
@@ -229,39 +241,44 @@ CREATE TABLE IF NOT EXISTS public.field_permissions (
   CONSTRAINT field_permissions_field_id_fkey FOREIGN KEY (field_id) REFERENCES field_definitions (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_field_permissions_role_field 
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_field_permissions_role_field
   ON public.field_permissions USING btree (role_id, field_id) TABLESPACE pg_default;
+
 
 -- =========================================================
 -- SEED DATA SETUP
 -- Demo Password: Password123!
 -- =========================================================
 
+
 -- Seed Demo Organization
 INSERT INTO public."Organization" (id, organization_name, organization_code, subscription_plan, status)
 VALUES (
-  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'e897ac9f-41c3-49f4-9ae2-7a87f745714f',
   'Acme Corporation',
   'ACME01',
   'enterprise',
   'active'
 ) ON CONFLICT (id) DO NOTHING;
 
+
 -- Seed Standard Enterprise Roles
 INSERT INTO public.roles (id, organization_id, role_name, description)
 VALUES
-  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Administrator', 'Full administrative access to all CRM features.'),
-  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'CRM Manager', 'Full management access to sales and customer operations.'),
-  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Relationship Manager', 'Access to manage client relationships, deals, and communication.'),
-  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'CRM Executive', 'Standard operational access to leads, accounts, and tasks.'),
-  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Read Only User', 'Read-only access across all standard CRM objects and reports.')
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'Administrator', 'Full administrative access to all CRM features.'),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'CRM Manager', 'Full management access to sales and customer operations.'),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'Relationship Manager', 'Access to manage client relationships, deals, and communication.'),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'CRM Executive', 'Standard operational access to leads, accounts, and tasks.'),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'Read Only User', 'Read-only access across all standard CRM objects and reports.')
 ON CONFLICT (id) DO NOTHING;
+
 
 -- Seed Admin User (priya@acme.com / Password123!)
 INSERT INTO public.users (id, organization_id, first_name, last_name, email, role_id, password_hash, status)
 VALUES (
   'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
-  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'e897ac9f-41c3-49f4-9ae2-7a87f745714f',
   'Priya',
   'Rao',
   'priya@acme.com',
@@ -270,16 +287,21 @@ VALUES (
   'active'
 ) ON CONFLICT (id) DO NOTHING;
 
+
 -- Seed Object Type Definitions (Leads, Deals, Contacts, Companies, Forms, Form Submissions)
 INSERT INTO public.object_type_definitions (id, organization_id, api_name, display_name, is_system)
 VALUES
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'leads', 'Leads', true),
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'deals', 'Deals', true),
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'contacts', 'Contacts', true),
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'companies', 'Companies', true),
+  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'leads', 'Leads', true),
+  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'deals', 'Deals', true),
+  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'contacts', 'Contacts', true),
+  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'companies', 'Companies', true),
   ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', NULL, 'form', 'Forms', true),
-  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a46', NULL, 'form_submission', 'Form Submissions', true)
+  ('d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a46', NULL, 'form_submission', 'Form Submissions', true),
+  ('24b1b608-4cee-4623-a745-6f64052625e9', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'products', 'Products', true),
+  ('8790325a-b8d5-4445-bccb-ebe354a46919', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'line_items', 'Line Items', true),
+  ('99776cd0-4a93-4a84-861f-c8a053556236', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'campaign', 'Campaigns', true)
 ON CONFLICT (id) DO NOTHING;
+
 
 -- Seed Object Permissions for Standard Enterprise Roles
 INSERT INTO public.object_permissions (role_id, object_type_id, can_create, can_read, can_update, can_delete, view_all, modify_all)
@@ -289,59 +311,188 @@ VALUES
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, true, true, true),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, true, true, true),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', '99776cd0-4a93-4a84-861f-c8a053556236', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', true, true, true, true, true, true),
   -- CRM Manager (Full Management Access)
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, true, true, true),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, true, true, true),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, true, true, true),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', '99776cd0-4a93-4a84-861f-c8a053556236', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', true, true, true, true, true, true),
   -- Relationship Manager (Client & Deal Management)
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, true, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, true, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, true, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', '99776cd0-4a93-4a84-861f-c8a053556236', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', true, true, true, true, false, false),
   -- CRM Executive (Operational Standard Access)
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', true, true, true, false, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', true, true, true, false, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', true, true, true, false, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', '99776cd0-4a93-4a84-861f-c8a053556236', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', true, true, true, false, false, false),
   -- Read Only User (Strict Read-Only Access)
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', false, true, false, false, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', false, true, false, false, false, false),
   ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', false, true, false, false, false, false),
-  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', false, true, false, false, false, false)
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', '24b1b608-4cee-4623-a745-6f64052625e9', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', '8790325a-b8d5-4445-bccb-ebe354a46919', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', '99776cd0-4a93-4a84-861f-c8a053556236', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', false, true, false, false, false, false)
 ON CONFLICT DO NOTHING;
+
 
 -- Seed Field Definitions for Leads, Deals, Contacts, Companies
 INSERT INTO public.field_definitions (organization_id, object_type_id, api_name, display_name, field_type, required)
 VALUES
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'name', 'Lead Name', 'text', true),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'email', 'Email Address', 'email', true),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'alternate_email', 'Alternate Email ID', 'email', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'company', 'Company Name', 'text', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'status', 'Lead Status', 'dropdown', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'name', 'Lead Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'email', 'Email Address', 'email', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'alternate_email', 'Alternate Email ID', 'email', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'company', 'Company Name', 'text', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'status', 'Lead Status', 'dropdown', true),
 
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'name', 'Deal Name', 'text', true),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'company_id', 'Company / Account', 'lookup', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'contact_id', 'Primary Contact', 'lookup', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'amount', 'Amount', 'number', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'stage', 'Stage', 'dropdown', true),
 
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'name', 'Contact Name', 'text', true),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'email', 'Email', 'email', true),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'phone', 'Phone', 'phone', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'company_id', 'Company / Account', 'lookup', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'name', 'Deal Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'company_id', 'Company / Account', 'lookup', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'contact_id', 'Primary Contact', 'lookup', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'amount', 'Amount', 'number', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'stage', 'Stage', 'dropdown', true),
 
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'name', 'Company Name', 'text', true),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'industry', 'Industry', 'text', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'website', 'Website', 'url', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'phone', 'Phone', 'phone', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'billing_address', 'Billing Address', 'textarea', false),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'shipping_address', 'Shipping Address', 'textarea', false)
+
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'name', 'Contact Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'email', 'Email', 'email', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'phone', 'Phone', 'phone', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'company_id', 'Company / Account', 'lookup', false),
+
+
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'name', 'Company Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'industry', 'Industry', 'text', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'website', 'Website', 'url', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'phone', 'Phone', 'phone', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'billing_address', 'Billing Address', 'textarea', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'shipping_address', 'Shipping Address', 'textarea', false),
+
+
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'name', 'Product Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'code', 'Product Code', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'description', 'Description', 'textarea', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'family', 'Product Family', 'dropdown', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'is_active', 'Active', 'boolean', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'unit_price', 'Unit Price', 'number', true),
+
+
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'deal_id', 'Deal', 'lookup', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'product_id', 'Product', 'lookup', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'quantity', 'Quantity', 'number', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'unit_price', 'Sales Price', 'number', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'discount', 'Discount', 'number', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'total_price', 'Total Price', 'number', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'description', 'Line Description', 'text', false),
+
+
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'name', 'Campaign Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'type', 'Type', 'dropdown', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'start_date', 'Start Date', 'date', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'end_date', 'End Date', 'date', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'status', 'Status', 'dropdown', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'is_active', 'Active', 'boolean', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '99776cd0-4a93-4a84-861f-c8a053556236', 'description', 'Description', 'textarea', false),
+
+
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45', 'campaign_id', 'Campaign', 'lookup', false)
 ON CONFLICT DO NOTHING;
+
 
 -- Seed Sample Records in universal_table for Leads
 INSERT INTO public.universal_table (organization_id, object_type_id, name, status, data)
 VALUES
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'Sarah Jenkins', 'Qualified', '{"email": "sarah@techcorp.io", "company": "TechCorp Systems"}'),
-  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'Michael Chang', 'Contacted', '{"email": "m.chang@innovate.co", "company": "Innovate LLC"}');
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'Sarah Jenkins', 'Qualified', '{"email": "sarah@techcorp.io", "company": "TechCorp Systems"}'),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'Michael Chang', 'Contacted', '{"email": "m.chang@innovate.co", "company": "Innovate LLC"}');
+
+
+-- Seed Sample Records in universal_table for Products
+INSERT INTO public.universal_table (id, organization_id, object_type_id, name, data)
+VALUES
+  ('e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a51', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'Enterprise CRM License', '{"code": "ENT-CRM-01", "description": "Full enterprise CRM access per user/year", "family": "Software", "is_active": true, "unit_price": 1200}'),
+  ('e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a52', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'Implementation Services', '{"code": "SVC-IMP-01", "description": "One-time setup and data migration", "family": "Services", "is_active": true, "unit_price": 5000}'),
+  ('e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a53', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'Premium Support', '{"code": "SVC-SUP-01", "description": "24/7 dedicated support plan", "family": "Support", "is_active": true, "unit_price": 2500}')
+ON CONFLICT (id) DO NOTHING;
+
+
+-- Products --
+-- 1. Create Object Type Definitions
+INSERT INTO public.object_type_definitions (id, organization_id, api_name, display_name, is_system)
+VALUES
+  ('24b1b608-4cee-4623-a745-6f64052625e9', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'products', 'Products', true),
+  ('8790325a-b8d5-4445-bccb-ebe354a46919', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'line_items', 'Line Items', true)
+ON CONFLICT (id) DO NOTHING;
+
+
+-- 2. Add Object Permissions for all Standard Roles
+INSERT INTO public.object_permissions (role_id, object_type_id, can_create, can_read, can_update, can_delete, view_all, modify_all)
+VALUES
+  -- Administrator
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, true, true, true),
+  -- CRM Manager
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, true, true, true),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, true, true, true),
+  -- Relationship Manager
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, true, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, true, false, false),
+  -- CRM Executive
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', '24b1b608-4cee-4623-a745-6f64052625e9', true, true, true, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36', '8790325a-b8d5-4445-bccb-ebe354a46919', true, true, true, false, false, false),
+  -- Read Only User
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', '24b1b608-4cee-4623-a745-6f64052625e9', false, true, false, false, false, false),
+  ('c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37', '8790325a-b8d5-4445-bccb-ebe354a46919', false, true, false, false, false, false)
+ON CONFLICT DO NOTHING;
+
+
+-- 3. Define Fields for Products and Line Items
+INSERT INTO public.field_definitions (organization_id, object_type_id, api_name, display_name, field_type, required)
+VALUES
+  -- Product Fields
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'name', 'Product Name', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'code', 'Product Code', 'text', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'description', 'Description', 'textarea', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'family', 'Product Family', 'dropdown', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'is_active', 'Active', 'boolean', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'unit_price', 'Unit Price', 'number', true),
+
+
+  -- Line Item Fields
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'deal_id', 'Deal', 'lookup', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'product_id', 'Product', 'lookup', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'quantity', 'Quantity', 'number', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'unit_price', 'Sales Price', 'number', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'discount', 'Discount', 'number', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'total_price', 'Total Price', 'number', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', '8790325a-b8d5-4445-bccb-ebe354a46919', 'description', 'Line Description', 'text', false)
+ON CONFLICT DO NOTHING;
+
+
+-- 4. Seed Sample Products
+INSERT INTO public.universal_table (id, organization_id, object_type_id, name, data)
+VALUES
+  ('e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a51', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'Enterprise CRM License', '{"code": "ENT-CRM-01", "description": "Full enterprise CRM access per user/year", "family": "Software", "is_active": true, "unit_price": 1200}'),
+  ('e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a52', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'Implementation Services', '{"code": "SVC-IMP-01", "description": "One-time setup and data migration", "family": "Services", "is_active": true, "unit_price": 5000}'),
+  ('e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a53', 'e897ac9f-41c3-49f4-9ae2-7a87f745714f', '24b1b608-4cee-4623-a745-6f64052625e9', 'Premium Support', '{"code": "SVC-SUP-01", "description": "24/7 dedicated support plan", "family": "Support", "is_active": true, "unit_price": 2500}')
+ON CONFLICT (id) DO NOTHING;
+
+
+
+
 
