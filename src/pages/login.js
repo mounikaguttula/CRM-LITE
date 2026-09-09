@@ -182,14 +182,15 @@ function Login() {
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !password) {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    if (!cleanEmail || !password) {
       setError('Please fill in both email and password.');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      await login({ email, password });
+      await login({ email: cleanEmail, password });
       navigate('/workspace/dashboard', { replace: true });
     } catch (err) {
       console.error('Login error:', err);

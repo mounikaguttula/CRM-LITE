@@ -4,12 +4,13 @@ const supabase = require('../config/supabase');
 const auditService = require('./auditService');
 
 const login = async (email, password) => {
-  // Query users table joined with Organization and Roles
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  // Query users table joined with Organization and Roles (Case-insensitive email lookup)
   const { data: user, error } = await supabase
     .from('users')
     .select('*, organization(*), roles(*)')
-    .eq('email', email)
-    .single();
+    .ilike('email', cleanEmail)
+    .maybeSingle();
 
   if (error || !user) {
     throw { statusCode: 401, message: 'Invalid credentials. User not found.' };
@@ -95,7 +96,7 @@ const registerOrganization = async ({ orgName, companyCode, organizationCode, ad
       organization_id: org.id,
       first_name: firstName || 'Admin',
       last_name: lastName || 'User',
-      email: adminEmail,
+      email: String(adminEmail || '').trim().toLowerCase(),
       password_hash,
       status: 'active',
     }])
