@@ -612,12 +612,149 @@ const metadataService = {
       permissions[keyPlural] = objPerm;
     }
 
+    try {
+      const dashboardScope = await metadataService.resolveDashboardScope(user);
+      permissions.dashboardScope = dashboardScope;
+    } catch (dsErr) {
+      console.warn('[Permissions] Error resolving dashboardScope:', dsErr.message);
+      permissions.dashboardScope = { canViewGroup: false, groupHelperText: null };
+    }
 
     console.log(`[Permissions] Final Resolved Permissions Map:`, JSON.stringify(permissions, null, 2));
     console.log(`=================== 🔐 PERMISSIONS FETCH END ===================\n`);
 
-
     return permissions;
+  },
+
+  /**
+   * Resolves dashboard scope permissions and helper text for a given user context.
+   * Leverages existing dynamic role hierarchy (roleService.getRolesByOrganization) and object permissions.
+   */
+  resolveDashboardScope: async (user) => {
+    if (!user) {
+      return { canViewGroup: false, groupHelperText: null };
+    }
+
+    const roleService = require('./roleService');
+    const orgId = user.organization_id || '40f7407a-a751-4090-9012-f383b1e68de5';
+
+    let roleId = user.role_id;
+    let roleName = user.role || user.role_name || '';
+
+    if ((!roleId || !roleName) && user.id && isUuid(user.id)) {
+      const { data: dbUser } = await supabase
+        .from('users')
+        .select('role_id, roles(id, role_name)')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (dbUser) {
+        if (dbUser.role_id) roleId = dbUser.role_id;
+        if (dbUser.roles?.role_name) roleName = dbUser.roles.role_name;
+      }
+    }
+
+    const rolesList = await roleService.getRolesByOrganization(orgId).catch(() => []);
+    const rNameLower = String(roleName || '').toLowerCase();
+    let userRoleIndex = -1;
+
+    if (roleId) {
+      userRoleIndex = rolesList.findIndex((r) => String(r.id).toLowerCase() === String(roleId).toLowerCase());
+    }
+    if (userRoleIndex === -1 && rNameLower) {
+      userRoleIndex = rolesList.findIndex((r) => String(r.role_name || r.name || '').toLowerCase() === rNameLower);
+    }
+
+    // Default fallback: if userRoleIndex is -1 and user has no explicit role assigned or is System Admin, default to top rank 0 (Administrator)
+    if (userRoleIndex === -1 && (!roleId || rNameLower.includes('admin') || !rNameLower)) {
+      userRoleIndex = 0;
+    }
+
+    let subordinateRoles = [];
+    if (userRoleIndex >= 0 && userRoleIndex < rolesList.length - 1) {
+      subordinateRoles = rolesList.slice(userRoleIndex + 1);
+    }
+
+    let isViewAll = rNameLower.includes('admin') || userRoleIndex === 0;
+    if (!isViewAll && roleId && isUuid(roleId)) {
+      const { data: opRows } = await supabase
+        .from('object_permissions')
+        .select('view_all')
+        .eq('role_id', roleId);
+      if (opRows && opRows.some((row) => row.view_all === true)) {
+        isViewAll = true;
+      }
+    }
+
+    let canViewGroup = false;
+    let groupHelperText = null;
+
+    if (isViewAll && (userRoleIndex === 0 || rNameLower.includes('admin'))) {
+      canViewGroup = true;
+      groupHelperText = 'Showing organization records';
+    } else if (subordinateRoles.length > 0) {
+      canViewGroup = true;
+      if (rNameLower.includes('manager') || rNameLower.includes('clone')) {
+        groupHelperText = 'Showing your team records';
+      } else {
+        groupHelperText = 'Showing team records';
+      }
+    } else {
+      canViewGroup = false;
+      groupHelperText = null;
+    }
+
+    return {
+      canViewGroup,
+      groupHelperText,
+      roleIndex: userRoleIndex,
+      subordinateRoles,
+      isViewAll,
+    };
+  },
+
+  /**
+   * Resolves the array of permitted owner_ids for a requested dashboard scope.
+   * Throws HTTP 403 Forbidden if scope=group is requested by an unauthorized user context.
+   */
+  getPermittedUserIdsForScope: async (user, scope, objectType = null) => {
+    const reqScope = String(scope || 'individual').toLowerCase();
+
+    if (reqScope === 'individual' || reqScope === 'user' || reqScope === 'my') {
+      return [user?.id].filter(Boolean);
+    }
+
+    if (reqScope === 'group') {
+      const scopeInfo = await metadataService.resolveDashboardScope(user);
+
+      if (!scopeInfo || scopeInfo.canViewGroup === false) {
+        const err = new Error('Access denied: Your role hierarchy position does not grant group scope visibility.');
+        err.statusCode = 403;
+        throw err;
+      }
+
+      if (scopeInfo.isViewAll && (scopeInfo.roleIndex === 0 || String(user?.role || '').toLowerCase().includes('admin'))) {
+        return null;
+      }
+
+      const subordinateRoleIds = (scopeInfo.subordinateRoles || []).map((r) => r.id).filter(Boolean);
+
+      let subUserIds = [];
+      if (subordinateRoleIds.length > 0) {
+        const { data: subUsers } = await supabase
+          .from('users')
+          .select('id')
+          .in('role_id', subordinateRoleIds);
+        if (subUsers && subUsers.length > 0) {
+          subUserIds = subUsers.map((u) => u.id);
+        }
+      }
+
+      const allPermittedUserIds = Array.from(new Set([user?.id, ...subUserIds].filter(Boolean)));
+      return allPermittedUserIds;
+    }
+
+    return [user?.id].filter(Boolean);
   },
 
   /**
@@ -964,6 +1101,14 @@ const metadataService = {
       permissions[apiName] = objPerm;
       permissions[keySingular] = objPerm;
       permissions[keyPlural] = objPerm;
+    }
+
+    try {
+      const dashboardScope = await metadataService.resolveDashboardScope(user);
+      permissions.dashboardScope = dashboardScope;
+    } catch (dsErr) {
+      console.warn('[PlatformMetadata] Error resolving dashboardScope:', dsErr.message);
+      permissions.dashboardScope = { canViewGroup: true, groupHelperText: 'Showing organization records' };
     }
 
     // Build permission-aware navigation reusing resolved permissions

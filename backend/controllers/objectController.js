@@ -33,14 +33,23 @@ const getRecords = async (req, res, next) => {
     const objPerm = getPermForObject(perms, objectType);
 
     const options = {};
-    if ((objPerm && objPerm.viewAll === false) || req.query.scope === 'user' || req.query.owner_id) {
-      // Security enforcement: Scope to user's records when View All is false
+
+    if (req.query.scope) {
+      // Validate requested dashboard scope (individual vs group) against user's actual hierarchy & RBAC
+      const ownerIds = await metadataService.getPermittedUserIdsForScope(req.user, req.query.scope, objectType);
+      if (ownerIds !== null) {
+        options.owner_ids = ownerIds;
+      }
+    } else if ((objPerm && objPerm.viewAll === false) || req.query.owner_id) {
       options.owner_id = req.user?.id;
     }
 
     const records = await objectService.listRecords(objectType, organizationId, options);
     return res.status(200).json(records);
   } catch (err) {
+    if (err?.statusCode === 403) {
+      return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message });
+    }
     next(err);
   }
 };
