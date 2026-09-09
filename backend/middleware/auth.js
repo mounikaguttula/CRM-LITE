@@ -25,9 +25,9 @@ const authMiddleware = async (req, res, next) => {
       return next();
     }
 
-    // Idle Timeout Enforcement
+    // Idle Timeout Enforcement (Default: 1 hour / 3,600,000 ms)
     if (req.user && req.user.id && req.user.organization_id) {
-      const timeoutMs = process.env.IDLE_TIMEOUT_MS ? parseInt(process.env.IDLE_TIMEOUT_MS, 10) : 300000;
+      const timeoutMs = process.env.IDLE_TIMEOUT_MS ? parseInt(process.env.IDLE_TIMEOUT_MS, 10) : 3600000;
       const client = getClient();
 
       const { data: sessionRow } = await client

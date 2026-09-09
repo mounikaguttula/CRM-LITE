@@ -110,8 +110,8 @@ export function AuthProvider({ children }) {
 
     const userId = user.id;
     const userActivityKey = `crm_last_user_activity_${userId}`;
-    const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 300,000 ms (5 minutes)
-    const WARNING_THRESHOLD_MS = 4.5 * 60 * 1000; // 270,000 ms (4 min 30 s)
+    const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 3,600,000 ms (1 hour / 60 minutes)
+    const WARNING_THRESHOLD_MS = 59 * 60 * 1000; // 3,540,000 ms (59 minutes - shows warning modal 60s before timeout)
     const PING_INTERVAL_MS = 45 * 1000; // 45 seconds
 
     let warningTimer = null;
