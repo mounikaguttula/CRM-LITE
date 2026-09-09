@@ -194,7 +194,9 @@ const objectService = {
         query = query.eq('organization_id', organizationId);
       }
 
-      if (options.owner_id) {
+      if (options.owner_ids && Array.isArray(options.owner_ids) && options.owner_ids.length > 0) {
+        query = query.in('owner_id', options.owner_ids);
+      } else if (options.owner_id) {
         query = query.eq('owner_id', options.owner_id);
       }
 

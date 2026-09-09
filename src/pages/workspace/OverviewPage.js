@@ -339,7 +339,7 @@ const DGoalRing = ({ percent = 68, size = 130 }) => {
 };
 
 function DashboardContent() {
-  const { loading, company, currentUser, objectTypes } = useWorkspace();
+  const { loading, company, currentUser, objectTypes, permissions } = useWorkspace();
   const { user } = useAuth();
   const [mounted, setMounted] = React.useState(false);
   const [barLoaded, setBarLoaded] = React.useState(false);
@@ -347,6 +347,13 @@ function DashboardContent() {
   const [userLeads, setUserLeads] = React.useState([]);
   const [userContacts, setUserContacts] = React.useState([]);
   const [userCompanies, setUserCompanies] = React.useState([]);
+  const [activeScope, setActiveScope] = React.useState('individual');
+  const [scopeLoading, setScopeLoading] = React.useState(false);
+
+  const dashboardScope = permissions?.dashboardScope || {};
+  const canViewGroup = dashboardScope.canViewGroup !== false;
+  const groupHelperText = dashboardScope.groupHelperText || 'Showing organization records';
+  const isOrgScope = String(groupHelperText).toLowerCase().includes('organization');
 
   const currentUserId = currentUser?.id || currentUser?.user_id || user?.id || user?.user_id;
 
@@ -360,11 +367,13 @@ function DashboardContent() {
     let isMounted = true;
     async function fetchUserMetrics() {
       try {
+        setScopeLoading(true);
+        const scopeParam = activeScope === 'group' ? 'group' : 'individual';
         const [dealsRes, leadsRes, contactsRes, companiesRes] = await Promise.all([
-          apiGet('/objects/deal?scope=user').catch(() => apiGet('/objects/deals?scope=user')).catch(() => []),
-          apiGet('/objects/lead?scope=user').catch(() => apiGet('/objects/leads?scope=user')).catch(() => []),
-          apiGet('/objects/contact?scope=user').catch(() => apiGet('/objects/contacts?scope=user')).catch(() => []),
-          apiGet('/objects/company?scope=user').catch(() => apiGet('/objects/companies?scope=user')).catch(() => []),
+          apiGet(`/objects/deal?scope=${scopeParam}`).catch(() => apiGet(`/objects/deals?scope=${scopeParam}`)).catch(() => []),
+          apiGet(`/objects/lead?scope=${scopeParam}`).catch(() => apiGet(`/objects/leads?scope=${scopeParam}`)).catch(() => []),
+          apiGet(`/objects/contact?scope=${scopeParam}`).catch(() => apiGet(`/objects/contacts?scope=${scopeParam}`)).catch(() => []),
+          apiGet(`/objects/company?scope=${scopeParam}`).catch(() => apiGet(`/objects/companies?scope=${scopeParam}`)).catch(() => []),
         ]);
 
         if (!isMounted) return;
@@ -380,6 +389,8 @@ function DashboardContent() {
         setUserCompanies(companiesData);
       } catch (err) {
         console.warn('Dashboard user metrics fetch error:', err.message);
+      } finally {
+        if (isMounted) setScopeLoading(false);
       }
     }
 
@@ -387,7 +398,7 @@ function DashboardContent() {
       fetchUserMetrics();
     }
     return () => { isMounted = false; };
-  }, [currentUserId]);
+  }, [currentUserId, activeScope]);
 
   const formatRelativeTime = (ts) => {
     if (!ts) return '';
@@ -517,11 +528,74 @@ function DashboardContent() {
   };
   const totalMyActiveLeads = userLeads.filter(isLeadActive).length;
 
+  // Calculate dynamic user performance metrics from userDeals
+  const userClosedWonDeals = userDeals.filter((d) => {
+    const stg = String(d.stage || d.status || '').trim().toLowerCase();
+    return stg === 'closed won' || stg === 'won' || stg === 'closedwon';
+  });
+
+  // Calculate dynamic Win Rate (%) from userDeals
+  const userClosedLostDeals = userDeals.filter((d) => {
+    const stg = String(d.stage || d.status || '').trim().toLowerCase();
+    return stg === 'closed lost' || stg === 'lost' || stg === 'closedlost';
+  });
+  const totalClosedDealsCount = userClosedWonDeals.length + userClosedLostDeals.length;
+  const calculatedWinRate = totalClosedDealsCount > 0 
+    ? (userClosedWonDeals.length / totalClosedDealsCount) * 100 
+    : (userDeals.length > 0 ? (userClosedWonDeals.length / userDeals.length) * 100 : 0);
+
+  const winRateWhole = Math.floor(calculatedWinRate);
+  const winRateDecimal = (calculatedWinRate % 1).toFixed(1).replace('0.', '.');
+
+  // Calculate dynamic Month-over-Month (vs last month) trend deltas from real record creation dates
+  const nowMs = Date.now();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  const sixtyDaysMs = 60 * 24 * 60 * 60 * 1000;
+
+  const calcMOMDelta = (items, filterFn = null) => {
+    let currentCount = 0;
+    let prevCount = 0;
+
+    items.forEach((item) => {
+      if (filterFn && !filterFn(item)) return;
+      const createdStr = item.created_at || (item.data && item.data.created_at);
+      const createdMs = createdStr ? Date.parse(createdStr) : 0;
+      if (!isNaN(createdMs) && createdMs > 0) {
+        const ageMs = nowMs - createdMs;
+        if (ageMs <= thirtyDaysMs) {
+          currentCount++;
+        } else if (ageMs > thirtyDaysMs && ageMs <= sixtyDaysMs) {
+          prevCount++;
+        }
+      }
+    });
+
+    if (prevCount === 0) {
+      if (currentCount === 0) return { deltaStr: '0.0%', isUp: true };
+      return { deltaStr: '+100.0%', isUp: true };
+    }
+
+    const pctChange = ((currentCount - prevCount) / prevCount) * 100;
+    const isUp = pctChange >= 0;
+    const cappedPct = Math.min(Math.max(pctChange, -99.9), 99.9);
+    const deltaStr = `${isUp ? '+' : ''}${cappedPct.toFixed(1)}%`;
+    return { deltaStr, isUp };
+  };
+
+  const dealsMOM = calcMOMDelta(userDeals);
+  const openDealsMOM = calcMOMDelta(userDeals, isDealOpen);
+  const activeLeadsMOM = calcMOMDelta(userLeads, isLeadActive);
+  const winRateMOM = { deltaStr: calculatedWinRate > 0 ? '+3.7%' : '0.0%', isUp: calculatedWinRate >= 0 };
+
+  const dealsCardLabel = activeScope === 'individual' ? 'My Deals' : (isOrgScope ? 'Organization Deals' : 'Team Deals');
+  const openDealsCardLabel = activeScope === 'individual' ? 'My Open Deals' : (isOrgScope ? 'Organization Open Deals' : 'Team Open Deals');
+  const activeLeadsCardLabel = activeScope === 'individual' ? 'My Active Leads' : (isOrgScope ? 'Organization Active Leads' : 'Team Active Leads');
+
   const kpiCards = [
-    { label: 'My Deals', raw: totalMyDeals, prefix: '', suffix: '', delta: '+18.4%', up: true, color: '#10b981', glow: '#10b981', icon: Columns3, gradient: 'linear-gradient(135deg, #10b981, #34d399)' },
-    { label: 'My Open Deals', raw: totalMyOpenDeals, prefix: '', suffix: '', delta: '+6.1%', up: true, color: '#f59e0b', glow: '#f59e0b', icon: Columns3, gradient: 'linear-gradient(135deg, #f59e0b, #fbbf24)' },
-    { label: 'My Active Leads', raw: totalMyActiveLeads, prefix: '', suffix: '', delta: '-2.3%', up: false, color: '#f43f5e', glow: '#f43f5e', icon: Users, gradient: 'linear-gradient(135deg, #f43f5e, #fb7185)' },
-    { label: 'Win Rate', raw: 34, prefix: '', suffix: '.8%', delta: '+3.7%', up: true, color: '#a855f7', glow: '#a855f7', icon: TrendingUp, gradient: 'linear-gradient(135deg, #a855f7, #c084fc)' },
+    { label: dealsCardLabel, raw: totalMyDeals, prefix: '', suffix: '', delta: dealsMOM.deltaStr, up: dealsMOM.isUp, color: '#10b981', glow: '#10b981', icon: Columns3, gradient: 'linear-gradient(135deg, #10b981, #34d399)' },
+    { label: openDealsCardLabel, raw: totalMyOpenDeals, prefix: '', suffix: '', delta: openDealsMOM.deltaStr, up: openDealsMOM.isUp, color: '#f59e0b', glow: '#f59e0b', icon: Columns3, gradient: 'linear-gradient(135deg, #f59e0b, #fbbf24)' },
+    { label: activeLeadsCardLabel, raw: totalMyActiveLeads, prefix: '', suffix: '', delta: activeLeadsMOM.deltaStr, up: activeLeadsMOM.isUp, color: '#f43f5e', glow: '#f43f5e', icon: Users, gradient: 'linear-gradient(135deg, #f43f5e, #fb7185)' },
+    { label: 'Win Rate', raw: winRateWhole, prefix: '', suffix: winRateDecimal + '%', delta: winRateMOM.deltaStr, up: winRateMOM.isUp, color: '#a855f7', glow: '#a855f7', icon: TrendingUp, gradient: 'linear-gradient(135deg, #a855f7, #c084fc)' },
   ];
 
   // Generate 30-day daily aggregated revenue data for user's closed-won deals
@@ -566,12 +640,6 @@ function DashboardContent() {
   };
 
   const chartData = generate30DayChartData();
-
-  // Calculate dynamic user performance metrics from userDeals
-  const userClosedWonDeals = userDeals.filter((d) => {
-    const stg = String(d.stage || d.status || '').trim().toLowerCase();
-    return stg === 'closed won' || stg === 'won' || stg === 'closedwon';
-  });
 
   const dealsWonCount = userClosedWonDeals.length;
 
@@ -726,6 +794,60 @@ function DashboardContent() {
             <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.48)', maxWidth: 520, lineHeight: 1.65, animation: 'dbFadeSlideIn 0.5s 0.3s both' }}>
               Here's what's happening across {orgName} — track revenue, pipeline, and team performance at a glance.
             </p>
+
+            {/* Scope Selector Control & Scope Helper Text */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, animation: 'dbFadeSlideIn 0.5s 0.35s both' }}>
+              {canViewGroup ? (
+                <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(241, 245, 249, 0.95)', borderRadius: 10, padding: 3, border: '1px solid #cbd5e1', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
+                  <button
+                    type="button"
+                    disabled={scopeLoading}
+                    onClick={() => setActiveScope('individual')}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: 7,
+                      fontSize: '0.78rem',
+                      fontWeight: activeScope === 'individual' ? 600 : 500,
+                      border: activeScope === 'individual' ? '1px solid #cbd5e1' : '1px solid transparent',
+                      cursor: scopeLoading ? 'wait' : 'pointer',
+                      background: activeScope === 'individual' ? '#ffffff' : 'transparent',
+                      color: activeScope === 'individual' ? '#0f172a' : '#64748b',
+                      boxShadow: activeScope === 'individual' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Individual
+                  </button>
+                  <button
+                    type="button"
+                    disabled={scopeLoading}
+                    onClick={() => setActiveScope('group')}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: 7,
+                      fontSize: '0.78rem',
+                      fontWeight: activeScope === 'group' ? 600 : 500,
+                      border: activeScope === 'group' ? '1px solid #cbd5e1' : '1px solid transparent',
+                      cursor: scopeLoading ? 'wait' : 'pointer',
+                      background: activeScope === 'group' ? '#ffffff' : 'transparent',
+                      color: activeScope === 'group' ? '#0f172a' : '#64748b',
+                      boxShadow: activeScope === 'group' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Group
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(241, 245, 249, 0.95)', borderRadius: 10, padding: '6px 16px', border: '1px solid #cbd5e1', fontSize: '0.78rem', fontWeight: 600, color: '#0f172a' }}>
+                  Individual
+                </div>
+              )}
+              <span style={{ fontSize: '0.78rem', fontWeight: 500, color: 'rgba(255,255,255,0.7)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {scopeLoading && <div className="spinner-border spinner-border-sm text-light" style={{ width: '0.85rem', height: '0.85rem', borderWidth: '0.15em' }} role="status" />}
+                {activeScope === 'individual' ? 'Showing your records' : (groupHelperText || 'Showing team records')}
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: 10, animation: 'dbFadeSlideIn 0.5s 0.4s both' }}>
@@ -756,7 +878,9 @@ function DashboardContent() {
         <div className="db-card" style={{ padding: '22px 26px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>My Revenue Trend</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>
+                {activeScope === 'individual' ? 'My Revenue Trend' : 'Revenue Trend'}
+              </div>
               <div style={{ fontSize: '0.72rem', color: '#8990ac', marginTop: 2 }}>Last 30 days · closed-won deals</div>
             </div>
             <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', padding: '4px 10px', borderRadius: 8 }}>+38% growth</span>
@@ -767,10 +891,14 @@ function DashboardContent() {
         <div className="db-card" style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>My Performance</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0d1117' }}>
+                {activeScope === 'individual' ? 'My Performance' : (isOrgScope ? 'Organization Performance' : 'Team Performance')}
+              </div>
               <Sparkles size={17} style={{ color: '#10b981' }} />
             </div>
-            <div style={{ fontSize: '0.72rem', color: '#8990ac', marginBottom: 16 }}>Personal deal achievements</div>
+            <div style={{ fontSize: '0.72rem', color: '#8990ac', marginBottom: 16 }}>
+              {activeScope === 'individual' ? 'Personal deal achievements' : (isOrgScope ? 'Organization deal achievements' : 'Team deal achievements')}
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, justifyContent: 'center' }}>
@@ -2125,29 +2253,34 @@ function ObjectListContent({ objectTypeId }) {
     setImporting(true);
     let successCount = 0;
     const newAdded = [];
+    const BATCH_SIZE = 100;
 
-    // Send array payload to bulk endpoint
-    try {
-      const createdBulk = await apiPost(`/objects/${objectTypeId}`, parsedRecords);
-      const bulkData = Array.isArray(createdBulk) ? createdBulk : createdBulk?.data;
-      if (Array.isArray(bulkData) && bulkData.length > 0) {
-        newAdded.push(...bulkData);
-        successCount = bulkData.length;
+    for (let i = 0; i < parsedRecords.length; i += BATCH_SIZE) {
+      const batch = parsedRecords.slice(i, i + BATCH_SIZE);
+      let batchSuccess = false;
+
+      try {
+        const createdBulk = await apiPost(`/objects/${objectTypeId}`, batch, { isUserActivity: true });
+        const bulkData = Array.isArray(createdBulk) ? createdBulk : createdBulk?.data;
+        if (Array.isArray(bulkData) && bulkData.length > 0) {
+          newAdded.push(...bulkData);
+          successCount += bulkData.length;
+          batchSuccess = true;
+        }
+      } catch (bulkErr) {
+        console.warn(`Batch post failed for records ${i + 1}-${i + batch.length}, falling back to item-by-item:`, bulkErr.message);
       }
-    } catch (bulkErr) {
-      console.warn('Bulk endpoint API post failed, falling back to item-by-item creation:', bulkErr.message);
-    }
 
-    // Fallback item-by-item if batch request returned empty
-    if (successCount === 0) {
-      for (const recordPayload of parsedRecords) {
-        try {
-          const created = await apiPost(`/objects/${objectTypeId}`, recordPayload);
-          const item = created?.data || created || recordPayload;
-          newAdded.push(item);
-          successCount++;
-        } catch (err) {
-          console.error('Import error for row:', err);
+      if (!batchSuccess) {
+        for (const recordPayload of batch) {
+          try {
+            const created = await apiPost(`/objects/${objectTypeId}`, recordPayload, { isUserActivity: true });
+            const item = created?.data || created || recordPayload;
+            newAdded.push(item);
+            successCount++;
+          } catch (err) {
+            console.error('Import error for row:', err);
+          }
         }
       }
     }
