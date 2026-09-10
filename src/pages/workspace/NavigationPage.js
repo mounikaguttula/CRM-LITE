@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Target, Briefcase, Users, Building2,
   Megaphone, FileText, QrCode, Folder, LogOut,
-  ChevronRight, Sparkles, ChevronDown, ChevronUp,
+  ChevronRight, Sparkles, ChevronDown, ChevronUp, Package
 } from 'lucide-react';
 
 function getModuleIcon(name, size = 15) {
@@ -18,6 +18,7 @@ function getModuleIcon(name, size = 15) {
   if (str.includes('campaign') || str.includes('market'))        return <Megaphone {...props} />;
   if (str.includes('form') || str.includes('doc'))               return <FileText {...props} />;
   if (str.includes('qr') || str.includes('scan'))                return <QrCode {...props} />;
+  if (str.includes('product') || str.includes('item'))           return <Package {...props} />;
   return <Folder {...props} />;
 }
 
@@ -29,6 +30,7 @@ function getModuleGradient(name) {
   if (str.includes('contact')) return 'linear-gradient(135deg,#8b5cf6,#ec4899)';
   if (str.includes('compan'))  return 'linear-gradient(135deg,#3b82f6,#6366f1)';
   if (str.includes('campaign'))return 'linear-gradient(135deg,#f97316,#f59e0b)';
+  if (str.includes('product')) return 'linear-gradient(135deg,#3b82f6,#2563eb)';
   return 'linear-gradient(135deg,#00b09b,#4facfe)';
 }
 
@@ -116,9 +118,10 @@ function NavigationPage({ onNavigate }) {
     if (/(company|account|organization)/.test(val)) return 1;
     if (/(contact|person)/.test(val)) return 2;
     if (/(deal|opp|pipeline|pipel)/.test(val)) return 3;
+    if (/(product|item)/.test(val)) return 4;
     if (/(campaign|market)/.test(val)) return 6;
     if (/(captcha|scan|scanner|qr)/.test(val)) return 5;
-    return 4;
+    return 7;
   };
 
   const navItems = rawNavItems

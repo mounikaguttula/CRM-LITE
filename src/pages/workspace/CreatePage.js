@@ -33,7 +33,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
 
   const [formData, setFormData] = useState({});
   const [fields, setFields] = useState([]);
-  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [] });
+  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [], deals: [], products: [] });
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -48,7 +48,9 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       apiGet('/users').catch(() => ({ data: [] })),
       apiGet('/objects/companies').catch(() => apiGet('/companies')).catch(() => ({ data: [] })),
       apiGet('/objects/contacts').catch(() => apiGet('/contacts')).catch(() => ({ data: [] })),
-    ]).then(([fList, uRes, cRes, ctRes]) => {
+      apiGet('/objects/deals').catch(() => apiGet('/deals')).catch(() => ({ data: [] })),
+      apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9').catch(() => ({ data: [] }))
+    ]).then(([fList, uRes, cRes, ctRes, dRes, pRes]) => {
       if (!isMounted) return;
       const fieldsData = Array.isArray(fList) ? fList : (fList?.data || []);
       if (fieldsData.length > 0) setFields(fieldsData);
@@ -56,11 +58,15 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       const usersList = Array.isArray(uRes) ? uRes : (uRes?.data || []);
       const compList = Array.isArray(cRes) ? cRes : (cRes?.data || []);
       const contactList = Array.isArray(ctRes) ? ctRes : (ctRes?.data || []);
+      const dealsList = Array.isArray(dRes) ? dRes : (dRes?.data || []);
+      const productsList = Array.isArray(pRes) ? pRes : (pRes?.data || []);
 
       setLookupData({
         users: usersList.length > 0 ? usersList : (currentUser ? [currentUser] : []),
         companies: compList,
         contacts: contactList,
+        deals: dealsList,
+        products: productsList,
       });
 
       // Parse query params for pre-filled lookup values
@@ -276,10 +282,12 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
 
   const renderField = (f) => {
     const hasError = Boolean(errors[f.name]);
-    const isNotes = f.name === 'notes' || f.name === 'description' || f.name === 'note' || f.type === 'address' || (f.name || '').toLowerCase().includes('address') || (f.name || '').toLowerCase().includes('street');
     const isOwner = f.name?.toLowerCase().includes('owner') || f.name?.toLowerCase().includes('created_by');
-    const isCompany = f.name?.toLowerCase().includes('company');
+    const isCompany = f.name?.toLowerCase().includes('company') || f.name?.toLowerCase().includes('account');
     const isContact = f.name?.toLowerCase().includes('contact');
+    const isDeal = f.name?.toLowerCase().includes('deal');
+    const isProduct = f.name?.toLowerCase().includes('product');
+    const isNotes = f.name?.toLowerCase().includes('notes') || f.name?.toLowerCase().includes('description') || f.type === 'textarea' || f.type === 'address' || (f.name || '').toLowerCase().includes('address') || (f.name || '').toLowerCase().includes('street');
 
     let fieldEl;
 
@@ -322,13 +330,17 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
           hasError={hasError}
         />
       );
-    } else if (f.type === 'lookup' || isOwner || isCompany || isContact) {
+    } else if (f.type === 'lookup' || isOwner || isCompany || isContact || isDeal || isProduct) {
       const options = isOwner
         ? lookupData.users
         : isContact
         ? lookupData.contacts
         : isCompany
         ? lookupData.companies
+        : isDeal
+        ? lookupData.deals
+        : isProduct
+        ? lookupData.products
         : [];
 
       fieldEl = (
