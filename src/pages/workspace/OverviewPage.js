@@ -481,19 +481,15 @@ function DashboardContent() {
 
     const getCreatedMs = (r) => parseRecordDate(r, ['created_at', 'created_date', 'createdAt', 'date_created']);
     const getUpdatedMs = (r) => parseRecordDate(r, ['updated_at', 'modified_date', 'updated_date', 'updatedAt', 'created_at', 'created_date']);
+    // 1. New Leads created this week (7 days) in current scope
+    const newLeads = userLeads.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
 
-    // 1. New Leads created this week (7 days) in current scope, fallback to scope total if no 7-day additions
-    const recentLeadsCount = userLeads.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
-    const newLeads = recentLeadsCount > 0 ? recentLeadsCount : userLeads.length;
+    // 2. New Contacts created this week (7 days) in current scope
+    const newContacts = userContacts.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
 
-    // 2. New Contacts created this week (7 days) in current scope, fallback to scope total if no 7-day additions
-    const recentContactsCount = userContacts.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
-    const newContacts = recentContactsCount > 0 ? recentContactsCount : userContacts.length;
-
-    // 3. Recent Updates modified this week across user-scoped records, fallback to scope total if no 7-day updates
+    // 3. Recent Updates modified this week across user-scoped records
     const allRecords = [...userLeads, ...userDeals, ...userContacts, ...userCompanies];
-    const recentUpdatesCount = allRecords.filter((r) => getUpdatedMs(r) >= weekAgoMs).length;
-    const recentUpdates = recentUpdatesCount > 0 ? recentUpdatesCount : allRecords.length;
+    const recentUpdates = allRecords.filter((r) => getUpdatedMs(r) >= weekAgoMs).length;
 
     return {
       newLeads,
