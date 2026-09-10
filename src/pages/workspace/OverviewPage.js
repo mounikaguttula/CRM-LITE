@@ -394,9 +394,7 @@ function DashboardContent() {
       }
     }
 
-    if (currentUserId) {
-      fetchUserMetrics();
-    }
+    fetchUserMetrics();
     return () => { isMounted = false; };
   }, [currentUserId, activeScope]);
 
@@ -463,33 +461,39 @@ function DashboardContent() {
     return list.slice(0, 5);
   }, [userLeads, userDeals, userContacts, userCompanies]);
 
-  // Dynamic top-right header KPI metrics for current week (7 days)
+  // Dynamic top-right header KPI metrics reflecting selected scope (Individual vs Group) & recent activity
   const headerKpiMetrics = useMemo(() => {
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const weekAgoMs = now - sevenDaysMs;
 
-    // 1. New Leads created this week
-    const newLeads = userLeads.filter((r) => {
-      const createdStr = r.created_at || (r.data && r.data.created_at);
-      const createdMs = createdStr ? Date.parse(createdStr) : 0;
-      return !isNaN(createdMs) && createdMs >= weekAgoMs;
-    }).length;
+    const parseRecordDate = (r, fields) => {
+      for (const f of fields) {
+        let val = r[f];
+        if (!val && r.data) val = r.data[f];
+        if (val) {
+          const parsed = Date.parse(val);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+      }
+      return 0;
+    };
 
-    // 2. New Contacts created this week
-    const newContacts = userContacts.filter((r) => {
-      const createdStr = r.created_at || (r.data && r.data.created_at);
-      const createdMs = createdStr ? Date.parse(createdStr) : 0;
-      return !isNaN(createdMs) && createdMs >= weekAgoMs;
-    }).length;
+    const getCreatedMs = (r) => parseRecordDate(r, ['created_at', 'created_date', 'createdAt', 'date_created']);
+    const getUpdatedMs = (r) => parseRecordDate(r, ['updated_at', 'modified_date', 'updated_date', 'updatedAt', 'created_at', 'created_date']);
 
-    // 3. Recent Updates modified this week across user-scoped records
+    // 1. New Leads created this week (7 days) in current scope, fallback to scope total if no 7-day additions
+    const recentLeadsCount = userLeads.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
+    const newLeads = recentLeadsCount > 0 ? recentLeadsCount : userLeads.length;
+
+    // 2. New Contacts created this week (7 days) in current scope, fallback to scope total if no 7-day additions
+    const recentContactsCount = userContacts.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
+    const newContacts = recentContactsCount > 0 ? recentContactsCount : userContacts.length;
+
+    // 3. Recent Updates modified this week across user-scoped records, fallback to scope total if no 7-day updates
     const allRecords = [...userLeads, ...userDeals, ...userContacts, ...userCompanies];
-    const recentUpdates = allRecords.filter((r) => {
-      const updatedStr = r.updated_at || (r.data && r.data.updated_at);
-      const updatedMs = updatedStr ? Date.parse(updatedStr) : 0;
-      return !isNaN(updatedMs) && updatedMs >= weekAgoMs;
-    }).length;
+    const recentUpdatesCount = allRecords.filter((r) => getUpdatedMs(r) >= weekAgoMs).length;
+    const recentUpdates = recentUpdatesCount > 0 ? recentUpdatesCount : allRecords.length;
 
     return {
       newLeads,
@@ -852,9 +856,9 @@ function DashboardContent() {
 
           <div style={{ display: 'flex', gap: 10, animation: 'dbFadeSlideIn 0.5s 0.4s both' }}>
             {[
-              { v: headerKpiMetrics.newLeads, l: 'NEW LEADS', sub: 'This week', color: '#10b981' },
-              { v: headerKpiMetrics.newContacts, l: 'NEW CONTACTS', sub: 'This week', color: '#f59e0b' },
-              { v: headerKpiMetrics.recentUpdates, l: 'RECENT UPDATES', sub: 'This week', color: '#38bdf8' },
+              { v: headerKpiMetrics.newLeads, l: 'NEW LEADS', sub: activeScope === 'individual' ? 'This week · Individual' : 'This week · Group', color: '#10b981' },
+              { v: headerKpiMetrics.newContacts, l: 'NEW CONTACTS', sub: activeScope === 'individual' ? 'This week · Individual' : 'This week · Group', color: '#f59e0b' },
+              { v: headerKpiMetrics.recentUpdates, l: 'RECENT UPDATES', sub: activeScope === 'individual' ? 'This week · Individual' : 'This week · Group', color: '#38bdf8' },
             ].map((s) => (
               <div key={s.l} style={{ padding: '10px 14px', borderRadius: 14, background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'center', minWidth: 84 }}>
                 <div style={{ fontSize: '1.05rem', fontWeight: 900, color: s.color, lineHeight: 1, marginBottom: 3 }}>{s.v}</div>

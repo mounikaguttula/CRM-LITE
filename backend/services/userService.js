@@ -75,9 +75,6 @@ class UserService {
           const matched = candidateRoles.find(r => r.id === role_id || (r.role_name && r.role_name.toLowerCase().includes(String(role_id).toLowerCase())));
           if (matched) {
             validatedRoleId = matched.id;
-          } else {
-            const adminRole = candidateRoles.find(r => r.role_name && r.role_name.toLowerCase().includes('admin'));
-            validatedRoleId = adminRole ? adminRole.id : candidateRoles[0].id;
           }
         }
       }
