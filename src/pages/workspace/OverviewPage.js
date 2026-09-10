@@ -469,27 +469,30 @@ function DashboardContent() {
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const weekAgoMs = now - sevenDaysMs;
 
-    // 1. New Leads created this week
-    const newLeads = userLeads.filter((r) => {
-      const createdStr = r.created_at || (r.data && r.data.created_at);
-      const createdMs = createdStr ? Date.parse(createdStr) : 0;
-      return !isNaN(createdMs) && createdMs >= weekAgoMs;
-    }).length;
+    const parseRecordDate = (r, fields) => {
+      for (const f of fields) {
+        let val = r[f];
+        if (!val && r.data) val = r.data[f];
+        if (val) {
+          const parsed = Date.parse(val);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+      }
+      return 0;
+    };
 
-    // 2. New Contacts created this week
-    const newContacts = userContacts.filter((r) => {
-      const createdStr = r.created_at || (r.data && r.data.created_at);
-      const createdMs = createdStr ? Date.parse(createdStr) : 0;
-      return !isNaN(createdMs) && createdMs >= weekAgoMs;
-    }).length;
+    const getCreatedMs = (r) => parseRecordDate(r, ['created_at', 'created_date', 'createdAt', 'date_created']);
+    const getUpdatedMs = (r) => parseRecordDate(r, ['updated_at', 'modified_date', 'updated_date', 'updatedAt', 'created_at', 'created_date']);
+
+    // 1. New Leads created this week (7 days) in current scope
+    const newLeads = userLeads.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
+
+    // 2. New Contacts created this week (7 days) in current scope
+    const newContacts = userContacts.filter((r) => getCreatedMs(r) >= weekAgoMs).length;
 
     // 3. Recent Updates modified this week across user-scoped records
     const allRecords = [...userLeads, ...userDeals, ...userContacts, ...userCompanies];
-    const recentUpdates = allRecords.filter((r) => {
-      const updatedStr = r.updated_at || (r.data && r.data.updated_at);
-      const updatedMs = updatedStr ? Date.parse(updatedStr) : 0;
-      return !isNaN(updatedMs) && updatedMs >= weekAgoMs;
-    }).length;
+    const recentUpdates = allRecords.filter((r) => getUpdatedMs(r) >= weekAgoMs).length;
 
     return {
       newLeads,
