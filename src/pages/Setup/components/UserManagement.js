@@ -340,7 +340,7 @@ function UserManagement() {
       });
 
       const selectedRole = roles.find((r) => String(r.id) === String(editModalUser.role_id));
-      const roleName = updated?.role_name || updated?.role || (selectedRole ? selectedRole.role_name || selectedRole.name : 'Member');
+      const roleName = updated?.role_name || updated?.role || (selectedRole ? selectedRole.role_name || selectedRole.name : null);
 
       setUsers((prev) =>
         prev.map((u) =>
@@ -396,7 +396,7 @@ function UserManagement() {
         role_id: newUser.role_id,
       });
 
-      const roleName = created.role_name || created.role || (selectedRole ? selectedRole.role_name || selectedRole.name : 'Member');
+      const roleName = created.role_name || created.role || (selectedRole ? selectedRole.role_name || selectedRole.name : null);
 
       const normalizedCreated = {
         ...created,
@@ -485,8 +485,8 @@ function UserManagement() {
                 {filteredUsers.map((u) => {
                   const userName = u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || 'User';
                   const matchedRole = roles.find((r) => String(r.id) === String(u.role_id));
-                  const roleTitle = u.role_name || u.role || (matchedRole ? (matchedRole.role_name || matchedRole.name) : 'Member');
-                  const isAdmin = String(roleTitle).toLowerCase().includes('admin');
+                  const roleTitle = u.role_name || u.role || (matchedRole ? (matchedRole.role_name || matchedRole.name) : null);
+                  const isAdmin = roleTitle ? String(roleTitle).toLowerCase().includes('admin') : false;
                   return (
                     <tr key={u.id || u.email} style={{ borderBottom: '1px solid rgba(99,102,241,0.08)' }} className="glass-hover">
                       <td style={{ padding: '12px 16px' }}>
@@ -499,9 +499,13 @@ function UserManagement() {
                         </div>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <span className="badge" style={{ color: isAdmin ? '#4338ca' : '#4338ca', background: isAdmin ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: isAdmin ? 700 : 500 }}>
-                          {roleTitle}
-                        </span>
+                        {roleTitle ? (
+                          <span className="badge" style={{ color: isAdmin ? '#4338ca' : '#4338ca', background: isAdmin ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)', fontWeight: isAdmin ? 700 : 500 }}>
+                            {roleTitle}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: 13 }}>—</span>
+                        )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <span className="badge" style={{ color: '#047857', background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)' }}>

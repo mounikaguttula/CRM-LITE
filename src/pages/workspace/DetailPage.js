@@ -2096,6 +2096,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             <span style={{ fontWeight: 700, color: C.text }}>{String(recordTitle)}</span>
           </nav>
 
+          {/* ── Header banner (Exact Setup.js Hero Banner Theme, Height & Animations) ── */}
           <section
             style={{
               borderRadius: 22,
