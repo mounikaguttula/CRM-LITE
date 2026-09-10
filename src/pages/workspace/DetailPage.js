@@ -1977,62 +1977,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             <span style={{ fontWeight: 700, color: C.text }}>{String(recordTitle)}</span>
           </nav>
 
-          {/* ── Header Banner ── 
-        <section style={{
-          position: 'relative', overflow: 'hidden', borderRadius: 24,
-          background: C.bannerGrad, padding: 28,
-          boxShadow: '0 30px 60px -30px rgba(11,18,32,.65)',
-        }}>
-          <div style={{ position: 'absolute', right: -70, top: -110, width: 260, height: 260, borderRadius: '50%', background: 'rgba(34,211,238,.20)', filter: 'blur(70px)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', left: 90, bottom: -120, width: 240, height: 240, borderRadius: '50%', background: 'rgba(99,102,241,.28)', filter: 'blur(70px)', pointerEvents: 'none' }} />
-
-          <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 22 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-              {avatarFor(String(recordTitle), 66, true)}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
-                  padding: '5px 12px', borderRadius: 999, fontSize: 10.5, fontWeight: 800,
-                  letterSpacing: '0.14em', color: C.success,
-                  background: 'rgba(52,211,153,.12)', border: '1px solid rgba(52,211,153,.32)',
-                }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.success }} />
-                  {String(meta.displayName).toUpperCase()} RECORD
-                </span>
-                <h2 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: '#f4f7ff', letterSpacing: '-0.02em' }}>
-                  {String(recordTitle)}
-                </h2>
-                {subtitleVal && <p style={{ margin: 0, fontSize: 14, color: '#9fb0c9' }}>{subtitleVal}</p>}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-              {emailVal && (
-                <a href={`mailto:${emailVal}`} style={ghostBtn}>
-                  <Mail size={16} /> Email
-                </a>
-              )}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {emailVal && (
-              <a
-                href={`mailto:${emailVal}`}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 7,
-                  padding: '8px 16px', borderRadius: 11,
-                  fontSize: 13, fontWeight: 700, color: '#475569',
-                  background: '#ffffff', border: '1.5px solid #e2e8f0',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                  textDecoration: 'none', transition: 'all 0.15s ease',
-                }}
-              >
-                <Mail size={15} color="#6366f1" /> Email
-              </a>
-            )}
-          </div>
-        </div>
-
-        {/* ── Header banner (Exact Setup.js Hero Banner Theme, Height & Animations) ── */}
+          {/* ── Header banner (Exact Setup.js Hero Banner Theme, Height & Animations) ── */}
           <section
             style={{
               borderRadius: 22,
