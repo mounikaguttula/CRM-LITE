@@ -73,6 +73,65 @@ const getRecordById = async (req, res, next) => {
 };
 
 
+const GENERIC_KEYS = new Set([
+  'description',
+  'custom_description',
+  'notes',
+  'memo',
+  'comments',
+  'created_at',
+  'updated_at',
+  'created_by',
+  'updated_by',
+  'owner',
+  'owner_id',
+  'status',
+  'is_deleted',
+  'id',
+  '_id',
+  'organization_id',
+]);
+
+const getBackendMeaningfulKeys = (objectType) => {
+  const cleanKey = String(objectType || '').toLowerCase();
+  if (cleanKey.includes('contact') || cleanKey.includes('person')) {
+    return ['first_name', 'last_name', 'name', 'contact_name', 'email', 'alternate_email', 'phone', 'company', 'title'];
+  }
+  if (cleanKey.includes('company') || cleanKey.includes('account')) {
+    return ['name', 'company_name', 'account_name', 'website', 'domain', 'phone', 'industry', 'number_of_employees', 'address'];
+  }
+  if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+    return ['name', 'deal_name', 'opportunity_name', 'amount', 'stage', 'expected_close_date', 'company', 'contact'];
+  }
+  if (cleanKey.includes('lead')) {
+    return ['first_name', 'last_name', 'name', 'email', 'alternate_email', 'phone', 'company', 'title', 'lead_source'];
+  }
+  return [];
+};
+
+const validateMeaningfulPayload = (objectType, payload) => {
+  const keys = Object.keys(payload || {}).filter(k => k !== '__rowNum');
+  const meaningfulKeys = getBackendMeaningfulKeys(objectType);
+
+  let hasMeaningful = false;
+  if (meaningfulKeys.length > 0) {
+    hasMeaningful = meaningfulKeys.some(mKey => {
+      const val = payload[mKey];
+      return val !== undefined && val !== null && String(val).trim() !== '';
+    });
+  } else {
+    hasMeaningful = keys.some(k => {
+      if (GENERIC_KEYS.has(k.toLowerCase())) return false;
+      const val = payload[k];
+      return val !== undefined && val !== null && String(val).trim() !== '';
+    });
+  }
+
+  if (!hasMeaningful) {
+    throw new Error(`Row does not contain required identity/meaningful fields for ${objectType}.`);
+  }
+};
+
 const createRecord = async (req, res, next) => {
   try {
     const objectType = req.params.objectType;
@@ -84,12 +143,46 @@ const createRecord = async (req, res, next) => {
 
     if (Array.isArray(req.body)) {
       const createdRecords = [];
-      for (const itemPayload of req.body) {
+      const errorDetails = [];
+      const rowResults = [];
+
+      for (let i = 0; i < req.body.length; i++) {
+        const itemPayload = req.body[i];
+        const rowNum = itemPayload.__rowNum || (i + 1);
+        const rowIdentifier = itemPayload.name || itemPayload.deal_name || itemPayload.company_name || itemPayload.contact_name || itemPayload.email || `Row ${rowNum}`;
+
         try {
-          const record = await objectService.createRecord(objectType, itemPayload, organizationId, userId);
-          if (record) createdRecords.push(record);
+          const cleanPayload = { ...itemPayload };
+          delete cleanPayload.__rowNum;
+
+          validateMeaningfulPayload(objectType, cleanPayload);
+
+          const record = await objectService.createRecord(objectType, cleanPayload, organizationId, userId);
+          if (record) {
+            createdRecords.push({ ...record, __rowNum: rowNum });
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'imported',
+              recordId: record.id,
+              error: null,
+            });
+          }
         } catch (err) {
-          console.error(`Error creating row in bulk import for ${objectType}:`, err.message);
+          const errMsg = err.message || err.error || `Failed to create ${objectType} record.`;
+          console.error(`Error creating row ${rowNum} in bulk import for ${objectType}:`, errMsg);
+          errorDetails.push({
+            rowNum,
+            identifier: String(rowIdentifier).trim(),
+            reason: errMsg,
+          });
+          rowResults.push({
+            rowNumber: rowNum,
+            identifier: String(rowIdentifier).trim(),
+            status: 'failed',
+            recordId: null,
+            error: errMsg,
+          });
         }
       }
 
@@ -99,12 +192,25 @@ const createRecord = async (req, res, next) => {
         action: 'CREATE',
         module: objectType,
         record_id: null,
-        description: `Bulk created ${createdRecords.length} ${objectType} record(s)`,
+        description: `Bulk created ${createdRecords.length} ${objectType} record(s)${errorDetails.length > 0 ? `, ${errorDetails.length} failed` : ''}`,
       }).catch((auditErr) => console.error('❌ Audit log error in bulk createRecord:', auditErr.message));
 
-      return successResponse(res, createdRecords, `Bulk ${objectType} records created successfully.`, 201);
+      const statusCode = createdRecords.length > 0 ? 201 : 400;
+      return res.status(statusCode).json({
+        success: createdRecords.length > 0,
+        statusCode,
+        totalProcessed: req.body.length,
+        createdCount: createdRecords.length,
+        failedCount: errorDetails.length,
+        data: createdRecords,
+        results: rowResults,
+        message: createdRecords.length > 0
+          ? `Bulk ${objectType} records processed: ${createdRecords.length} created${errorDetails.length > 0 ? `, ${errorDetails.length} failed` : ''}.`
+          : `Failed to import ${objectType} records: All ${errorDetails.length} rows failed.`,
+      });
     }
 
+    validateMeaningfulPayload(objectType, req.body);
     const record = await objectService.createRecord(objectType, req.body, organizationId, userId);
 
     // Log audit activity after successful creation
