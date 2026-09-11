@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
@@ -45,6 +45,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Info,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -1770,6 +1771,159 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
   return String(val);
 }
 
+function getMeaningfulFieldKeys(objectTypeId, fieldsList = []) {
+  const cleanKey = String(objectTypeId || '').toLowerCase();
+
+  if (cleanKey.includes('contact') || cleanKey.includes('person')) {
+    return new Set(['first_name', 'last_name', 'name', 'contact_name', 'email', 'alternate_email', 'phone', 'company', 'title']);
+  }
+  if (cleanKey.includes('company') || cleanKey.includes('account')) {
+    return new Set(['name', 'company_name', 'account_name', 'website', 'domain', 'phone', 'industry', 'number_of_employees', 'address']);
+  }
+  if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+    return new Set(['name', 'deal_name', 'opportunity_name', 'amount', 'stage', 'expected_close_date', 'company', 'contact']);
+  }
+  if (cleanKey.includes('lead')) {
+    return new Set(['first_name', 'last_name', 'name', 'email', 'alternate_email', 'phone', 'company', 'title', 'lead_source']);
+  }
+
+  const GENERIC_SET = new Set(['description', 'custom_description', 'notes', 'memo', 'comments', 'created_at', 'updated_at', 'created_by', 'updated_by', 'owner', 'owner_id', 'status', 'is_deleted', 'id', '_id', 'organization_id']);
+  const meaningfulSet = new Set();
+  for (const f of fieldsList) {
+    const fname = String(f.name || f.api_name || '').toLowerCase();
+    if (fname && !GENERIC_SET.has(fname)) {
+      meaningfulSet.add(fname);
+    }
+  }
+  if (meaningfulSet.size === 0) {
+    meaningfulSet.add('name');
+    meaningfulSet.add('title');
+    meaningfulSet.add('subject');
+  }
+  return meaningfulSet;
+}
+
+function getObjectAllowedFields(objectTypeId, fieldsList = []) {
+  const cleanKey = String(objectTypeId || '').toLowerCase();
+  const allowedMap = new Map();
+
+  for (const f of fieldsList) {
+    const fname = f.name || f.api_name;
+    const flabel = f.label || f.display_name || fname;
+    if (fname) {
+      allowedMap.set(String(fname).toLowerCase(), { key: fname, label: String(flabel) });
+    }
+  }
+
+  if (cleanKey.includes('contact') || cleanKey.includes('person')) {
+    allowedMap.set('first_name', { key: 'first_name', label: 'First Name' });
+    allowedMap.set('last_name', { key: 'last_name', label: 'Last Name' });
+    allowedMap.set('email', { key: 'email', label: 'Email' });
+    allowedMap.set('alternate_email', { key: 'alternate_email', label: 'Alternate Email' });
+    allowedMap.set('phone', { key: 'phone', label: 'Phone' });
+    allowedMap.set('company', { key: 'company', label: 'Company' });
+    allowedMap.set('title', { key: 'title', label: 'Job Title' });
+    allowedMap.set('name', { key: 'name', label: 'Full Name' });
+    allowedMap.set('contact_name', { key: 'contact_name', label: 'Contact Name' });
+    allowedMap.set('description', { key: 'description', label: 'Description' });
+    allowedMap.set('address', { key: 'address', label: 'Address' });
+    allowedMap.set('city', { key: 'city', label: 'City' });
+    allowedMap.set('state', { key: 'state', label: 'State' });
+    allowedMap.set('country', { key: 'country', label: 'Country' });
+  } else if (cleanKey.includes('company') || cleanKey.includes('account')) {
+    allowedMap.set('name', { key: 'name', label: 'Company Name' });
+    allowedMap.set('company_name', { key: 'company_name', label: 'Company Name' });
+    allowedMap.set('industry', { key: 'industry', label: 'Industry' });
+    allowedMap.set('website', { key: 'website', label: 'Website' });
+    allowedMap.set('domain', { key: 'domain', label: 'Domain' });
+    allowedMap.set('number_of_employees', { key: 'number_of_employees', label: 'Employees' });
+    allowedMap.set('phone', { key: 'phone', label: 'Phone' });
+    allowedMap.set('city', { key: 'city', label: 'City' });
+    allowedMap.set('state', { key: 'state', label: 'State' });
+    allowedMap.set('country', { key: 'country', label: 'Country' });
+    allowedMap.set('address', { key: 'address', label: 'Address' });
+    allowedMap.set('annual_revenue', { key: 'annual_revenue', label: 'Annual Revenue' });
+    allowedMap.set('description', { key: 'description', label: 'Description' });
+  } else if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+    allowedMap.set('name', { key: 'name', label: 'Deal Name' });
+    allowedMap.set('deal_name', { key: 'deal_name', label: 'Deal Name' });
+    allowedMap.set('amount', { key: 'amount', label: 'Amount' });
+    allowedMap.set('stage', { key: 'stage', label: 'Stage' });
+    allowedMap.set('expected_close_date', { key: 'expected_close_date', label: 'Close Date' });
+    allowedMap.set('probability', { key: 'probability', label: 'Probability' });
+    allowedMap.set('company', { key: 'company', label: 'Company' });
+    allowedMap.set('contact', { key: 'contact', label: 'Contact' });
+    allowedMap.set('description', { key: 'description', label: 'Description' });
+  } else if (cleanKey.includes('lead')) {
+    allowedMap.set('first_name', { key: 'first_name', label: 'First Name' });
+    allowedMap.set('last_name', { key: 'last_name', label: 'Last Name' });
+    allowedMap.set('email', { key: 'email', label: 'Email' });
+    allowedMap.set('alternate_email', { key: 'alternate_email', label: 'Alternate Email' });
+    allowedMap.set('phone', { key: 'phone', label: 'Phone' });
+    allowedMap.set('company', { key: 'company', label: 'Company' });
+    allowedMap.set('title', { key: 'title', label: 'Job Title' });
+    allowedMap.set('lead_source', { key: 'lead_source', label: 'Lead Source' });
+    allowedMap.set('status', { key: 'status', label: 'Status' });
+    allowedMap.set('name', { key: 'name', label: 'Lead Name' });
+    allowedMap.set('description', { key: 'description', label: 'Description' });
+  } else {
+    allowedMap.set('name', { key: 'name', label: 'Name' });
+    allowedMap.set('title', { key: 'title', label: 'Title' });
+    allowedMap.set('status', { key: 'status', label: 'Status' });
+    allowedMap.set('description', { key: 'description', label: 'Description' });
+  }
+
+  return allowedMap;
+}
+
+function mapHeaderToField(rawHeader, allowedMap) {
+  if (!rawHeader) return null;
+  const rawLower = String(rawHeader).toLowerCase().trim();
+  const cleanAlpha = rawLower.replace(/[^a-z0-9]/g, '');
+
+  let candidateKey = null;
+
+  if (cleanAlpha === 'name' || cleanAlpha === 'fullname' || cleanAlpha === 'contactname' || cleanAlpha === 'dealname' || cleanAlpha === 'companyname' || cleanAlpha === 'accountname') candidateKey = 'name';
+  else if (cleanAlpha === 'first' || cleanAlpha === 'firstname' || cleanAlpha === 'fname' || cleanAlpha === 'givenname') candidateKey = 'first_name';
+  else if (cleanAlpha === 'last' || cleanAlpha === 'lastname' || cleanAlpha === 'lname' || cleanAlpha === 'surname' || cleanAlpha === 'familyname') candidateKey = 'last_name';
+  else if (cleanAlpha === 'email' || cleanAlpha === 'emailaddress' || cleanAlpha === 'workemail' || cleanAlpha === 'primaryemail') candidateKey = 'email';
+  else if (cleanAlpha === 'alternateemail' || cleanAlpha === 'alternateemailid' || cleanAlpha === 'secondaryemail' || cleanAlpha === 'altemail' || cleanAlpha === 'otheremail') candidateKey = 'alternate_email';
+  else if (cleanAlpha === 'phone' || cleanAlpha === 'phonenumber' || cleanAlpha === 'telephone' || cleanAlpha === 'mobile' || cleanAlpha === 'tel' || cleanAlpha === 'cell') candidateKey = 'phone';
+  else if (cleanAlpha === 'company' || cleanAlpha === 'companyname' || cleanAlpha === 'organization' || cleanAlpha === 'organizationname' || cleanAlpha === 'account' || cleanAlpha === 'accountname' || cleanAlpha === 'org') candidateKey = 'company';
+  else if (cleanAlpha === 'title' || cleanAlpha === 'jobtitle' || cleanAlpha === 'designation' || cleanAlpha === 'position' || cleanAlpha === 'role') candidateKey = 'title';
+  else if (cleanAlpha === 'leadsource' || cleanAlpha === 'source') candidateKey = 'lead_source';
+  else if (cleanAlpha === 'status') candidateKey = 'status';
+  else if (cleanAlpha === 'stage' || cleanAlpha === 'dealstage' || cleanAlpha === 'pipelinestage' || cleanAlpha === 'opportunitystage') candidateKey = 'stage';
+  else if (cleanAlpha === 'amount' || cleanAlpha === 'dealvalue' || cleanAlpha === 'value' || cleanAlpha === 'price' || cleanAlpha === 'revenue' || cleanAlpha === 'annualrevenue' || cleanAlpha === 'total') candidateKey = 'amount';
+  else if (cleanAlpha === 'industry' || cleanAlpha === 'sector') candidateKey = 'industry';
+  else if (cleanAlpha === 'website' || cleanAlpha === 'domain' || cleanAlpha === 'url' || cleanAlpha === 'web') candidateKey = 'website';
+  else if (cleanAlpha === 'employees' || cleanAlpha === 'numberofemployees' || cleanAlpha === 'companysize' || cleanAlpha === 'noofemployees') candidateKey = 'number_of_employees';
+  else if (cleanAlpha === 'city' || cleanAlpha === 'town') candidateKey = 'city';
+  else if (cleanAlpha === 'state' || cleanAlpha === 'province' || cleanAlpha === 'region') candidateKey = 'state';
+  else if (cleanAlpha === 'country' || cleanAlpha === 'nation') candidateKey = 'country';
+  else if (cleanAlpha === 'address' || cleanAlpha === 'street' || cleanAlpha === 'streetaddress') candidateKey = 'address';
+  else if (cleanAlpha === 'expectedclosedate' || cleanAlpha === 'closedate' || cleanAlpha === 'closingdate' || cleanAlpha === 'targetdate') candidateKey = 'expected_close_date';
+  else if (cleanAlpha === 'description' || cleanAlpha === 'note' || cleanAlpha === 'notes' || cleanAlpha === 'memo' || cleanAlpha === 'comments') candidateKey = 'description';
+
+  if (!candidateKey) {
+    candidateKey = rawLower.replace(/[^a-z0-9_]/g, '_');
+  }
+
+  if (allowedMap.has(candidateKey.toLowerCase())) {
+    return allowedMap.get(candidateKey.toLowerCase());
+  }
+
+  for (const [mapKey, fieldMeta] of allowedMap.entries()) {
+    const cleanMapKey = mapKey.replace(/[^a-z0-9]/g, '');
+    const cleanLabel = (fieldMeta.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanAlpha === cleanMapKey || cleanAlpha === cleanLabel) {
+      return fieldMeta;
+    }
+  }
+
+  return null;
+}
+
 function ObjectListContent({ objectTypeId }) {
   const { objectTypes, permissions, currentUser, organization, company } = useWorkspace();
   const navigate = useNavigate();
@@ -1782,9 +1936,31 @@ function ObjectListContent({ objectTypeId }) {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [parsedRecords, setParsedRecords] = useState([]);
+  const [matchedFields, setMatchedFields] = useState([]);
+  const [unmatchedHeaders, setUnmatchedHeaders] = useState([]);
+  const [csvValidationError, setCsvValidationError] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
+
+  const resetImportState = useCallback(() => {
+    setSelectedFile(null);
+    setParsedRecords([]);
+    setMatchedFields([]);
+    setUnmatchedHeaders([]);
+    setCsvValidationError(null);
+    setImportReport(null);
+    setImporting(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  const handleCloseImportModal = () => {
+    setImportModalOpen(false);
+    resetImportState();
+  };
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
@@ -1801,6 +1977,7 @@ function ObjectListContent({ objectTypeId }) {
     let isMounted = true;
     setLoading(true);
     setError(null);
+    resetImportState();
 
     Promise.all([
       apiGet(`/objects/${objectTypeId}`),
@@ -1846,10 +2023,10 @@ function ObjectListContent({ objectTypeId }) {
 
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
 
-  const meta = {
+  const meta = useMemo(() => ({
     displayName: rawMeta?.displayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1) : 'Record'),
     pluralDisplayName: rawMeta?.pluralDisplayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1) : 'Records'),
-  };
+  }), [rawMeta, objectTypeId]);
 
   const cleanObjKey = String(objectTypeId || '').toLowerCase();
   const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
@@ -1966,6 +2143,21 @@ function ObjectListContent({ objectTypeId }) {
 
     return cols;
   }, [rawMeta, allColumns, records, isDealObjList]);
+
+  const previewColumns = useMemo(() => {
+    if (matchedFields && matchedFields.length > 0) {
+      return matchedFields.slice(0, 6);
+    }
+    if (columns && columns.length > 0) {
+      return columns.slice(0, 5);
+    }
+    return [
+      { key: 'name', label: 'NAME' },
+      { key: 'email', label: 'EMAIL' },
+      { key: 'company', label: 'COMPANY' },
+      { key: 'status', label: 'STATUS' },
+    ];
+  }, [matchedFields, columns]);
 
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
@@ -2162,34 +2354,66 @@ function ObjectListContent({ objectTypeId }) {
       return;
     }
 
+    resetImportState();
     setSelectedFile(file);
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target.result;
       const lines = text.split(/\r\n|\n/).filter(line => line.trim());
       if (lines.length < 2) {
+        setCsvValidationError(`The uploaded file '${file.name}' is empty or contains no data rows.`);
         setParsedRecords([]);
         return;
       }
 
-      const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+      const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
       
-      const mapHeader = (h) => {
-        if (h.includes('first') || h === 'fname') return 'first_name';
-        if (h.includes('last') || h === 'lname') return 'last_name';
-        if (h.includes('alternate') || h.includes('duplicate') || h.includes('secondary') || h.includes('alt_email') || h.includes('alt email')) return 'alternate_email';
-        if (h.includes('email')) return 'email';
-        if (h.includes('phone') || h.includes('tel') || h.includes('mobile') || h === 'alt_phone' || h === 'alt phone') return 'phone';
-        if (h.includes('company') || h.includes('organization') || h.includes('org')) return 'company';
-        if (h.includes('title') || h.includes('job') || h.includes('position')) return 'title';
-        if (h.includes('source') || h.includes('lead source')) return 'lead_source';
-        if (h.includes('status')) return 'status';
-        if (h.includes('description') || h.includes('note') || h.includes('memo')) return 'description';
-        if (h === 'name' || h === 'full name') return 'name';
-        return h;
-      };
+      const cleanObjKey = String(objectTypeId || '').toLowerCase();
+      const fieldsList = (backendFields && backendFields.length > 0) ? backendFields : (rawMeta?.fields || meta?.fields || []);
 
-      const headers = rawHeaders.map(mapHeader);
+      const allowedMap = getObjectAllowedFields(cleanObjKey, fieldsList);
+      const meaningfulKeys = getMeaningfulFieldKeys(cleanObjKey, fieldsList);
+
+      const matchedList = [];
+      const unmatchedList = [];
+      const headerMap = [];
+
+      rawHeaders.forEach((h) => {
+        const fieldMatch = mapHeaderToField(h, allowedMap);
+        if (fieldMatch) {
+          if (!matchedList.some(m => m.key === fieldMatch.key)) {
+            matchedList.push(fieldMatch);
+          }
+          headerMap.push(fieldMatch);
+        } else {
+          unmatchedList.push(h);
+          headerMap.push(null);
+        }
+      });
+
+      setMatchedFields(matchedList);
+      setUnmatchedHeaders(unmatchedList);
+
+      const meaningfulMatched = matchedList.filter(f => meaningfulKeys.has(String(f.key).toLowerCase()));
+
+      if (meaningfulMatched.length === 0) {
+        const sampleLabels = Array.from(allowedMap.values())
+          .filter(f => meaningfulKeys.has(String(f.key).toLowerCase()))
+          .slice(0, 5)
+          .map(f => f.label);
+
+        const sampleText = sampleLabels.length > 0
+          ? sampleLabels.join(', ')
+          : 'First Name, Last Name, Email, Phone or Company';
+
+        setCsvValidationError(`This CSV does not contain enough valid ${meta.displayName} information to create ${meta.displayName} records. Please upload a CSV containing fields such as ${sampleText}.`);
+        setParsedRecords([]);
+        return;
+      }
+
+      setCsvValidationError(null);
+
       const parsedList = [];
 
       for (let i = 1; i < lines.length; i++) {
@@ -2213,32 +2437,72 @@ function ObjectListContent({ objectTypeId }) {
         rowValues.push(val.trim().replace(/^["']|["']$/g, ''));
 
         const rowObj = {};
-        headers.forEach((h, idx) => {
-          if (rowValues[idx] !== undefined) {
-            rowObj[h] = rowValues[idx];
+        headerMap.forEach((fieldMeta, idx) => {
+          if (fieldMeta && rowValues[idx] !== undefined && rowValues[idx] !== '') {
+            rowObj[fieldMeta.key] = rowValues[idx];
           }
         });
 
-        const fn = rowObj.first_name || '';
-        const ln = rowObj.last_name || '';
-        const combinedName = (fn || ln) ? `${fn} ${ln}`.trim() : (rowObj.name || rowObj.email?.split('@')[0] || `Imported Lead ${i}`);
+        // Check if row contains at least ONE non-empty value for a meaningful field
+        const hasMeaningfulValue = Array.from(meaningfulKeys).some(mKey => {
+          const v = rowObj[mKey];
+          return v !== undefined && v !== null && String(v).trim() !== '';
+        });
 
-        const payload = {
-          name: combinedName,
-          first_name: fn,
-          last_name: ln,
-          email: rowObj.email || '',
-          phone: rowObj.phone || '',
-          company: rowObj.company || '',
-          title: rowObj.title || '',
-          lead_source: rowObj.lead_source || 'CSV Import',
-          status: rowObj.status || 'New',
-          description: rowObj.description || '',
-        };
+        if (!hasMeaningfulValue) continue;
 
-        if (payload.name || payload.email || payload.company) {
-          parsedList.push(payload);
+        const csvRowNumber = i + 1; // 1-based CSV line number (line 1 is header, data rows start at line 2)
+        const payload = { ...rowObj, __rowNum: csvRowNumber };
+
+        // Name resolution derived ONLY from mapped fields
+        if (cleanObjKey.includes('company') || cleanObjKey.includes('account')) {
+          const compName = rowObj.company_name || rowObj.company || rowObj.name || rowObj.account_name || rowObj.organization;
+          if (compName) {
+            payload.name = compName;
+            payload.company_name = compName;
+          }
+        } else if (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) {
+          const dealName = rowObj.deal_name || rowObj.name || rowObj.title;
+          if (dealName) {
+            payload.name = dealName;
+            payload.deal_name = dealName;
+          }
+        } else if (cleanObjKey.includes('contact') || cleanObjKey.includes('person') || cleanObjKey.includes('lead')) {
+          const fn = rowObj.first_name || '';
+          const ln = rowObj.last_name || '';
+          const combinedName = (fn || ln) ? `${fn} ${ln}`.trim() : (rowObj.name || rowObj.contact_name || (rowObj.email ? rowObj.email.split('@')[0] : ''));
+          if (combinedName) {
+            payload.name = combinedName;
+            payload.first_name = fn;
+            payload.last_name = ln;
+          }
+          if (cleanObjKey.includes('lead')) {
+            payload.lead_source = rowObj.lead_source || 'CSV Import';
+            payload.status = rowObj.status || 'New';
+          }
+        } else {
+          const genName = rowObj.name || rowObj.title || rowObj.subject;
+          if (genName) {
+            payload.name = genName;
+          }
         }
+
+        parsedList.push(payload);
+      }
+
+      if (parsedList.length === 0) {
+        const sampleLabels = Array.from(allowedMap.values())
+          .filter(f => meaningfulKeys.has(String(f.key).toLowerCase()))
+          .slice(0, 5)
+          .map(f => f.label);
+
+        const sampleText = sampleLabels.length > 0
+          ? sampleLabels.join(', ')
+          : 'First Name, Last Name, Email, Phone or Company';
+
+        setCsvValidationError(`This CSV does not contain any records with valid ${meta.displayName} information. Please upload a CSV containing fields such as ${sampleText}.`);
+        setParsedRecords([]);
+        return;
       }
 
       setParsedRecords(parsedList);
@@ -2248,50 +2512,99 @@ function ObjectListContent({ objectTypeId }) {
   };
 
   const handleImportSubmit = async () => {
-    if (!parsedRecords || parsedRecords.length === 0) return;
+    if (!parsedRecords || parsedRecords.length === 0 || csvValidationError) return;
 
     setImporting(true);
     let successCount = 0;
     const newAdded = [];
+    const backendErrors = [];
+    const successRowNums = new Set();
     const BATCH_SIZE = 100;
+    const totalDataRows = parsedRecords.length;
 
     for (let i = 0; i < parsedRecords.length; i += BATCH_SIZE) {
       const batch = parsedRecords.slice(i, i + BATCH_SIZE);
-      let batchSuccess = false;
 
       try {
-        const createdBulk = await apiPost(`/objects/${objectTypeId}`, batch, { isUserActivity: true });
-        const bulkData = Array.isArray(createdBulk) ? createdBulk : createdBulk?.data;
+        const res = await apiPost(`/objects/${objectTypeId}`, batch, { isUserActivity: true });
+        const bulkData = Array.isArray(res) ? res : res?.data || [];
+
         if (Array.isArray(bulkData) && bulkData.length > 0) {
           newAdded.push(...bulkData);
           successCount += bulkData.length;
-          batchSuccess = true;
+          bulkData.forEach(item => {
+            if (item.__rowNum) successRowNums.add(item.__rowNum);
+          });
+        }
+
+        if (res?.errors && Array.isArray(res.errors)) {
+          backendErrors.push(...res.errors);
         }
       } catch (bulkErr) {
-        console.warn(`Batch post failed for records ${i + 1}-${i + batch.length}, falling back to item-by-item:`, bulkErr.message);
-      }
+        console.warn(`Batch post for ${objectTypeId} returned error, processing response:`, bulkErr);
+        const errData = bulkErr.data;
 
-      if (!batchSuccess) {
-        for (const recordPayload of batch) {
+        if (errData?.errors && Array.isArray(errData.errors)) {
+          backendErrors.push(...errData.errors);
+        }
+
+        if (errData?.data && Array.isArray(errData.data) && errData.data.length > 0) {
+          newAdded.push(...errData.data);
+          successCount += errData.data.length;
+          errData.data.forEach(item => {
+            if (item.__rowNum) successRowNums.add(item.__rowNum);
+          });
+        }
+
+        // Fallback for any row in batch not accounted for by backend success/error payload
+        const unaccounted = batch.filter(row => !successRowNums.has(row.__rowNum));
+        for (const recordPayload of unaccounted) {
+          const alreadyLogged = backendErrors.some(e => e.rowNum === recordPayload.__rowNum);
+          if (alreadyLogged) continue;
+
           try {
             const created = await apiPost(`/objects/${objectTypeId}`, recordPayload, { isUserActivity: true });
             const item = created?.data || created || recordPayload;
             newAdded.push(item);
             successCount++;
-          } catch (err) {
-            console.error('Import error for row:', err);
+            if (recordPayload.__rowNum) successRowNums.add(recordPayload.__rowNum);
+          } catch (singleErr) {
+            const errMsg = singleErr.message || singleErr.data?.message || 'Validation Error';
+            const rowId = recordPayload.name || recordPayload.deal_name || recordPayload.company_name || recordPayload.email || `Row ${recordPayload.__rowNum}`;
+            backendErrors.push({
+              rowNum: recordPayload.__rowNum,
+              identifier: String(rowId).trim(),
+              reason: errMsg,
+            });
           }
         }
       }
     }
 
     setImporting(false);
-    setImportModalOpen(false);
-    setSelectedFile(null);
-    setParsedRecords([]);
+
+    const reportRows = parsedRecords.map(rec => {
+      const isSuccess = successRowNums.has(rec.__rowNum);
+      const errObj = backendErrors.find(e => e.rowNum === rec.__rowNum);
+      const identifier = rec.name || rec.deal_name || rec.company_name || rec.contact_name || rec.email || `Row ${rec.__rowNum}`;
+      return {
+        rowNum: rec.__rowNum,
+        identifier: String(identifier).trim(),
+        status: isSuccess ? 'imported' : 'failed',
+        reason: isSuccess ? '—' : (errObj?.reason || 'Validation error'),
+      };
+    });
+
+    const report = {
+      createdCount: successCount,
+      failedCount: totalDataRows - successCount,
+      totalProcessed: totalDataRows,
+      rows: reportRows,
+    };
+
+    setImportReport(report);
 
     if (successCount > 0) {
-      // Re-fetch all records to guarantee complete list and proper ordering
       setLoading(true);
       apiGet(`/objects/${objectTypeId}`)
         .then((recRes) => {
@@ -2304,9 +2617,14 @@ function ObjectListContent({ objectTypeId }) {
         .finally(() => {
           setLoading(false);
         });
-      showToast(`🎉 Successfully imported ${successCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
+    }
+
+    if (report.failedCount === 0) {
+      showToast(`🎉 Successfully imported all ${successCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
+    } else if (successCount > 0) {
+      showToast(`⚠️ Imported ${successCount} records, but ${report.failedCount} failed. Review details below.`, 'warning');
     } else {
-      showToast(`⚠️ Failed to import. Please check CSV format.`, 'error');
+      showToast(`❌ Failed to import. All ${report.failedCount} rows failed validation.`, 'error');
     }
   };
 
@@ -2982,7 +3300,61 @@ function ObjectListContent({ objectTypeId }) {
 
             {/* Modal Body Content */}
             <div style={{ padding: '24px 28px 20px' }}>
-              {!selectedFile ? (
+              {importReport ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* Summary Stats Cards */}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <div style={{ flex: 1, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Total Processed</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>{importReport.totalProcessed}</div>
+                    </div>
+                    <div style={{ flex: 1, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 14 }}>
+                      <div style={{ fontSize: '0.74rem', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>✓ Imported</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#15803d' }}>{importReport.createdCount}</div>
+                    </div>
+                    <div style={{ flex: 1, padding: '12px 16px', background: importReport.failedCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${importReport.failedCount > 0 ? '#fecdd3' : '#e2e8f0'}`, borderRadius: 14 }}>
+                      <div style={{ fontSize: '0.74rem', color: importReport.failedCount > 0 ? '#9f1239' : '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>✕ Failed</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: importReport.failedCount > 0 ? '#e11d48' : '#0f172a' }}>{importReport.failedCount}</div>
+                    </div>
+                  </div>
+
+                  {/* Row-Level Errors / Status Table */}
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', maxHeight: 260, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1 }}>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 90 }}>CSV Row</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 170 }}>Record Identifier</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 110 }}>Status</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Reason / Validation Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importReport.rows.map((r, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', background: r.status === 'failed' ? '#fff1f215' : '#ffffff' }}>
+                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#64748b' }}>Row {r.rowNum}</td>
+                            <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0f172a' }}>{r.identifier}</td>
+                            <td style={{ padding: '10px 14px' }}>
+                              {r.status === 'imported' ? (
+                                <span style={{ color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 10px', borderRadius: 999, fontSize: '0.74rem', fontWeight: 700 }}>
+                                  ✓ Imported
+                                </span>
+                              ) : (
+                                <span style={{ color: '#e11d48', background: '#fff1f2', border: '1px solid #fecdd3', padding: '3px 10px', borderRadius: 999, fontSize: '0.74rem', fontWeight: 700 }}>
+                                  ✕ Failed
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: r.status === 'failed' ? '#e11d48' : '#64748b', fontSize: '0.8rem', fontWeight: r.status === 'failed' ? 600 : 400 }}>
+                              {r.reason}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : !selectedFile ? (
                 <div
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -3039,13 +3411,13 @@ function ObjectListContent({ objectTypeId }) {
                       </div>
                       <div>
                         <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>{selectedFile.name}</div>
-                        <div style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 500 }}>{parsedRecords.length} records detected and mapped</div>
+                        <div style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 500 }}>{parsedRecords.length} records detected and mapped for {meta.displayName}</div>
                       </div>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => { setSelectedFile(null); setParsedRecords([]); }}
+                      onClick={resetImportState}
                       style={{
                         padding: '5px 12px', borderRadius: 999, fontSize: '0.76rem', fontWeight: 700,
                         color: '#fb7185', background: '#fef2f2', border: '1px solid #fecaca', cursor: 'pointer',
@@ -3056,31 +3428,77 @@ function ObjectListContent({ objectTypeId }) {
                     </button>
                   </div>
 
-                  {/* Preview Table */}
-                  {parsedRecords.length > 0 && (
+                  {/* CSV Validation Error Banner */}
+                  {csvValidationError && (
+                    <div style={{
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: 14,
+                      padding: '14px 18px',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                      color: '#9f1239',
+                      fontSize: '0.84rem',
+                      fontWeight: 500,
+                      lineHeight: 1.45,
+                    }}>
+                      <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1, color: '#e11d48' }} />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 2 }}>Invalid CSV Format</div>
+                        {csvValidationError}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Partially Matched Headers Info Banner */}
+                  {!csvValidationError && unmatchedHeaders.length > 0 && matchedFields.length > 0 && (
+                    <div style={{
+                      background: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: 14,
+                      padding: '12px 16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      color: '#1e40af',
+                      fontSize: '0.81rem',
+                      fontWeight: 500,
+                    }}>
+                      <Info size={16} style={{ flexShrink: 0, color: '#3b82f6' }} />
+                      <div>
+                        Mapped <strong>{matchedFields.length}</strong> field(s). Ignored <strong>{unmatchedHeaders.length}</strong> column(s) ({unmatchedHeaders.join(', ')}) because they are not valid {meta.displayName} fields.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dynamic Object Preview Table */}
+                  {!csvValidationError && parsedRecords.length > 0 && (
                     <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', maxHeight: 220, overflowY: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
                         <thead>
-                          <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', sticky: 'top' }}>
-                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>#</th>
-                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Name</th>
-                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Email</th>
-                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Company</th>
-                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Lead Source</th>
+                          <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1 }}>
+                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 50 }}>#</th>
+                            {previewColumns.map(col => (
+                              <th key={col.key} style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>{col.label}</th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {parsedRecords.slice(0, 4).map((r, idx) => (
+                          {parsedRecords.slice(0, 5).map((r, idx) => (
                             <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>{idx + 1}</td>
-                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a' }}>{r.name || '—'}</td>
-                              <td style={{ padding: '10px 14px', color: '#475569' }}>{r.email || '—'}</td>
-                              <td style={{ padding: '10px 14px', color: '#475569' }}>{r.company || '—'}</td>
-                              <td style={{ padding: '10px 14px' }}>
-                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0284c7', background: '#e0f2fe', padding: '2px 8px', borderRadius: 999 }}>
-                                  {r.lead_source || 'CSV Import'}
-                                </span>
-                              </td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>{r.__rowNum || idx + 1}</td>
+                              {previewColumns.map(col => {
+                                let rawVal = r[col.key] !== undefined ? r[col.key] : (r.data && r.data[col.key]);
+                                if (rawVal === undefined || rawVal === null || rawVal === '') {
+                                  if (col.key === 'name') rawVal = r.name || r.deal_name || r.company_name;
+                                }
+                                return (
+                                  <td key={col.key} style={{ padding: '10px 14px', color: '#0f172a', fontWeight: col.isTitle ? 700 : 400 }}>
+                                    {rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '' ? String(rawVal) : '—'}
+                                  </td>
+                                );
+                              })}
                             </tr>
                           ))}
                         </tbody>
@@ -3096,43 +3514,72 @@ function ObjectListContent({ objectTypeId }) {
               display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12,
               padding: '16px 28px', background: '#f8fafc', borderTop: '1px solid #e2e8f0',
             }}>
-              <button
-                type="button"
-                onClick={() => { setImportModalOpen(false); setSelectedFile(null); setParsedRecords([]); }}
-                style={{
-                  padding: '10px 18px', borderRadius: 12, border: '1px solid #cbd5e1',
-                  background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleImportSubmit}
-                disabled={!selectedFile || parsedRecords.length === 0 || importing}
-                style={{
-                  padding: '10px 22px', borderRadius: 12, border: 'none',
-                  background: (!selectedFile || parsedRecords.length === 0 || importing)
-                    ? '#94a3b8'
-                    : 'linear-gradient(135deg, #6366f1 0%, #22d3ee 100%)',
-                  color: '#ffffff', fontWeight: 700, fontSize: '0.84rem',
-                  cursor: (!selectedFile || parsedRecords.length === 0 || importing) ? 'not-allowed' : 'pointer',
-                  boxShadow: (!selectedFile || parsedRecords.length === 0 || importing) ? 'none' : '0 8px 20px -6px rgba(99,102,241,0.5)',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                }}
-              >
-                {importing ? (
-                  <>
-                    <RefreshCw size={15} style={{ animation: 'ep-spin .8s linear infinite' }} />
-                    Importing Records…
-                  </>
-                ) : (
-                  <>
-                    <UploadCloud size={15} />
-                    {`Import ${parsedRecords.length > 0 ? parsedRecords.length : ''} ${meta.pluralDisplayName}`}
-                  </>
-                )}
-              </button>
+              {importReport ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedFile(null); setParsedRecords([]); setImportReport(null); }}
+                    style={{
+                      padding: '10px 18px', borderRadius: 12, border: '1px solid #cbd5e1',
+                      background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
+                    }}
+                  >
+                    Import Another File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloseImportModal}
+                    style={{
+                      padding: '10px 22px', borderRadius: 12, border: 'none',
+                      background: 'linear-gradient(135deg, #6366f1 0%, #22d3ee 100%)',
+                      color: '#ffffff', fontWeight: 700, fontSize: '0.84rem', cursor: 'pointer',
+                      boxShadow: '0 8px 20px -6px rgba(99,102,241,0.5)',
+                    }}
+                  >
+                    Done
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleCloseImportModal}
+                    style={{
+                      padding: '10px 18px', borderRadius: 12, border: '1px solid #cbd5e1',
+                      background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportSubmit}
+                    disabled={!selectedFile || parsedRecords.length === 0 || importing}
+                    style={{
+                      padding: '10px 22px', borderRadius: 12, border: 'none',
+                      background: (!selectedFile || parsedRecords.length === 0 || importing)
+                        ? '#94a3b8'
+                        : 'linear-gradient(135deg, #6366f1 0%, #22d3ee 100%)',
+                      color: '#ffffff', fontWeight: 700, fontSize: '0.84rem',
+                      cursor: (!selectedFile || parsedRecords.length === 0 || importing) ? 'not-allowed' : 'pointer',
+                      boxShadow: (!selectedFile || parsedRecords.length === 0 || importing) ? 'none' : '0 8px 20px -6px rgba(99,102,241,0.5)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                  >
+                    {importing ? (
+                      <>
+                        <RefreshCw size={15} style={{ animation: 'ep-spin .8s linear infinite' }} />
+                        Importing Records…
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud size={15} />
+                        {`Import ${parsedRecords.length > 0 ? parsedRecords.length : ''} ${meta.pluralDisplayName}`}
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>,
