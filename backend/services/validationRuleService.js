@@ -670,6 +670,9 @@ const validationRuleService = {
       })
     );
   },
+  fetchResolvedRules,
+  evaluateRule,
 };
 
 module.exports = validationRuleService;
+

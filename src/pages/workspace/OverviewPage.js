@@ -1936,7 +1936,7 @@ function ObjectListContent({ objectTypeId }) {
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
-  // CSV Import/Export States
+  // CSV Import States
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [parsedRecords, setParsedRecords] = useState([]);
@@ -1944,6 +1944,7 @@ function ObjectListContent({ objectTypeId }) {
   const [unmatchedHeaders, setUnmatchedHeaders] = useState([]);
   const [csvValidationError, setCsvValidationError] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
   const [importReport, setImportReport] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
@@ -1956,6 +1957,7 @@ function ObjectListContent({ objectTypeId }) {
     setCsvValidationError(null);
     setImportReport(null);
     setImporting(false);
+    setImportProgress('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -2535,11 +2537,15 @@ function ObjectListContent({ objectTypeId }) {
     const newAdded = [];
     const backendErrors = [];
     const successRowNums = new Set();
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 50;
     const totalDataRows = parsedRecords.length;
+    const totalBatches = Math.ceil(totalDataRows / BATCH_SIZE);
 
     for (let i = 0; i < parsedRecords.length; i += BATCH_SIZE) {
+      const batchIndex = Math.floor(i / BATCH_SIZE);
       const batch = parsedRecords.slice(i, i + BATCH_SIZE);
+      const currentProgressStr = `Processing batch ${batchIndex + 1} of ${totalBatches} (${Math.min(i + batch.length, totalDataRows)} / ${totalDataRows} records processed)...`;
+      setImportProgress(currentProgressStr);
 
       try {
         const res = await apiPost(`/objects/${objectTypeId}`, batch, { isUserActivity: true });
@@ -2556,8 +2562,22 @@ function ObjectListContent({ objectTypeId }) {
         if (res?.errors && Array.isArray(res.errors)) {
           backendErrors.push(...res.errors);
         }
+        if (res?.results && Array.isArray(res.results)) {
+          res.results.forEach(r => {
+            if (r.status === 'imported' && r.rowNumber) successRowNums.add(r.rowNumber);
+            if (r.status === 'failed' && r.error) {
+              backendErrors.push({ rowNum: r.rowNumber, identifier: r.identifier, reason: r.error });
+            }
+          });
+        }
       } catch (bulkErr) {
-        console.warn(`Batch post for ${objectTypeId} returned error, processing response:`, bulkErr);
+        console.warn(`Batch ${batchIndex + 1} post for ${objectTypeId} returned error:`, bulkErr);
+
+        if (bulkErr?.status === 401) {
+          showToast && showToast('Session expired during import. Processing stopped.', 'error');
+          break;
+        }
+
         const errData = bulkErr.data;
 
         if (errData?.errors && Array.isArray(errData.errors)) {
@@ -2572,32 +2592,22 @@ function ObjectListContent({ objectTypeId }) {
           });
         }
 
-        // Fallback for any row in batch not accounted for by backend success/error payload
-        const unaccounted = batch.filter(row => !successRowNums.has(row.__rowNum));
-        for (const recordPayload of unaccounted) {
-          const alreadyLogged = backendErrors.some(e => e.rowNum === recordPayload.__rowNum);
-          if (alreadyLogged) continue;
-
-          try {
-            const created = await apiPost(`/objects/${objectTypeId}`, recordPayload, { isUserActivity: true });
-            const item = created?.data || created || recordPayload;
-            newAdded.push(item);
-            successCount++;
-            if (recordPayload.__rowNum) successRowNums.add(recordPayload.__rowNum);
-          } catch (singleErr) {
-            const errMsg = singleErr.message || singleErr.data?.message || 'Validation Error';
-            const rowId = recordPayload.name || recordPayload.deal_name || recordPayload.company_name || recordPayload.email || `Row ${recordPayload.__rowNum}`;
+        const errMsg = bulkErr.message || bulkErr.data?.message || 'Batch request failed';
+        batch.forEach(row => {
+          if (!successRowNums.has(row.__rowNum) && !backendErrors.some(e => e.rowNum === row.__rowNum)) {
+            const rowId = row.name || row.deal_name || row.company_name || row.contact_name || row.email || `Row ${row.__rowNum}`;
             backendErrors.push({
-              rowNum: recordPayload.__rowNum,
+              rowNum: row.__rowNum,
               identifier: String(rowId).trim(),
               reason: errMsg,
             });
           }
-        }
+        });
       }
     }
 
     setImporting(false);
+    setImportProgress('');
 
     const reportRows = parsedRecords.map(rec => {
       const isSuccess = successRowNums.has(rec.__rowNum);
@@ -3567,6 +3577,11 @@ function ObjectListContent({ objectTypeId }) {
                   >
                     Cancel
                   </button>
+                  {importing && importProgress && (
+                    <div style={{ fontSize: '0.81rem', color: '#6366f1', fontWeight: 600, marginRight: 'auto' }}>
+                      {importProgress}
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={handleImportSubmit}
@@ -3585,7 +3600,7 @@ function ObjectListContent({ objectTypeId }) {
                     {importing ? (
                       <>
                         <RefreshCw size={15} style={{ animation: 'ep-spin .8s linear infinite' }} />
-                        Importing Records…
+                        Processing...
                       </>
                     ) : (
                       <>

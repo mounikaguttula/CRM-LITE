@@ -155,6 +155,12 @@ CREATE TABLE IF NOT EXISTS public.universal_table (
   CONSTRAINT objects_secondary_parent_id_fkey FOREIGN KEY (secondary_parent_id) REFERENCES universal_table (id),
   CONSTRAINT objects_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES "Organization" (id) ON DELETE CASCADE,
   CONSTRAINT objects_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES users (id)
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_universal_table_org_object_deleted
+  ON public.universal_table USING btree (organization_id, object_type_id, is_deleted) TABLESPACE pg_default;
+
+
 -- ---------------------------------------------------------
 -- 7. VALIDATION RULES TABLE (Multi-Tenant)
 -- ---------------------------------------------------------

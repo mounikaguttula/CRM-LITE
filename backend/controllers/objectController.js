@@ -142,49 +142,7 @@ const createRecord = async (req, res, next) => {
     await metadataService.checkPermission(req.user, objectType, 'create');
 
     if (Array.isArray(req.body)) {
-      const createdRecords = [];
-      const errorDetails = [];
-      const rowResults = [];
-
-      for (let i = 0; i < req.body.length; i++) {
-        const itemPayload = req.body[i];
-        const rowNum = itemPayload.__rowNum || (i + 1);
-        const rowIdentifier = itemPayload.name || itemPayload.deal_name || itemPayload.company_name || itemPayload.contact_name || itemPayload.email || `Row ${rowNum}`;
-
-        try {
-          const cleanPayload = { ...itemPayload };
-          delete cleanPayload.__rowNum;
-
-          validateMeaningfulPayload(objectType, cleanPayload);
-
-          const record = await objectService.createRecord(objectType, cleanPayload, organizationId, userId);
-          if (record) {
-            createdRecords.push({ ...record, __rowNum: rowNum });
-            rowResults.push({
-              rowNumber: rowNum,
-              identifier: String(rowIdentifier).trim(),
-              status: 'imported',
-              recordId: record.id,
-              error: null,
-            });
-          }
-        } catch (err) {
-          const errMsg = err.message || err.error || `Failed to create ${objectType} record.`;
-          console.error(`Error creating row ${rowNum} in bulk import for ${objectType}:`, errMsg);
-          errorDetails.push({
-            rowNum,
-            identifier: String(rowIdentifier).trim(),
-            reason: errMsg,
-          });
-          rowResults.push({
-            rowNumber: rowNum,
-            identifier: String(rowIdentifier).trim(),
-            status: 'failed',
-            recordId: null,
-            error: errMsg,
-          });
-        }
-      }
+      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId);
 
       auditService.logUserActivity({
         organization_id: organizationId,
@@ -192,21 +150,23 @@ const createRecord = async (req, res, next) => {
         action: 'CREATE',
         module: objectType,
         record_id: null,
-        description: `Bulk created ${createdRecords.length} ${objectType} record(s)${errorDetails.length > 0 ? `, ${errorDetails.length} failed` : ''}`,
+        description: `Bulk processed ${bulkResult.totalProcessed} ${objectType} record(s): ${bulkResult.createdCount} created, ${bulkResult.failedCount} failed`,
       }).catch((auditErr) => console.error('❌ Audit log error in bulk createRecord:', auditErr.message));
 
-      const statusCode = createdRecords.length > 0 ? 201 : 400;
+      const statusCode = bulkResult.createdCount > 0 ? 201 : 400;
       return res.status(statusCode).json({
-        success: createdRecords.length > 0,
+        success: bulkResult.createdCount > 0,
         statusCode,
-        totalProcessed: req.body.length,
-        createdCount: createdRecords.length,
-        failedCount: errorDetails.length,
-        data: createdRecords,
-        results: rowResults,
-        message: createdRecords.length > 0
-          ? `Bulk ${objectType} records processed: ${createdRecords.length} created${errorDetails.length > 0 ? `, ${errorDetails.length} failed` : ''}.`
-          : `Failed to import ${objectType} records: All ${errorDetails.length} rows failed.`,
+        totalProcessed: bulkResult.totalProcessed,
+        createdCount: bulkResult.createdCount,
+        failedCount: bulkResult.failedCount,
+        skippedCount: bulkResult.skippedCount || 0,
+        data: bulkResult.data,
+        results: bulkResult.results,
+        errors: bulkResult.errors,
+        message: bulkResult.createdCount > 0
+          ? `Bulk ${objectType} records processed: ${bulkResult.createdCount} created${bulkResult.failedCount > 0 ? `, ${bulkResult.failedCount} failed` : ''}.`
+          : `Failed to import ${objectType} records: All ${bulkResult.failedCount} rows failed.`,
       });
     }
 
