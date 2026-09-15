@@ -1781,7 +1781,7 @@ function getMeaningfulFieldKeys(objectTypeId, fieldsList = []) {
     return new Set(['name', 'company_name', 'account_name', 'website', 'domain', 'phone', 'industry', 'number_of_employees', 'address']);
   }
   if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
-    return new Set(['name', 'deal_name', 'opportunity_name', 'amount', 'stage', 'expected_close_date', 'company', 'contact']);
+    return new Set(['name', 'deal_name', 'opportunity_name', 'amount', 'stage', 'expected_close_date', 'company', 'company_id', 'contact', 'contact_id']);
   }
   if (cleanKey.includes('lead')) {
     return new Set(['first_name', 'last_name', 'name', 'email', 'alternate_email', 'phone', 'company', 'title', 'lead_source']);
@@ -1852,7 +1852,9 @@ function getObjectAllowedFields(objectTypeId, fieldsList = []) {
     allowedMap.set('expected_close_date', { key: 'expected_close_date', label: 'Close Date' });
     allowedMap.set('probability', { key: 'probability', label: 'Probability' });
     allowedMap.set('company', { key: 'company', label: 'Company' });
+    allowedMap.set('company_id', { key: 'company_id', label: 'Company ID' });
     allowedMap.set('contact', { key: 'contact', label: 'Contact' });
+    allowedMap.set('contact_id', { key: 'contact_id', label: 'Contact ID' });
     allowedMap.set('description', { key: 'description', label: 'Description' });
   } else if (cleanKey.includes('lead')) {
     allowedMap.set('first_name', { key: 'first_name', label: 'First Name' });
@@ -1889,6 +1891,8 @@ function mapHeaderToField(rawHeader, allowedMap) {
   else if (cleanAlpha === 'email' || cleanAlpha === 'emailaddress' || cleanAlpha === 'workemail' || cleanAlpha === 'primaryemail') candidateKey = 'email';
   else if (cleanAlpha === 'alternateemail' || cleanAlpha === 'alternateemailid' || cleanAlpha === 'secondaryemail' || cleanAlpha === 'altemail' || cleanAlpha === 'otheremail') candidateKey = 'alternate_email';
   else if (cleanAlpha === 'phone' || cleanAlpha === 'phonenumber' || cleanAlpha === 'telephone' || cleanAlpha === 'mobile' || cleanAlpha === 'tel' || cleanAlpha === 'cell') candidateKey = 'phone';
+  else if (cleanAlpha === 'companyid' || cleanAlpha === 'companyuuid') candidateKey = 'company_id';
+  else if (cleanAlpha === 'contactid' || cleanAlpha === 'contactuuid') candidateKey = 'contact_id';
   else if (cleanAlpha === 'company' || cleanAlpha === 'companyname' || cleanAlpha === 'organization' || cleanAlpha === 'organizationname' || cleanAlpha === 'account' || cleanAlpha === 'accountname' || cleanAlpha === 'org') candidateKey = 'company';
   else if (cleanAlpha === 'title' || cleanAlpha === 'jobtitle' || cleanAlpha === 'designation' || cleanAlpha === 'position' || cleanAlpha === 'role') candidateKey = 'title';
   else if (cleanAlpha === 'leadsource' || cleanAlpha === 'source') candidateKey = 'lead_source';
@@ -2292,6 +2296,18 @@ function ObjectListContent({ objectTypeId }) {
       return '—';
     }
     const str = String(val).trim();
+    // Resolve relationship ID fields (company_id, contact_id) to human names for CSV import preview
+    if (keyLower === 'company_id' || keyLower === 'contact_id') {
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)) {
+        const resolved = lookupMap?.[str];
+        if (resolved) {
+          const resolvedName = resolved.name || resolved.company_name || resolved.contact_name || resolved.account_name;
+          if (resolvedName && !isUuid(resolvedName)) return resolvedName;
+        }
+        return `Unresolved: ${str.slice(0, 8)}…`;
+      }
+      return str;
+    }
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str) || /id$/i.test(key)) {
       return '—';
     }
