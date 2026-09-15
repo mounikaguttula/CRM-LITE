@@ -803,6 +803,589 @@ const objectService = {
 
     return { success: true, message: `Record '${id}' deleted successfully.` };
   },
+
+  /**
+   * Bulk create records for any objectType in universal_table with pre-cached metadata,
+   * bulk relationship lookups, in-memory validation, and controlled failure isolation.
+   * @param {Object} [options] - Optional settings.
+   * @param {boolean} [options.dryRun=false] - When true, runs full processing but skips the database INSERT.
+   *   Never passed from HTTP controllers. Only used by benchmark/profiling scripts.
+   */
+  bulkCreateRecords: async (objectKey, recordsArray, organizationId, userId, cacheContext = null, options = {}) => {
+    const dryRun = options.dryRun === true;
+    if (!Array.isArray(recordsArray) || recordsArray.length === 0) {
+      return {
+        success: true,
+        totalProcessed: 0,
+        createdCount: 0,
+        failedCount: 0,
+        skippedCount: 0,
+        data: [],
+        results: [],
+        errors: []
+      };
+    }
+
+    const cleanKey = String(objectKey || '').toLowerCase();
+
+    // 1. Pre-fetch metadata, field definitions, object types, and validation rules (or use cacheContext)
+    let objDef, fields, validationRules, companyObjectType, contactObjectType;
+
+    if (cacheContext) {
+      objDef = cacheContext.objDef;
+      fields = cacheContext.fields;
+      validationRules = cacheContext.validationRules;
+      companyObjectType = cacheContext.companyObjectType;
+      contactObjectType = cacheContext.contactObjectType;
+    } else {
+      const defRes = await metadataService.getObjectDefinition(objectKey, organizationId);
+      objDef = defRes.definition;
+      fields = defRes.fields;
+
+      validationRules = await validationRuleService.fetchResolvedRules(organizationId, {
+        objectName: objDef.api_name,
+        activeOnly: true,
+      }).catch(() => []);
+
+      companyObjectType = await metadataService.getObjectTypeByApiName('companies', organizationId).catch(() => null);
+      contactObjectType = await metadataService.getObjectTypeByApiName('contacts', organizationId).catch(() => null);
+    }
+
+    // 2. Extract unique Company IDs/Names and Contact IDs/Names across all rows in recordsArray
+    const companyIdsSet = new Set();
+    const contactIdsSet = new Set();
+    const companyNamesSet = new Set();
+    const contactNamesSet = new Set();
+
+    const extractedInputs = recordsArray.map((rowPayload) => {
+      let companyIdInput = undefined;
+      let companyNameInput = undefined;
+      let contactIdInput = undefined;
+      let contactNameInput = undefined;
+
+      const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
+      for (const k of explicitCompanyIdKeys) {
+        if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+          companyIdInput = String(rowPayload[k]).trim();
+          break;
+        }
+      }
+      if (companyIdInput === undefined) {
+        const rawComp = rowPayload.company !== undefined ? rowPayload.company : rowPayload.Company;
+        if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
+          const compStr = String(rawComp).trim();
+          if (isUuid(compStr)) {
+            companyIdInput = compStr;
+          } else {
+            companyNameInput = compStr;
+          }
+        }
+      }
+      if (companyNameInput === undefined) {
+        const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
+        for (const k of explicitCompanyNameKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+            const nameStr = String(rowPayload[k]).trim();
+            if (!isUuid(nameStr)) {
+              companyNameInput = nameStr;
+              break;
+            }
+          }
+        }
+      }
+
+      const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
+      for (const k of explicitContactIdKeys) {
+        if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+          contactIdInput = String(rowPayload[k]).trim();
+          break;
+        }
+      }
+      if (contactIdInput === undefined) {
+        const rawCont = rowPayload.contact !== undefined ? rowPayload.contact : rowPayload.Contact;
+        if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
+          const contStr = String(rawCont).trim();
+          if (isUuid(contStr)) {
+            contactIdInput = contStr;
+          } else {
+            contactNameInput = contStr;
+          }
+        }
+      }
+      if (contactNameInput === undefined) {
+        const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
+        for (const k of explicitContactNameKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+            const nameStr = String(rowPayload[k]).trim();
+            if (!isUuid(nameStr)) {
+              contactNameInput = nameStr;
+              break;
+            }
+          }
+        }
+      }
+
+      if (companyIdInput && companyIdInput !== 'null') companyIdsSet.add(companyIdInput);
+      if (contactIdInput && contactIdInput !== 'null') contactIdsSet.add(contactIdInput);
+      if (companyNameInput) companyNamesSet.add(companyNameInput.trim().toLowerCase());
+      if (contactNameInput) contactNamesSet.add(contactNameInput.trim().toLowerCase());
+
+      return {
+        companyIdInput,
+        companyNameInput,
+        contactIdInput,
+        contactNameInput
+      };
+    });
+
+    // 3. Perform bulk DB queries for relationship lookups (parallelized)
+    const companyByIdMap = new Map();
+    const contactByIdMap = new Map();
+    const companyByNameMap = new Map();
+    const contactByNameMap = new Map();
+
+    // Build all relationship lookup promises upfront, then execute in parallel
+    const relationshipPromises = [];
+
+    // Company ID lookup
+    if (companyIdsSet.size > 0) {
+      const validUuids = Array.from(companyIdsSet).filter(id => isUuid(id));
+      if (validUuids.length > 0) {
+        relationshipPromises.push(
+          supabase
+            .from('universal_table')
+            .select('id, organization_id, object_type_id, name, data, is_deleted')
+            .in('id', validUuids)
+            .then(({ data: rows }) => {
+              (rows || []).forEach(r => companyByIdMap.set(r.id, r));
+            })
+        );
+      }
+    }
+
+    // Contact ID lookup
+    if (contactIdsSet.size > 0) {
+      const validUuids = Array.from(contactIdsSet).filter(id => isUuid(id));
+      if (validUuids.length > 0) {
+        relationshipPromises.push(
+          supabase
+            .from('universal_table')
+            .select('id, organization_id, object_type_id, name, data, is_deleted')
+            .in('id', validUuids)
+            .then(({ data: rows }) => {
+              (rows || []).forEach(r => contactByIdMap.set(r.id, r));
+            })
+        );
+      }
+    }
+
+    // Company Name lookup
+    if (companyNamesSet.size > 0 && companyObjectType) {
+      relationshipPromises.push(
+        supabase
+          .from('universal_table')
+          .select('id, organization_id, object_type_id, name, data, is_deleted')
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', companyObjectType.id)
+          .eq('is_deleted', false)
+          .then(({ data: rows }) => {
+            (rows || []).forEach(r => {
+              const rName = String(r.name || r.data?.name || r.data?.company_name || '').trim().toLowerCase();
+              if (companyNamesSet.has(rName)) {
+                if (!companyByNameMap.has(rName)) companyByNameMap.set(rName, []);
+                companyByNameMap.get(rName).push(r);
+              }
+            });
+          })
+      );
+    }
+
+    // Contact Name lookup
+    if (contactNamesSet.size > 0 && contactObjectType) {
+      relationshipPromises.push(
+        supabase
+          .from('universal_table')
+          .select('id, organization_id, object_type_id, name, data, is_deleted')
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', contactObjectType.id)
+          .eq('is_deleted', false)
+          .then(({ data: rows }) => {
+            (rows || []).forEach(r => {
+              const rName = String(r.name || r.data?.name || r.data?.contact_name || '').trim().toLowerCase();
+              if (contactNamesSet.has(rName)) {
+                if (!contactByNameMap.has(rName)) contactByNameMap.set(rName, []);
+                contactByNameMap.get(rName).push(r);
+              }
+            });
+          })
+      );
+    }
+
+    // Execute all relationship lookups concurrently
+    await Promise.all(relationshipPromises);
+
+    // 4. Duplicate checks (in-CSV + existing DB)
+    // Option C: Fetch existing records ONCE and reuse for all unique fields.
+    // Previously each unique field triggered a separate full-table scan.
+    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code');
+    const seenCsvValuesMap = new Map();
+    uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Set()));
+
+    const existingDbValuesMap = new Map();
+    uniqueFields.forEach(f => existingDbValuesMap.set(f.name, new Set()));
+
+    if (uniqueFields.length > 0) {
+      // Check if ANY unique field has values in the current batch
+      const anyBatchHasValues = uniqueFields.some(f => {
+        return recordsArray.some(r => {
+          const v = r[f.name] !== undefined ? r[f.name] : (r.data && r.data[f.name]);
+          return v !== undefined && v !== null && String(v).trim() !== '';
+        });
+      });
+
+      if (anyBatchHasValues) {
+        // Single fetch: retrieve existing records ONCE for this object type
+        const { data: allExistingRows } = await supabase
+          .from('universal_table')
+          .select('data')
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', objDef.id)
+          .eq('is_deleted', false);
+
+        // Extract values for ALL unique fields from the single result set
+        if (allExistingRows && allExistingRows.length > 0) {
+          for (const f of uniqueFields) {
+            const dbSet = existingDbValuesMap.get(f.name);
+            allExistingRows.forEach(d => {
+              const dbVal = d.data && d.data[f.name];
+              if (dbVal && String(dbVal).trim()) {
+                dbSet.add(String(dbVal).trim().toLowerCase());
+              }
+            });
+          }
+        }
+      }
+    }
+
+    // 5. In-Memory Validation & Payload Construction Loop
+    const validNewRows = [];
+    const validPayloadsToReturn = [];
+    const rowResults = [];
+    const errorDetails = [];
+    let createdCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < recordsArray.length; i++) {
+      const payload = recordsArray[i];
+      const rowNum = payload.__rowNum || (i + 1);
+      const rowIdentifier = payload.name || payload.deal_name || payload.company_name || payload.contact_name || payload.email || `Row ${rowNum}`;
+      const relInputs = extractedInputs[i];
+
+      try {
+        const cleanPayload = { ...payload };
+        delete cleanPayload.__rowNum;
+
+        validateDuplicateEmails(cleanPayload);
+        validateEmailFormats(cleanPayload);
+
+        // Required field validation
+        for (const field of fields) {
+          if (field.required && field.type !== 'lookup' && (cleanPayload[field.name] === undefined || cleanPayload[field.name] === '')) {
+            throw { statusCode: 400, message: `Validation Error: Field '${field.label || field.name}' is required for ${objectKey}.` };
+          }
+        }
+
+        // Unique field validation (against CSV payload & DB)
+        for (const f of uniqueFields) {
+          const rawVal = cleanPayload[f.name];
+          if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '') {
+            const normVal = String(rawVal).trim().toLowerCase();
+            const seenSet = seenCsvValuesMap.get(f.name);
+            const dbSet = existingDbValuesMap.get(f.name);
+
+            if (seenSet.has(normVal)) {
+              throw { statusCode: 400, message: `Validation Error: Duplicate ${f.label || f.name} '${rawVal}' found within the import payload.` };
+            }
+            if (dbSet.has(normVal)) {
+              throw { statusCode: 400, message: `Validation Error: ${f.label || f.name} '${rawVal}' already exists.` };
+            }
+            seenSet.add(normVal);
+          }
+        }
+
+        // Custom validation rules (in-memory)
+        const vErrors = [];
+        (validationRules || []).forEach(rule => {
+          const isValid = validationRuleService.evaluateRule(rule, cleanPayload);
+          if (!isValid) {
+            vErrors.push(rule.error_message || `Validation rule '${rule.rule_name}' failed.`);
+          }
+        });
+        if (vErrors.length > 0) {
+          throw { statusCode: 400, message: vErrors.join(' | ') };
+        }
+
+        // Canonical name resolution
+        const rawName = (cleanPayload.name || cleanPayload.first_name || cleanPayload.title || '').trim();
+        if (rawName) {
+          if (!cleanPayload.name) cleanPayload.name = rawName;
+          if (!cleanPayload.first_name) cleanPayload.first_name = rawName.split(' ')[0] || rawName;
+          if (!cleanPayload.last_name) cleanPayload.last_name = rawName.split(' ').slice(1).join(' ') || cleanPayload.first_name;
+        }
+
+        const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = cleanPayload;
+        let resolvedName = '';
+        if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
+          const candidate = cleanPayload.name || cleanPayload.company_name || cleanPayload.account_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.company_name));
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : '';
+        } else if (cleanKey === 'contact' || cleanKey === 'person' || cleanKey === 'contacts' || cleanKey === 'people') {
+          const explicitName = (!isUuid(cleanPayload.name) && String(cleanPayload.name || '').trim()) ? String(cleanPayload.name).trim() : '';
+          const fn = String(cleanPayload.first_name || (cleanPayload.data && cleanPayload.data.first_name) || '').trim();
+          const ln = String(cleanPayload.last_name || (cleanPayload.data && cleanPayload.data.last_name) || '').trim();
+          const combined = `${fn} ${ln}`.trim();
+          resolvedName = explicitName || combined || (!isUuid(cleanPayload.email) && cleanPayload.email ? String(cleanPayload.email).split('@')[0] : 'Contact');
+        } else if (cleanKey === 'deal' || cleanKey === 'opportunity' || cleanKey === 'deals' || cleanKey === 'opportunities') {
+          const candidate = cleanPayload.name || cleanPayload.deal_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.deal_name));
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : 'New Deal';
+        } else {
+          const candidate = cleanPayload.name || cleanPayload.title || cleanPayload.subject || (cleanPayload.data && cleanPayload.data.name);
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : 'Untitled';
+        }
+
+        if (!resolvedName) resolvedName = (!isUuid(name) && String(name || '').trim()) ? String(name).trim() : 'Untitled';
+        customData.name = resolvedName;
+
+        // Bi-directional alias syncing
+        const titleVal = (cleanPayload.title || cleanPayload.job_title || '').trim();
+        if (titleVal) { customData.title = titleVal; customData.job_title = titleVal; }
+        const sourceVal = (cleanPayload.lead_source || cleanPayload.source || '').trim();
+        if (sourceVal) { customData.lead_source = sourceVal; customData.source = sourceVal; }
+
+        // Company Relationship Resolution
+        let resolvedParent = null;
+        let resolvedParentName = null;
+
+        if (relInputs.companyIdInput !== undefined) {
+          if (relInputs.companyIdInput && relInputs.companyIdInput !== 'null') {
+            if (!isUuid(relInputs.companyIdInput)) {
+              throw { statusCode: 400, message: `Validation Error: Company ID '${relInputs.companyIdInput}' is not a valid UUID format.` };
+            }
+            const parentRow = companyByIdMap.get(relInputs.companyIdInput);
+            if (!parentRow || parentRow.is_deleted) {
+              throw { statusCode: 400, message: `Validation Error: Company ID '${relInputs.companyIdInput}' was not found.` };
+            }
+            if (parentRow.organization_id !== organizationId) {
+              throw { statusCode: 403, message: `Validation Error: Company ID '${relInputs.companyIdInput}' does not belong to the current organization.` };
+            }
+            if (companyObjectType && parentRow.object_type_id !== companyObjectType.id) {
+              throw { statusCode: 400, message: `Validation Error: The referenced record '${relInputs.companyIdInput}' is not a Company object type.` };
+            }
+            resolvedParent = parentRow.id;
+            resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || 'Company';
+          }
+        } else if (relInputs.companyNameInput) {
+          const cleanName = relInputs.companyNameInput.trim().toLowerCase();
+          const matches = companyByNameMap.get(cleanName) || [];
+          if (matches.length > 1) {
+            throw { statusCode: 400, message: `Validation Error: Multiple Companys found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
+          }
+          if (matches.length === 1) {
+            resolvedParent = matches[0].id;
+            resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
+          } else {
+            resolvedParentName = relInputs.companyNameInput;
+          }
+        }
+
+        if (resolvedParent) {
+          customData.company = resolvedParent;
+          customData.company_id = resolvedParent;
+          customData.Company = resolvedParent;
+          customData.Company_id = resolvedParent;
+          if (resolvedParentName) customData.company_name = resolvedParentName;
+        } else {
+          customData.company = null; customData.company_id = null; customData.Company = null; customData.Company_id = null;
+          if (relInputs.companyIdInput !== undefined) customData.company_name = null;
+          else customData.company_name = resolvedParentName || null;
+        }
+
+        // Contact Relationship Resolution
+        let resolvedSecondary = null;
+        let resolvedSecondaryName = null;
+
+        if (relInputs.contactIdInput !== undefined) {
+          if (relInputs.contactIdInput && relInputs.contactIdInput !== 'null') {
+            if (!isUuid(relInputs.contactIdInput)) {
+              throw { statusCode: 400, message: `Validation Error: Contact ID '${relInputs.contactIdInput}' is not a valid UUID format.` };
+            }
+            const secRow = contactByIdMap.get(relInputs.contactIdInput);
+            if (!secRow || secRow.is_deleted) {
+              throw { statusCode: 400, message: `Validation Error: Contact ID '${relInputs.contactIdInput}' was not found.` };
+            }
+            if (secRow.organization_id !== organizationId) {
+              throw { statusCode: 403, message: `Validation Error: Contact ID '${relInputs.contactIdInput}' does not belong to the current organization.` };
+            }
+            if (contactObjectType && secRow.object_type_id !== contactObjectType.id) {
+              throw { statusCode: 400, message: `Validation Error: The referenced record '${relInputs.contactIdInput}' is not a Contact object type.` };
+            }
+            resolvedSecondary = secRow.id;
+            resolvedSecondaryName = secRow.name || secRow.data?.name || secRow.data?.contact_name || 'Contact';
+          }
+        } else if (relInputs.contactNameInput) {
+          const cleanName = relInputs.contactNameInput.trim().toLowerCase();
+          const matches = contactByNameMap.get(cleanName) || [];
+          if (matches.length > 1) {
+            throw { statusCode: 400, message: `Validation Error: Multiple Contacts found with the name '${relInputs.contactNameInput}'. Please provide Contact ID.` };
+          }
+          if (matches.length === 1) {
+            resolvedSecondary = matches[0].id;
+            resolvedSecondaryName = matches[0].name || matches[0].data?.name || matches[0].data?.contact_name || relInputs.contactNameInput;
+          } else {
+            resolvedSecondaryName = relInputs.contactNameInput;
+          }
+        }
+
+        if (resolvedSecondary) {
+          customData.contact = resolvedSecondary;
+          customData.contact_id = resolvedSecondary;
+          customData.Contact = resolvedSecondary;
+          customData.Contact_id = resolvedSecondary;
+          if (resolvedSecondaryName) customData.contact_name = resolvedSecondaryName;
+        } else {
+          customData.contact = null; customData.contact_id = null; customData.Contact = null; customData.Contact_id = null;
+          if (relInputs.contactIdInput !== undefined) customData.contact_name = null;
+          else customData.contact_name = resolvedSecondaryName || null;
+        }
+
+        const newRow = {
+          organization_id: organizationId,
+          object_type_id: objDef.id,
+          name: resolvedName,
+          status: status || 'Active',
+          owner_id: owner_id || userId || null,
+          parent_id: resolvedParent,
+          secondary_parent_id: resolvedSecondary,
+          data: customData,
+          created_by: userId || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          __rowNum: rowNum,
+          __rowIdentifier: rowIdentifier
+        };
+
+        validNewRows.push(newRow);
+      } catch (err) {
+        failedCount++;
+        const errMsg = err.message || err.error || `Failed to create ${objectKey} record.`;
+        errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg });
+        rowResults.push({ rowNumber: rowNum, identifier: String(rowIdentifier).trim(), status: 'failed', recordId: null, error: errMsg });
+      }
+    }
+
+    // 6. Bulk Insert Valid Rows into universal_table with Controlled Backend Isolation
+    if (validNewRows.length > 0 && !dryRun) {
+      const rowsToInsert = validNewRows.map(r => {
+        const copy = { ...r };
+        delete copy.__rowNum;
+        delete copy.__rowIdentifier;
+        return copy;
+      });
+
+      const { data: insertedData, error: bulkInsertErr } = await supabase
+        .from('universal_table')
+        .insert(rowsToInsert)
+        .select();
+
+      if (!bulkInsertErr && Array.isArray(insertedData)) {
+        insertedData.forEach((row, idx) => {
+          const normRecord = objectService.normalizeRecord(row);
+          const origRow = validNewRows[idx];
+          const rowNum = origRow.__rowNum;
+          const rowIdentifier = origRow.__rowIdentifier;
+
+          createdCount++;
+          validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
+          rowResults.push({
+            rowNumber: rowNum,
+            identifier: String(rowIdentifier).trim(),
+            status: 'imported',
+            recordId: normRecord.id,
+            error: null
+          });
+        });
+      } else {
+        // Bulk INSERT failed (e.g. database constraint error).
+        // Fallback: isolate rows server-side inside backend request loop
+        console.warn(`Bulk insert error for ${objectKey}, isolating rows server-side:`, bulkInsertErr?.message);
+
+        for (let i = 0; i < validNewRows.length; i++) {
+          const origRow = validNewRows[i];
+          const singlePayload = { ...origRow };
+          const rowNum = singlePayload.__rowNum;
+          const rowIdentifier = singlePayload.__rowIdentifier;
+          delete singlePayload.__rowNum;
+          delete singlePayload.__rowIdentifier;
+
+          const { data: singleInserted, error: singleErr } = await supabase
+            .from('universal_table')
+            .insert([singlePayload])
+            .select()
+            .single();
+
+          if (!singleErr && singleInserted) {
+            const normRecord = objectService.normalizeRecord(singleInserted);
+            createdCount++;
+            validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'imported',
+              recordId: normRecord.id,
+              error: null
+            });
+          } else {
+            failedCount++;
+            const errMsg = singleErr?.message || 'Database Insertion Error';
+            errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg });
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'failed',
+              recordId: null,
+              error: errMsg
+            });
+          }
+        }
+      }
+    } else if (validNewRows.length > 0 && dryRun) {
+      // DRY RUN: Skip INSERT entirely. Report valid rows as dry_run status.
+      validNewRows.forEach(origRow => {
+        const rowNum = origRow.__rowNum;
+        const rowIdentifier = origRow.__rowIdentifier;
+        createdCount++;
+        rowResults.push({
+          rowNumber: rowNum,
+          identifier: String(rowIdentifier).trim(),
+          status: 'dry_run',
+          recordId: null,
+          error: null
+        });
+      });
+    }
+
+    rowResults.sort((a, b) => a.rowNumber - b.rowNumber);
+
+    return {
+      success: createdCount > 0,
+      totalProcessed: recordsArray.length,
+      createdCount,
+      failedCount,
+      skippedCount: 0,
+      data: validPayloadsToReturn,
+      results: rowResults,
+      errors: errorDetails
+    };
+  },
 };
 
 module.exports = objectService;
