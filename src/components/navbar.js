@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { Search, Bell, Menu, Settings, Command, ArrowRight, Layers } from 'lucide-react';
+import { Search, Menu, Settings, Command, ArrowRight, Layers } from 'lucide-react';
 
 function Navbar({ onMenuToggle }) {
   const navigate = useNavigate();
@@ -282,18 +282,6 @@ function Navbar({ onMenuToggle }) {
           )}
         </div>
 
-        <button type="button" className="glass glass-hover" style={iconBtn} title="Notifications">
-          <Bell size={16} style={{ color: '#0f1330' }} />
-          <span
-            style={{
-              position: 'absolute', top: 8, right: 8,
-              width: 8, height: 8, borderRadius: '50%',
-              background: '#f43f5e',
-              boxShadow: '0 0 0 3px rgba(255,255,255,0.9), 0 0 12px rgba(244,63,94,0.6)',
-              animation: 'pulseGlow 2s infinite',
-            }}
-          />
-        </button>
 
         <button
           type="button"

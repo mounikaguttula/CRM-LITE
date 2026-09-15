@@ -69,7 +69,13 @@ const validateEmailFormats = (payload) => {
 
 // Helper to validate parent record existence, tenant ownership, and target object type
 const validateParentRelationship = async (parentId, expectedObjectKey, organizationId, fieldLabel = 'Company') => {
-  if (!parentId || !isUuid(parentId)) return null;
+  if (!parentId) return null;
+  if (!isUuid(parentId)) {
+    throw {
+      statusCode: 400,
+      message: `Validation Error: ${fieldLabel} ID '${parentId}' is not a valid UUID format.`,
+    };
+  }
 
   const { data: parentRow, error } = await supabase
     .from('universal_table')
@@ -80,14 +86,14 @@ const validateParentRelationship = async (parentId, expectedObjectKey, organizat
   if (error || !parentRow || parentRow.is_deleted) {
     throw {
       statusCode: 400,
-      message: `Validation Error: The specified ${fieldLabel} parent record '${parentId}' does not exist or has been deleted.`,
+      message: `Validation Error: ${fieldLabel} ID '${parentId}' was not found.`,
     };
   }
 
   if (parentRow.organization_id !== organizationId) {
     throw {
       statusCode: 403,
-      message: `Validation Error: The specified ${fieldLabel} parent record does not belong to your organization.`,
+      message: `Validation Error: ${fieldLabel} ID '${parentId}' does not belong to the current organization.`,
     };
   }
 
@@ -102,6 +108,177 @@ const validateParentRelationship = async (parentId, expectedObjectKey, organizat
   }
 
   return parentRow;
+};
+
+// Helper to resolve parent by name within the current tenant, handling ambiguity
+const resolveParentByName = async (nameInput, targetObjectKey, organizationId, fieldLabel = 'Company') => {
+  if (!nameInput || typeof nameInput !== 'string' || !nameInput.trim()) return null;
+
+  const targetDef = await metadataService.getObjectTypeByApiName(targetObjectKey, organizationId).catch(() => null);
+  if (!targetDef || !targetDef.id) return null;
+
+  const cleanName = nameInput.trim().toLowerCase();
+
+  const { data: rows, error } = await supabase
+    .from('universal_table')
+    .select('id, name, data')
+    .eq('object_type_id', targetDef.id)
+    .eq('organization_id', organizationId)
+    .eq('is_deleted', false);
+
+  if (error || !rows || rows.length === 0) return null;
+
+  const matches = rows.filter((r) => {
+    const rName = String(r.name || r.data?.name || r.data?.company_name || r.data?.contact_name || '').trim().toLowerCase();
+    return rName === cleanName;
+  });
+
+  if (matches.length > 1) {
+    throw {
+      statusCode: 400,
+      message: `Validation Error: Multiple ${fieldLabel}s found with the name '${nameInput}'. Please provide ${fieldLabel} ID.`,
+    };
+  }
+
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  return null;
+};
+
+// Helper to extract separated relationship inputs and resolve relationships
+const resolveRecordRelationships = async (payload, cleanObjKey, organizationId) => {
+  let companyIdInput = undefined;
+  let companyNameInput = undefined;
+  let contactIdInput = undefined;
+  let contactNameInput = undefined;
+
+  // Explicit Company ID candidates
+  const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
+  for (const k of explicitCompanyIdKeys) {
+    if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+      companyIdInput = String(payload[k]).trim();
+      break;
+    }
+  }
+
+  if (companyIdInput === undefined) {
+    const rawComp = payload.company !== undefined ? payload.company : payload.Company;
+    if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
+      const compStr = String(rawComp).trim();
+      if (isUuid(compStr)) {
+        companyIdInput = compStr;
+      } else {
+        companyNameInput = compStr;
+      }
+    }
+  }
+
+  if (companyNameInput === undefined) {
+    const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
+    for (const k of explicitCompanyNameKeys) {
+      if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+        const nameStr = String(payload[k]).trim();
+        if (!isUuid(nameStr)) {
+          companyNameInput = nameStr;
+          break;
+        }
+      }
+    }
+  }
+
+  // Explicit Contact ID candidates
+  const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
+  for (const k of explicitContactIdKeys) {
+    if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+      contactIdInput = String(payload[k]).trim();
+      break;
+    }
+  }
+
+  if (contactIdInput === undefined) {
+    const rawCont = payload.contact !== undefined ? payload.contact : payload.Contact;
+    if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
+      const contStr = String(rawCont).trim();
+      if (isUuid(contStr)) {
+        contactIdInput = contStr;
+      } else {
+        contactNameInput = contStr;
+      }
+    }
+  }
+
+  if (contactNameInput === undefined) {
+    const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
+    for (const k of explicitContactNameKeys) {
+      if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+        const nameStr = String(payload[k]).trim();
+        if (!isUuid(nameStr)) {
+          contactNameInput = nameStr;
+          break;
+        }
+      }
+    }
+  }
+
+  let resolvedParent = null;
+  let resolvedParentName = null;
+  let resolvedSecondary = null;
+  let resolvedSecondaryName = null;
+
+  // 1. Resolve Company Relationship
+  if (companyIdInput !== undefined) {
+    if (companyIdInput && companyIdInput !== 'null') {
+      const expectedTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) ? 'company' : null;
+      const parentRow = await validateParentRelationship(companyIdInput, expectedTarget, organizationId, 'Company');
+      if (parentRow) {
+        resolvedParent = parentRow.id;
+        resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || 'Company';
+      }
+    }
+  } else if (companyNameInput) {
+    const expectedTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) ? 'company' : null;
+    const parentRow = await resolveParentByName(companyNameInput, expectedTarget, organizationId, 'Company');
+    if (parentRow) {
+      resolvedParent = parentRow.id;
+      resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || companyNameInput;
+    } else {
+      resolvedParentName = companyNameInput;
+    }
+  }
+
+  // 2. Resolve Contact Relationship
+  if (contactIdInput !== undefined) {
+    if (contactIdInput && contactIdInput !== 'null') {
+      const expectedSecondaryTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity') || cleanObjKey.includes('contact')) ? 'contact' : null;
+      const secondaryRow = await validateParentRelationship(contactIdInput, expectedSecondaryTarget, organizationId, 'Contact');
+      if (secondaryRow) {
+        resolvedSecondary = secondaryRow.id;
+        resolvedSecondaryName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name || 'Contact';
+      }
+    }
+  } else if (contactNameInput) {
+    const expectedSecondaryTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity') || cleanObjKey.includes('contact')) ? 'contact' : null;
+    const secondaryRow = await resolveParentByName(contactNameInput, expectedSecondaryTarget, organizationId, 'Contact');
+    if (secondaryRow) {
+      resolvedSecondary = secondaryRow.id;
+      resolvedSecondaryName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name || contactNameInput;
+    } else {
+      resolvedSecondaryName = contactNameInput;
+    }
+  }
+
+  return {
+    resolvedParent,
+    resolvedParentName,
+    resolvedSecondary,
+    resolvedSecondaryName,
+    companyIdInputProvided: companyIdInput !== undefined,
+    contactIdInputProvided: contactIdInput !== undefined,
+    companyNameInputProvided: companyNameInput !== undefined,
+    contactNameInputProvided: contactNameInput !== undefined,
+  };
 };
 
 /**
@@ -326,50 +503,28 @@ const objectService = {
 
     const cleanObjKey = String(objectKey || '').toLowerCase();
 
-    const parentInput = payload.parent_id !== undefined ? payload.parent_id : (payload.company_id !== undefined ? payload.company_id : (payload.company !== undefined ? payload.company : (payload.Company !== undefined ? payload.Company : (payload.Company_id !== undefined ? payload.Company_id : undefined))));
-    const secondaryInput = payload.secondary_parent_id !== undefined ? payload.secondary_parent_id : (payload.contact_id !== undefined ? payload.contact_id : (payload.contact !== undefined ? payload.contact : (payload.Contact !== undefined ? payload.Contact : (payload.Contact_id !== undefined ? payload.Contact_id : undefined))));
-
-    let rawParent = isUuid(parentInput) ? parentInput : null;
-    let rawSecondary = isUuid(secondaryInput) ? secondaryInput : null;
-
-    let resolvedParent = null;
-    let resolvedSecondary = null;
-
-    if (rawParent) {
-      const expectedTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) ? 'company' : null;
-      const parentRow = await validateParentRelationship(rawParent, expectedTarget, organizationId, 'Company');
-      if (parentRow) {
-        resolvedParent = parentRow.id;
-        const compName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name;
-        if (compName && typeof compName === 'string' && !isUuid(compName)) {
-          customData.company_name = compName;
-        }
-      }
-    }
-
-    if (rawSecondary) {
-      const expectedSecondaryTarget = (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity') || cleanObjKey.includes('contact')) ? 'contact' : null;
-      const secondaryRow = await validateParentRelationship(rawSecondary, expectedSecondaryTarget, organizationId, 'Contact');
-      if (secondaryRow) {
-        resolvedSecondary = secondaryRow.id;
-        const contName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name;
-        if (contName && typeof contName === 'string' && !isUuid(contName)) {
-          customData.contact_name = contName;
-        }
-      }
-    }
+    const relRes = await resolveRecordRelationships(payload, cleanObjKey, organizationId);
+    let resolvedParent = relRes.resolvedParent;
+    let resolvedSecondary = relRes.resolvedSecondary;
 
     if (resolvedParent) {
       customData.company = resolvedParent;
       customData.company_id = resolvedParent;
       customData.Company = resolvedParent;
       customData.Company_id = resolvedParent;
+      if (relRes.resolvedParentName) customData.company_name = relRes.resolvedParentName;
     } else {
       customData.company = null;
       customData.company_id = null;
       customData.Company = null;
       customData.Company_id = null;
-      customData.company_name = null;
+      if (relRes.companyIdInputProvided) {
+        customData.company_name = null;
+      } else if (relRes.resolvedParentName) {
+        customData.company_name = relRes.resolvedParentName;
+      } else {
+        customData.company_name = null;
+      }
     }
 
     if (resolvedSecondary) {
@@ -377,12 +532,19 @@ const objectService = {
       customData.contact_id = resolvedSecondary;
       customData.Contact = resolvedSecondary;
       customData.Contact_id = resolvedSecondary;
+      if (relRes.resolvedSecondaryName) customData.contact_name = relRes.resolvedSecondaryName;
     } else {
       customData.contact = null;
       customData.contact_id = null;
       customData.Contact = null;
       customData.Contact_id = null;
-      customData.contact_name = null;
+      if (relRes.contactIdInputProvided) {
+        customData.contact_name = null;
+      } else if (relRes.resolvedSecondaryName) {
+        customData.contact_name = relRes.resolvedSecondaryName;
+      } else {
+        customData.contact_name = null;
+      }
     }
 
     const newRow = {

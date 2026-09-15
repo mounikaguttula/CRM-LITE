@@ -3625,7 +3625,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         </div>,
         document.body
       )}
-      )}
 
       {showLinkFormModal && ReactDOM.createPortal(
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,.4)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, padding: 20 }}>
