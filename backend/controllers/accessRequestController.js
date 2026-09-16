@@ -136,7 +136,7 @@ const handleActionToken = async (req, res, next) => {
           <div class="icon">${isApprove ? '✓' : '✕'}</div>
           <h1>${title}</h1>
           <p>${description}</p>
-          <a href="${clientUrl}/login">Return to CRM Lite</a>
+          <a href="${clientUrl}/login">Return to FounderCRM</a>
         </div>
       </body>
       </html>

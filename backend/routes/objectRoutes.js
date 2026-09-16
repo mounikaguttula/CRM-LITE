@@ -7,6 +7,7 @@ const authMiddleware = require('../middleware/auth');
 router.use(authMiddleware);
 
 // Generic CRUD API routes: /objects/:objectType
+router.post('/objects/:objectType/bulk-delete', objectController.bulkDeleteRecords);
 router.get('/objects/:objectType', objectController.getRecords);
 router.get('/objects/:objectType/:id', objectController.getRecordById);
 router.post('/objects/:objectType', objectController.createRecord);
@@ -14,6 +15,7 @@ router.put('/objects/:objectType/:id', objectController.updateRecord);
 router.delete('/objects/:objectType/:id', objectController.deleteRecord);
 
 // Route alias for /records/:objectType
+router.post('/records/:objectType/bulk-delete', objectController.bulkDeleteRecords);
 router.get('/records/:objectType', objectController.getRecords);
 router.get('/records/:objectType/:id', objectController.getRecordById);
 router.post('/records/:objectType', objectController.createRecord);
@@ -21,6 +23,10 @@ router.post('/records/:objectType', objectController.createRecord);
 // Direct route aliases (e.g. GET /leads, POST /leads, GET /contacts, etc.)
 const EXCLUDED_PREFIXES = ['auth', 'workspace', 'health', 'objects', 'users', 'roles', 'records', 'company', 'metadata', 'validation-rules', 'api', 'setup'];
 
+router.post('/:objectType/bulk-delete', (req, res, next) => {
+  if (EXCLUDED_PREFIXES.includes(req.params.objectType)) return next('route');
+  return objectController.bulkDeleteRecords(req, res, next);
+});
 router.get('/:objectType', (req, res, next) => {
   if (EXCLUDED_PREFIXES.includes(req.params.objectType)) return next('route');
   return objectController.getRecords(req, res, next);

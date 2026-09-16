@@ -55,7 +55,7 @@ app.use('/email-assets', express.static(path.join(__dirname, 'public', 'email-as
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'CRM Lite Metadata-Driven CRM Platform Engine',
+    service: 'FounderCRM Metadata-Driven CRM Platform Engine',
     architecture: 'Clean Metadata Platform Architecture',
     timestamp: new Date().toISOString(),
   });
@@ -106,7 +106,7 @@ const startServer = async () => {
     await validationRuleService.ensureSystemRules();
 
     app.listen(PORT, () => {
-      console.log(`🚀 CRM Lite Metadata Platform Engine running on http://localhost:${PORT}`);
+      console.log(`🚀 FounderCRM Metadata Platform Engine running on http://localhost:${PORT}`);
       console.log(`📡 Health Check: http://localhost:${PORT}/health`);
     });
   } catch (err) {

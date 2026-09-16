@@ -15,7 +15,7 @@ const welcomeTemplate = (name, body, formLink) => `
       <tr>
         <td style="background:linear-gradient(135deg,#7c4dff,#e040fb 60%,#ff6090);padding:48px 40px 40px;text-align:center;">
           <div style="display:inline-block;background:rgba(255,255,255,0.15);border-radius:12px;padding:8px 20px;margin-bottom:24px;">
-            <span style="color:#fff;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">CRM Lite</span>
+            <span style="color:#fff;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">FounderCRM</span>
           </div>
           <h1 style="margin:0;color:#fff;font-size:30px;font-weight:800;line-height:1.2;">Welcome aboard!</h1>
           <p style="margin:14px 0 0;color:rgba(255,255,255,0.8);font-size:15px;">${name}</p>
@@ -54,12 +54,12 @@ const welcomeTemplate = (name, body, formLink) => `
             </tr>
           </table>
           <div style="height:1px;background:rgba(255,255,255,0.08);margin:32px 0 28px;"></div>
-          <p style="margin:0;color:rgba(240,234,255,0.5);font-size:14px;">Thank you,<br/><strong style="color:#c4b5fd;">The CRM Lite Team</strong></p>
+          <p style="margin:0;color:rgba(240,234,255,0.5);font-size:14px;">Thank you,<br/><strong style="color:#c4b5fd;">The FounderCRM Team</strong></p>
         </td>
       </tr>
       <tr>
         <td style="background:#0d0a1f;padding:24px 40px;text-align:center;border-top:1px solid rgba(255,255,255,0.06);">
-          <p style="margin:0 0 6px;color:rgba(255,255,255,0.3);font-size:12px;">© 2026 CRM Lite. All rights reserved.</p>
+          <p style="margin:0 0 6px;color:rgba(255,255,255,0.3);font-size:12px;">© 2026 FounderCRM. All rights reserved.</p>
         </td>
       </tr>
     </table>
@@ -104,12 +104,12 @@ const promotionTemplate = (name, body, formLink) => `
             </tr>
           </table>
           <div style="height:1px;background:#f0f0f0;margin:32px 0 24px;"></div>
-          <p style="margin:0;color:#999;font-size:14px;">Best regards,<br/><strong style="color:#ff6b35;">The CRM Lite Team</strong></p>
+          <p style="margin:0;color:#999;font-size:14px;">Best regards,<br/><strong style="color:#ff6b35;">The FounderCRM Team</strong></p>
         </td>
       </tr>
       <tr>
         <td style="background:#fff8f0;padding:20px 40px;text-align:center;border-top:1px solid #ffe0cc;">
-          <p style="margin:0 0 6px;color:#ccc;font-size:12px;">© 2026 CRM Lite. All rights reserved.</p>
+          <p style="margin:0 0 6px;color:#ccc;font-size:12px;">© 2026 FounderCRM. All rights reserved.</p>
         </td>
       </tr>
     </table>
@@ -129,7 +129,7 @@ const newsletterTemplate = (name, body, formLink) => `
       <tr>
         <td style="background:#0d1b2a;padding:16px 32px;">
           <table width="100%"><tr>
-            <td style="color:#fff;font-size:14px;font-weight:700;letter-spacing:2px;">CRM LITE</td>
+            <td style="color:#fff;font-size:14px;font-weight:700;letter-spacing:2px;">FOUNDERCRM</td>
             <td align="right" style="color:#64b5f6;font-size:13px;">${name}</td>
           </tr></table>
         </td>
@@ -156,12 +156,12 @@ const newsletterTemplate = (name, body, formLink) => `
             </tr>
           </table>
           <div style="height:1px;background:#f0f0f0;margin:28px 0 20px;"></div>
-          <p style="margin:0;color:#999;font-size:14px;">Best regards,<br/><strong style="color:#1565c0;">The CRM Lite Team</strong></p>
+          <p style="margin:0;color:#999;font-size:14px;">Best regards,<br/><strong style="color:#1565c0;">The FounderCRM Team</strong></p>
         </td>
       </tr>
       <tr>
         <td style="background:#0d1b2a;padding:20px 40px;text-align:center;">
-          <p style="margin:0 0 6px;color:rgba(255,255,255,0.3);font-size:12px;">© 2026 CRM Lite. All rights reserved.</p>
+          <p style="margin:0 0 6px;color:rgba(255,255,255,0.3);font-size:12px;">© 2026 FounderCRM. All rights reserved.</p>
         </td>
       </tr>
     </table>
@@ -200,12 +200,12 @@ const eventTemplate = (name, body, formLink) => `
             </tr>
           </table>
           <div style="height:1px;background:#222;margin:32px 0 24px;"></div>
-          <p style="margin:0;color:#555;font-size:13px;text-align:center;">We look forward to seeing you there.<br/><span style="color:#c9a84c;">— The CRM Lite Team</span></p>
+          <p style="margin:0;color:#555;font-size:13px;text-align:center;">We look forward to seeing you there.<br/><span style="color:#c9a84c;">— The FounderCRM Team</span></p>
         </td>
       </tr>
       <tr>
         <td style="background:#0a0a0a;padding:20px 40px;text-align:center;border-top:1px solid #1a1a1a;">
-          <p style="margin:0 0 6px;color:#444;font-size:12px;font-family:Arial;">© 2026 CRM Lite. All rights reserved.</p>
+          <p style="margin:0 0 6px;color:#444;font-size:12px;font-family:Arial;">© 2026 FounderCRM. All rights reserved.</p>
         </td>
       </tr>
     </table>

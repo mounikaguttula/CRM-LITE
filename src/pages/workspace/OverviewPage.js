@@ -370,11 +370,12 @@ function DashboardContent() {
       try {
         setScopeLoading(true);
         const scopeParam = activeScope === 'group' ? 'group' : 'individual';
+
         const [dealsRes, leadsRes, contactsRes, companiesRes] = await Promise.all([
-          apiGet(`/objects/deal?scope=${scopeParam}`).catch(() => apiGet(`/objects/deals?scope=${scopeParam}`)).catch(() => []),
-          apiGet(`/objects/lead?scope=${scopeParam}`).catch(() => apiGet(`/objects/leads?scope=${scopeParam}`)).catch(() => []),
-          apiGet(`/objects/contact?scope=${scopeParam}`).catch(() => apiGet(`/objects/contacts?scope=${scopeParam}`)).catch(() => []),
-          apiGet(`/objects/company?scope=${scopeParam}`).catch(() => apiGet(`/objects/companies?scope=${scopeParam}`)).catch(() => []),
+          apiGet(`/objects/deal?scope=${scopeParam}`).catch(() => apiGet(`/objects/deals?scope=${scopeParam}`).catch(() => [])),
+          apiGet(`/objects/lead?scope=${scopeParam}`).catch(() => apiGet(`/objects/leads?scope=${scopeParam}`).catch(() => [])),
+          apiGet(`/objects/contact?scope=${scopeParam}`).catch(() => apiGet(`/objects/contacts?scope=${scopeParam}`).catch(() => [])),
+          apiGet(`/objects/company?scope=${scopeParam}`).catch(() => apiGet(`/objects/companies?scope=${scopeParam}`).catch(() => [])),
         ]);
 
         if (!isMounted) return;
@@ -1885,15 +1886,17 @@ function mapHeaderToField(rawHeader, allowedMap) {
 
   let candidateKey = null;
 
-  if (cleanAlpha === 'name' || cleanAlpha === 'fullname' || cleanAlpha === 'contactname' || cleanAlpha === 'dealname' || cleanAlpha === 'companyname' || cleanAlpha === 'accountname') candidateKey = 'name';
+  // Evaluate relationship-specific headers FIRST before generic name matching
+  if (cleanAlpha === 'companyid' || cleanAlpha === 'companyuuid' || cleanAlpha === 'parentid') candidateKey = 'company_id';
+  else if (cleanAlpha === 'contactid' || cleanAlpha === 'contactuuid' || cleanAlpha === 'secondaryparentid') candidateKey = 'contact_id';
+  else if (cleanAlpha === 'company' || cleanAlpha === 'companyname' || cleanAlpha === 'organization' || cleanAlpha === 'organizationname' || cleanAlpha === 'account' || cleanAlpha === 'accountname' || cleanAlpha === 'org') candidateKey = 'company';
+  else if (cleanAlpha === 'contact' || cleanAlpha === 'contactname' || cleanAlpha === 'primarycontact' || cleanAlpha === 'personname') candidateKey = 'contact';
+  else if (cleanAlpha === 'name' || cleanAlpha === 'fullname' || cleanAlpha === 'dealname' || cleanAlpha === 'opportunityname') candidateKey = 'name';
   else if (cleanAlpha === 'first' || cleanAlpha === 'firstname' || cleanAlpha === 'fname' || cleanAlpha === 'givenname') candidateKey = 'first_name';
   else if (cleanAlpha === 'last' || cleanAlpha === 'lastname' || cleanAlpha === 'lname' || cleanAlpha === 'surname' || cleanAlpha === 'familyname') candidateKey = 'last_name';
   else if (cleanAlpha === 'email' || cleanAlpha === 'emailaddress' || cleanAlpha === 'workemail' || cleanAlpha === 'primaryemail') candidateKey = 'email';
   else if (cleanAlpha === 'alternateemail' || cleanAlpha === 'alternateemailid' || cleanAlpha === 'secondaryemail' || cleanAlpha === 'altemail' || cleanAlpha === 'otheremail') candidateKey = 'alternate_email';
   else if (cleanAlpha === 'phone' || cleanAlpha === 'phonenumber' || cleanAlpha === 'telephone' || cleanAlpha === 'mobile' || cleanAlpha === 'tel' || cleanAlpha === 'cell') candidateKey = 'phone';
-  else if (cleanAlpha === 'companyid' || cleanAlpha === 'companyuuid') candidateKey = 'company_id';
-  else if (cleanAlpha === 'contactid' || cleanAlpha === 'contactuuid') candidateKey = 'contact_id';
-  else if (cleanAlpha === 'company' || cleanAlpha === 'companyname' || cleanAlpha === 'organization' || cleanAlpha === 'organizationname' || cleanAlpha === 'account' || cleanAlpha === 'accountname' || cleanAlpha === 'org') candidateKey = 'company';
   else if (cleanAlpha === 'title' || cleanAlpha === 'jobtitle' || cleanAlpha === 'designation' || cleanAlpha === 'position' || cleanAlpha === 'role') candidateKey = 'title';
   else if (cleanAlpha === 'leadsource' || cleanAlpha === 'source') candidateKey = 'lead_source';
   else if (cleanAlpha === 'status') candidateKey = 'status';
@@ -2048,6 +2051,17 @@ function ObjectListContent({ objectTypeId }) {
   const [deleteError, setDeleteError] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
 
+  // Bulk Selection & Deletion States
+  const [selectedRecordIds, setSelectedRecordIds] = useState(new Set());
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState(null);
+
+  // Clear selection on page, query, object, or page size change
+  useEffect(() => {
+    setSelectedRecordIds(new Set());
+  }, [objectTypeId, query, currentPage, pageSize]);
+
   const showToast = (text, type = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
@@ -2066,6 +2080,11 @@ function ObjectListContent({ objectTypeId }) {
     try {
       await apiDelete(`/objects/${objectTypeId}/${deleteModalRecord.id}`);
       setRecords((prev) => prev.filter((r) => r.id !== deleteModalRecord.id));
+      setSelectedRecordIds((prev) => {
+        const next = new Set(prev);
+        next.delete(deleteModalRecord.id);
+        return next;
+      });
       const deletedTitle = deleteModalRecord.title;
       setDeleteModalRecord(null);
       showToast(`"${deletedTitle}" deleted successfully!`, 'success');
@@ -2074,6 +2093,46 @@ function ObjectListContent({ objectTypeId }) {
       setDeleteError(err?.message || 'Failed to delete record.');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    const idsArray = Array.from(selectedRecordIds);
+    if (idsArray.length === 0) return;
+
+    setBulkDeleting(true);
+    setBulkDeleteError(null);
+
+    try {
+      const res = await apiPost(`/objects/${objectTypeId}/bulk-delete`, { ids: idsArray });
+      const payload = res?.data || res;
+      const deleted = payload?.deletedIds || [];
+      const failed = payload?.failed || [];
+
+      if (deleted.length > 0) {
+        setRecords((prev) => prev.filter((r) => !deleted.includes(r.id)));
+        setSelectedRecordIds((prev) => {
+          const next = new Set(prev);
+          deleted.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+
+      setBulkDeleteModalOpen(false);
+
+      if (failed.length === 0) {
+        showToast(`Successfully deleted ${deleted.length} ${deleted.length === 1 ? 'record' : 'records'}.`, 'success');
+      } else if (deleted.length > 0) {
+        showToast(`Deleted ${deleted.length} record(s). ${failed.length} record(s) failed authorization/validation.`, 'warning');
+      } else {
+        const firstReason = failed[0]?.reason || 'Permission denied or record non-deletable.';
+        showToast(`Failed to delete records: ${firstReason}`, 'error');
+      }
+    } catch (err) {
+      console.error('Bulk delete error:', err);
+      setBulkDeleteError(err?.message || 'Failed to bulk delete records.');
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -2184,6 +2243,45 @@ function ObjectListContent({ objectTypeId }) {
   const currentRecordsPage = useMemo(() => {
     return filteredRecords.slice(startIndex, endIndex);
   }, [filteredRecords, startIndex, endIndex]);
+
+  const isAllVisibleSelected = useMemo(() => {
+    if (!currentRecordsPage || currentRecordsPage.length === 0) return false;
+    return currentRecordsPage.every((r) => selectedRecordIds.has(r.id));
+  }, [currentRecordsPage, selectedRecordIds]);
+
+  const isSomeVisibleSelected = useMemo(() => {
+    if (!currentRecordsPage || currentRecordsPage.length === 0) return false;
+    return currentRecordsPage.some((r) => selectedRecordIds.has(r.id));
+  }, [currentRecordsPage, selectedRecordIds]);
+
+  const handleToggleSelectAllVisible = () => {
+    if (isAllVisibleSelected) {
+      setSelectedRecordIds((prev) => {
+        const next = new Set(prev);
+        currentRecordsPage.forEach((r) => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setSelectedRecordIds((prev) => {
+        const next = new Set(prev);
+        currentRecordsPage.forEach((r) => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const handleToggleSelectRecord = (e, recordId) => {
+    e.stopPropagation();
+    setSelectedRecordIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(recordId)) {
+        next.delete(recordId);
+      } else {
+        next.add(recordId);
+      }
+      return next;
+    });
+  };
 
   const getPageNumbers = (current, total) => {
     if (total <= 7) {
@@ -2298,17 +2396,33 @@ function ObjectListContent({ objectTypeId }) {
       return '—';
     }
     const str = String(val).trim();
-    // Resolve relationship ID fields (company_id, contact_id) to human names for CSV import preview
-    if (keyLower === 'company_id' || keyLower === 'contact_id') {
+    // Resolve relationship fields (company_id, contact_id, company, contact) to human names for CSV import preview
+    if (keyLower === 'company_id' || keyLower === 'contact_id' || keyLower === 'company' || keyLower === 'contact') {
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)) {
-        const resolved = lookupMap?.[str];
+        const resolved = lookupMap?.[str] || lookupMap?.all?.[str] || lookupMap?.companies?.[str] || lookupMap?.contacts?.[str];
         if (resolved) {
           const resolvedName = resolved.name || resolved.company_name || resolved.contact_name || resolved.account_name;
           if (resolvedName && !isUuid(resolvedName)) return resolvedName;
         }
-        return `Unresolved: ${str.slice(0, 8)}…`;
+        return `Unresolved ID: ${str.slice(0, 8)}…`;
       }
-      return str;
+      if (lookupMap && (lookupMap.companies || lookupMap.contacts || lookupMap.all)) {
+        const cleanName = str.toLowerCase();
+        const allRows = [
+          ...Object.values(lookupMap.companies || {}),
+          ...Object.values(lookupMap.contacts || {}),
+          ...Object.values(lookupMap.all || {})
+        ];
+        const match = allRows.find(r => {
+          const rName = String(r.name || r.company_name || r.contact_name || r.account_name || '').trim().toLowerCase();
+          return rName === cleanName;
+        });
+        if (match) {
+          const matchedName = match.name || match.company_name || match.contact_name || str;
+          return matchedName;
+        }
+      }
+      return `Unresolved: ${str}`;
     }
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str) || /id$/i.test(key)) {
       return '—';
@@ -2746,6 +2860,69 @@ function ObjectListContent({ objectTypeId }) {
 
       {/* Main Table Panel */}
       <div className="glass" style={{ padding: 8, borderRadius: 16 }}>
+        {selectedRecordIds.size > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 16px',
+              background: 'rgba(99,102,241,0.08)',
+              borderBottom: '1px solid rgba(99,102,241,0.2)',
+              borderRadius: '12px 12px 0 0',
+              marginBottom: 4,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#4f46e5' }}>
+                {selectedRecordIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedRecordIds(new Set())}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 12,
+                  color: 'var(--text-faint)',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Deselect All
+              </button>
+            </div>
+
+            {canDeleteRecord && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkDeleteError(null);
+                  setBulkDeleteModalOpen(true);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: '#ef4444',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(239, 68, 68, 0.2)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Trash2 size={13} />
+                Delete Selected
+              </button>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--panel-border)' }}>
           <div style={{ position: 'relative' }} className="orbit-search-input-wrapper">
             <Search
@@ -2810,6 +2987,20 @@ function ObjectListContent({ objectTypeId }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
               <thead>
                 <tr style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <th style={{ width: 42, padding: '12px 12px 12px 18px', borderBottom: '1px solid var(--panel-border)', textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={isAllVisibleSelected}
+                      ref={(input) => {
+                        if (input) {
+                          input.indeterminate = !isAllVisibleSelected && isSomeVisibleSelected;
+                        }
+                      }}
+                      onChange={handleToggleSelectAllVisible}
+                      title="Select/Deselect visible records on current page"
+                      style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
+                    />
+                  </th>
                   {columns.map((col) => (
                     <th
                       key={col.key}
@@ -2840,6 +3031,17 @@ function ObjectListContent({ objectTypeId }) {
                       style={{ borderBottom: '1px solid rgba(99,102,241,0.08)', cursor: 'pointer' }}
                       className="glass-hover"
                     >
+                      <td
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ width: 42, padding: '14px 12px 14px 18px', textAlign: 'center' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedRecordIds.has(r.id)}
+                          onChange={(e) => handleToggleSelectRecord(e, r.id)}
+                          style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
+                        />
+                      </td>
                       {columns.map((col) => {
                         const raw = r[col.key] !== undefined ? r[col.key] : (r.data && r.data[col.key]);
                         if (col.isTitle) {
@@ -3701,6 +3903,98 @@ function ObjectListContent({ objectTypeId }) {
                   <>
                     <Trash2 size={16} />
                     <span>Delete Record</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Bulk Delete Record Confirmation Custom Modal */}
+      {bulkDeleteModalOpen && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 440,
+            padding: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', textAlign: 'center',
+            position: 'relative',
+          }}>
+            <button 
+              type="button" 
+              onClick={() => { setBulkDeleteModalOpen(false); setBulkDeleteError(null); }}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', background: '#ffe4e6',
+              color: '#e11d48', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 16, boxShadow: '0 0 0 8px rgba(225, 29, 72, 0.08)'
+            }}>
+              <AlertTriangle size={28} />
+            </div>
+
+            <h3 className="font-display" style={{ margin: '0 0 8px 0', fontSize: 19, fontWeight: 700, color: '#0f172a' }}>
+              Delete {selectedRecordIds.size} Selected {selectedRecordIds.size === 1 ? meta.displayName : meta.pluralDisplayName}?
+            </h3>
+
+            <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: '#64748b', lineHeight: 1.5 }}>
+              Are you sure you want to bulk delete <strong style={{ color: '#0f172a' }}>{selectedRecordIds.size} selected {selectedRecordIds.size === 1 ? meta.displayName.toLowerCase() : meta.pluralDisplayName.toLowerCase()}</strong>? Records outside your scope or converted leads will be preserved.
+            </p>
+
+            {bulkDeleteError && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+                fontSize: '0.82rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{bulkDeleteError}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => { setBulkDeleteModalOpen(false); setBulkDeleteError(null); }}
+                disabled={bulkDeleting}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: '1px solid #cbd5e1',
+                  background: '#ffffff', color: '#334155', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', transition: 'all 0.15s ease'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBulkDelete}
+                disabled={bulkDeleting}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: 'none',
+                  background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+                  color: '#ffffff', fontWeight: 700, fontSize: '0.88rem',
+                  cursor: 'pointer', boxShadow: '0 4px 14px rgba(225, 29, 72, 0.4)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {bulkDeleting ? (
+                  <span>Deleting…</span>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    <span>Delete Selected</span>
                   </>
                 )}
               </button>

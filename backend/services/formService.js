@@ -1066,7 +1066,7 @@ const formService = {
                       </table>
 
                       <hr style="border:none;border-top:1px solid #f1f5f9;margin:20px 0 16px;"/>
-                      <p style="margin:0;color:#94a3b8;font-size:12px;">Sent via CRM Lite Forms Engine</p>
+                      <p style="margin:0;color:#94a3b8;font-size:12px;">Sent via FounderCRM Forms Engine</p>
                     </td>
                   </tr>
                 </table>

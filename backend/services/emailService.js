@@ -2,7 +2,7 @@
 const nodemailer = require('nodemailer');
 
 /**
- * CRM Lite Email Service
+ * FounderCRM Email Service
  *
  * All icons are hosted as static SVG files at BACKEND_URL/email-assets/*
  * so they render correctly in Gmail, Outlook, and Apple Mail.
@@ -21,7 +21,7 @@ const assetUrl = (filename) => {
 const img = (filename, w, h, alt = '') =>
   `<img src="${assetUrl(filename)}" width="${w}" height="${h}" alt="${alt}" border="0" style="display:block;outline:none;border:none;text-decoration:none;" />`;
 
-/** CRM Lite logo: cube icon + "CRM Lite" text, centered */
+/** FounderCRM logo: cube icon + "FounderCRM" text, centered */
 const logoRow = () => `
   <table cellpadding="0" cellspacing="0" align="center" style="border-collapse:collapse;">
     <tr>
@@ -29,7 +29,7 @@ const logoRow = () => `
         ${img('cube.svg', 26, 26, '')}
       </td>
       <td valign="middle" align="left">
-        <b style="font-size:20px;color:#1e1b4b;font-family:Arial,Helvetica,sans-serif;font-weight:800;letter-spacing:-0.3px;line-height:1;">CRM Lite</b>
+        <b style="font-size:20px;color:#1e1b4b;font-family:Arial,Helvetica,sans-serif;font-weight:800;letter-spacing:-0.3px;line-height:1;">FounderCRM</b>
       </td>
     </tr>
   </table>`;
@@ -135,7 +135,7 @@ const emailFooter = () => `
     <tr>
       <td align="center" style="padding:14px 0 10px;">
         <span style="font-size:12.5px;color:#94a3b8;font-family:Arial,Helvetica,sans-serif;">
-          <b style="color:#6366f1;font-family:Arial,Helvetica,sans-serif;">CRM Lite</b>
+          <b style="color:#6366f1;font-family:Arial,Helvetica,sans-serif;">FounderCRM</b>
           &nbsp;&bull;&nbsp; Powered by TechMantra Now
         </span>
       </td>
@@ -153,7 +153,7 @@ const wrapEmail = (bodyHtml, waveSvg = 'wave-purple.svg', customContactEmail = n
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>CRM Lite</title>
+  <title>FounderCRM</title>
 </head>
 <body style="margin:0;padding:0;background:#eef0fb;font-family:Arial,Helvetica,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#eef0fb" style="padding:40px 16px;border-collapse:collapse;">
@@ -208,11 +208,11 @@ const emailService = {
 
   sendEmail: async ({ to, subject, html, text, replyTo }) => {
     try {
-      const fromEmail = process.env.SMTP_FROM || 'CRM Lite <noreply@crmplatform.io>';
+      const fromEmail = process.env.SMTP_FROM || 'FounderCRM <noreply@crmplatform.io>';
 
       // ── SendGrid ──────────────────────────────────────────────────────────
       if (process.env.SENDGRID_API_KEY) {
-        let fromAddress = fromEmail, fromName = 'CRM Lite';
+        let fromAddress = fromEmail, fromName = 'FounderCRM';
         const m = fromEmail.match(/(.*)<(.*)>/);
         if (m) { fromName = m[1].trim(); fromAddress = m[2].trim(); }
         const toArray = Array.isArray(to) ? to : [to];
