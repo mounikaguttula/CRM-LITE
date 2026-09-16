@@ -668,6 +668,7 @@ function UserManagement() {
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
                     placeholder="Minimum 8 characters"
                     value={newUser.password || ''}
                     onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
@@ -686,6 +687,7 @@ function UserManagement() {
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
                     placeholder="Re-enter your password"
                     value={newUser.confirmPassword || ''}
                     onChange={(e) => setNewUser((p) => ({ ...p, confirmPassword: e.target.value }))}

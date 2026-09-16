@@ -354,7 +354,7 @@ function NavigationPage({ onNavigate }) {
         </div>
         <div style={{ minWidth:0, flex:1 }}>
           <div style={{ fontSize:'0.9rem', fontWeight:800, color:'#fff', letterSpacing:'-0.01em', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            CRM Lite
+            FounderCRM
           </div>
           <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.4)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {companyName}

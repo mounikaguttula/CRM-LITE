@@ -244,7 +244,10 @@ const resolveRecordRelationships = async (payload, cleanObjKey, organizationId) 
       resolvedParent = parentRow.id;
       resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || companyNameInput;
     } else {
-      resolvedParentName = companyNameInput;
+      throw {
+        statusCode: 400,
+        message: `Validation Error: Company '${companyNameInput}' was not found. Please provide a valid Company Name or Company ID.`,
+      };
     }
   }
 
@@ -265,7 +268,10 @@ const resolveRecordRelationships = async (payload, cleanObjKey, organizationId) 
       resolvedSecondary = secondaryRow.id;
       resolvedSecondaryName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name || contactNameInput;
     } else {
-      resolvedSecondaryName = contactNameInput;
+      throw {
+        statusCode: 400,
+        message: `Validation Error: Contact '${contactNameInput}' was not found. Please provide a valid Contact Name or Contact ID.`,
+      };
     }
   }
 
@@ -347,7 +353,6 @@ const objectService = {
     }
 
     const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
-
     const targetTypeId = objDef ? objDef.id : (isUuid(objectKey) ? objectKey : null);
     if (!targetTypeId) {
       return [];
@@ -382,6 +387,7 @@ const objectService = {
       const { data: rows, error } = await query;
 
       if (error) {
+        console.error(`Supabase ERROR for '${objectKey}':`, error.message, error.code, error.details);
         throw { statusCode: 500, message: `Failed to fetch records for '${objectKey}': ${error.message}` };
       }
 
@@ -805,6 +811,132 @@ const objectService = {
   },
 
   /**
+   * Bulk soft-delete records in universal_table.
+   * Performs 1 SELECT query for all requested IDs, in-memory validation & RBAC record scope check,
+   * and 1 bulk UPDATE query for authorized records.
+   */
+  bulkDeleteRecords: async (objectKey, ids, organizationId, user) => {
+    const uniqueIds = Array.from(new Set(ids || [])).filter(Boolean);
+    if (uniqueIds.length === 0) {
+      return {
+        success: true,
+        summary: { total: 0, deleted: 0, failed: 0 },
+        deletedIds: [],
+        failed: [],
+      };
+    }
+
+    const cleanKey = String(objectKey || '').toLowerCase();
+    const keySingular = cleanKey.endsWith('s') ? cleanKey.slice(0, -1) : cleanKey;
+    const keyPlural = cleanKey.endsWith('s') ? cleanKey : `${cleanKey}s`;
+
+    // 1. Resolve object definition and permissions
+    const objDefRes = await metadataService.getObjectDefinition(objectKey, organizationId);
+    const targetObjectType = objDefRes?.definition || objDefRes;
+    const objectTypeId = targetObjectType?.id;
+
+    const perms = await metadataService.getPermissions(user);
+    let objPerm = perms ? (perms[cleanKey] || perms[keySingular] || perms[keyPlural]) : null;
+
+    if (!objPerm) {
+      const uRole = String(user?.role || '').toLowerCase();
+      const isAdmin = uRole.includes('admin');
+      const isCrmManager = uRole === 'crm manager';
+      const isReadOnly = uRole.includes('read only') || uRole.includes('viewer');
+
+      if (isReadOnly) {
+        objPerm = { canDelete: false, viewAll: false, modifyAll: false };
+      } else {
+        objPerm = { canDelete: isAdmin || isCrmManager, viewAll: isAdmin || isCrmManager, modifyAll: isAdmin };
+      }
+    }
+
+    // 2. Fetch all requested records in a SINGLE query
+    let fetchQuery = supabase
+      .from('universal_table')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .eq('is_deleted', false)
+      .in('id', uniqueIds);
+
+    if (objectTypeId) {
+      fetchQuery = fetchQuery.eq('object_type_id', objectTypeId);
+    }
+
+    const { data: dbRecords, error: fetchErr } = await fetchQuery;
+
+    if (fetchErr) {
+      throw { statusCode: 400, message: `Failed to fetch records for bulk delete: ${fetchErr.message}` };
+    }
+
+    const recordMap = new Map();
+    (dbRecords || []).forEach((r) => recordMap.set(r.id, r));
+
+    const allowedIds = [];
+    const failedResults = [];
+
+    // 3. In-memory validation & RBAC evaluation for each requested ID
+    for (const id of uniqueIds) {
+      const record = recordMap.get(id);
+
+      if (!record) {
+        failedResults.push({ id, reason: 'Record not found, already deleted, or belongs to another organization.' });
+        continue;
+      }
+
+      // Converted lead protection
+      if (keySingular === 'lead') {
+        const statusVal = String(record.status || record.data?.status || record.stage || record.data?.stage || '').toLowerCase();
+        const isConverted = statusVal === 'converted' || Boolean(record.is_converted) || Boolean(record.data?.is_converted);
+
+        if (isConverted) {
+          failedResults.push({ id, reason: 'Converted leads cannot be deleted because they are preserved for historical tracking.' });
+          continue;
+        }
+      }
+
+      // Record-level scope evaluation
+      const isOwner = record.owner_id === user.id || record.created_by === user.id;
+      const hasFullScope = Boolean(objPerm && (objPerm.viewAll !== false || objPerm.modifyAll !== false));
+
+      if (!hasFullScope && !isOwner) {
+        failedResults.push({ id, reason: "Access Denied: You don't have permission to delete this record." });
+        continue;
+      }
+
+      allowedIds.push(id);
+    }
+
+    // 4. Perform single bulk soft-delete update for authorized records
+    if (allowedIds.length > 0) {
+      const { error: updateErr } = await supabase
+        .from('universal_table')
+        .update({
+          is_deleted: true,
+          deleted_by: user.id || null,
+          deleted_at: new Date().toISOString(),
+        })
+        .in('id', allowedIds)
+        .eq('organization_id', organizationId);
+
+      if (updateErr) {
+        throw { statusCode: 400, message: `Failed to update records during bulk delete: ${updateErr.message}` };
+      }
+    }
+
+    return {
+      success: true,
+      summary: {
+        total: uniqueIds.length,
+        deleted: allowedIds.length,
+        failed: failedResults.length,
+      },
+      deletedIds: allowedIds,
+      failed: failedResults,
+    };
+  },
+
+  /**
    * Bulk create records for any objectType in universal_table with pre-cached metadata,
    * bulk relationship lookups, in-memory validation, and controlled failure isolation.
    * @param {Object} [options] - Optional settings.
@@ -1187,13 +1319,13 @@ const objectService = {
           const cleanName = relInputs.companyNameInput.trim().toLowerCase();
           const matches = companyByNameMap.get(cleanName) || [];
           if (matches.length > 1) {
-            throw { statusCode: 400, message: `Validation Error: Multiple Companys found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
+            throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
           }
           if (matches.length === 1) {
             resolvedParent = matches[0].id;
             resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
           } else {
-            resolvedParentName = relInputs.companyNameInput;
+            throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
           }
         }
 
@@ -1241,7 +1373,7 @@ const objectService = {
             resolvedSecondary = matches[0].id;
             resolvedSecondaryName = matches[0].name || matches[0].data?.name || matches[0].data?.contact_name || relInputs.contactNameInput;
           } else {
-            resolvedSecondaryName = relInputs.contactNameInput;
+            throw { statusCode: 400, message: `Validation Error: Contact '${relInputs.contactNameInput}' was not found. Please provide a valid Contact Name or Contact ID.` };
           }
         }
 

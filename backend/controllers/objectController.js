@@ -254,6 +254,41 @@ const deleteRecord = async (req, res, next) => {
 };
 
 
+const bulkDeleteRecords = async (req, res, next) => {
+  try {
+    const objectType = req.params.objectType;
+    const { ids } = req.body;
+    const organizationId = req.user?.organization_id;
+    const userId = req.user?.id;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return errorResponse(res, 'No record IDs provided for bulk deletion.', 400);
+    }
+
+    // Enforce object-level permission check for 'delete'
+    await metadataService.checkPermission(req.user, objectType, 'delete');
+
+    const result = await objectService.bulkDeleteRecords(objectType, ids, organizationId, req.user);
+
+    // Log audit activity if any records were deleted
+    if (result.deletedIds && result.deletedIds.length > 0) {
+      auditService.logUserActivity({
+        organization_id: organizationId,
+        user_id: userId,
+        action: 'BULK_DELETE',
+        module: objectType,
+        record_id: result.deletedIds.join(','),
+        description: `Bulk deleted ${result.deletedIds.length} ${objectType} record(s)`,
+      }).catch((auditErr) => console.error('❌ Audit log error in bulkDeleteRecords:', auditErr.message));
+    }
+
+    return successResponse(res, result, `Bulk delete completed for ${objectType}.`);
+  } catch (err) {
+    next(err);
+  }
+};
+
+
 const getObjectFields = async (req, res, next) => {
   try {
     const objectType = req.params.objectType || req.params.objectTypeId;
@@ -288,6 +323,7 @@ module.exports = {
   createRecord,
   updateRecord,
   deleteRecord,
+  bulkDeleteRecords,
   getObjectFields,
   getObjectViews,
 };

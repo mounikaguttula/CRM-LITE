@@ -871,8 +871,15 @@ const metadataService = {
     if (record && objPerm) {
       const isOwner = record.owner_id === user.id || record.created_by === user.id;
 
+      // Lead-specific: allow access to unassigned Leads (owner_id is NULL) for users
+      // who already passed the object-level CRUD check above. This enables the
+      // "View Lead" / edit workflow for public-form-created Leads that have no owner yet.
+      // Scoped strictly to Lead objects — other unassigned objects follow normal rules.
+      const isUnassignedLead = (record.owner_id === null || record.owner_id === undefined)
+        && (keySingular === 'lead');
+
       // Check Read Scope when View All is false
-      if (targetAction === 'read' && objPerm.viewAll === false && !isOwner) {
+      if (targetAction === 'read' && objPerm.viewAll === false && !isOwner && !isUnassignedLead) {
         // Allow if department/team in record data matches user
         const recDept = record.department || (record.data && (record.data.department || record.data.department_id));
         const userDept = user.department || user.department_id;
@@ -884,10 +891,16 @@ const metadataService = {
         }
       }
 
-      // Check Modify/Update/Delete Scope when Modify All is false (and View All is false)
-      if ((targetAction === 'update' || targetAction === 'delete' || targetAction === 'edit') && objPerm.viewAll === false && objPerm.modifyAll === false && !isOwner) {
+      // Check Update/Edit Scope when Modify All is false (and View All is false)
+      if ((targetAction === 'update' || targetAction === 'edit') && objPerm.viewAll === false && objPerm.modifyAll === false && !isOwner && !isUnassignedLead) {
         console.log(`[Authorization] ⛔ DENIED out-of-scope ${action} on ${objectType}/${record.id} for user ${user?.id}`);
         throw { statusCode: 403, message: "You don't have permission to modify this record." };
+      }
+
+      // Check Delete Scope when Modify All is false and View All is false (unassigned Lead exception does NOT apply to delete)
+      if (targetAction === 'delete' && objPerm.viewAll === false && objPerm.modifyAll === false && !isOwner) {
+        console.log(`[Authorization] ⛔ DENIED out-of-scope delete on ${objectType}/${record.id} for user ${user?.id}`);
+        throw { statusCode: 403, message: "You don't have permission to delete this record." };
       }
     }
   },

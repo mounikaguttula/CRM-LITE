@@ -72,7 +72,7 @@ const EMAIL_TEMPLATES = [
     bg: 'linear-gradient(140deg, #0c4a6e 0%, #0369a1 55%, #0284c7 100%)',
     headerText: 'MONTHLY NEWSLETTER',
     headerSub: 'Latest updates & insights',
-    subject: 'CRM Lite Monthly Updates',
+    subject: 'FounderCRM Monthly Updates',
     body: `Hello,\n\nHere are the top product updates, features, and community highlights for this month.\n\nThank you for growing with us!`,
   },
   {
@@ -775,7 +775,7 @@ function CampaignsPage() {
                         }}>
                           <div style={{ position: 'absolute', top: -10, right: -10, width: 60, height: 60, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)' }}>CRM Lite</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)' }}>FounderCRM</span>
                             <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: 'rgba(255,255,255,0.18)', color: '#fff' }}>{tpl.category}</span>
                           </div>
                           <div style={{ position: 'absolute', bottom: 12, left: 16 }}>

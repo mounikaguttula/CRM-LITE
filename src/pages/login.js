@@ -330,13 +330,13 @@ function Login() {
             <Sparkles size={20} color="#fff" strokeWidth={2.4} />
           </div>
           <span className="font-display" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-strong)' }}>
-            CRM Lite
+            FounderCRM
           </span>
         </div>
 
         <div style={{ maxWidth: 520 }}>
           <div className="badge" style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--brand-700)', border: '1px solid rgba(99,102,241,0.25)', marginBottom: 22 }}>
-            <span className="dot" style={{ background: 'var(--brand-500)' }} /> Enterprise CRM Lite
+            <span className="dot" style={{ background: 'var(--brand-500)' }} /> FounderCRM Enterprise Platform
           </div>
           <h1 className="font-display" style={{ fontSize: 44, lineHeight: 1.08, fontWeight: 800, color: 'var(--text-strong)', margin: '0 0 20px' }}>
             Where every relationship <span className="aurora-text">compounds into revenue</span>.
@@ -528,6 +528,7 @@ function Login() {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
+                      autoComplete="current-password"
                       className="form-control"
                       placeholder="Enter your password"
                       value={password}
@@ -814,6 +815,7 @@ function Login() {
                     <input
                       type={showResetPassword ? 'text' : 'password'}
                       required
+                      autoComplete="new-password"
                       placeholder="Minimum 6 characters"
                       value={resetPassword}
                       onChange={(e) => setResetPassword(e.target.value)}
@@ -853,6 +855,7 @@ function Login() {
                     <input
                       type={showResetConfirmPassword ? 'text' : 'password'}
                       required
+                      autoComplete="new-password"
                       placeholder="Re-enter your password"
                       value={resetConfirmPassword}
                       onChange={(e) => setResetConfirmPassword(e.target.value)}

@@ -149,7 +149,7 @@ function CampaignFormPage() {
               marginBottom: 12,
             }}
           >
-            <Sparkles size={13} /> CRM Lite Response Form
+            <Sparkles size={13} /> FounderCRM Response Form
           </div>
           <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em' }}>
             Get In Touch
