@@ -15,9 +15,10 @@ const { successResponse } = require('../utils/response');
 const getPermForObject = (perms, objectType) => {
   if (!perms || !objectType) return null;
   const key = String(objectType).toLowerCase();
-  const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
-  const keyPlural = key.endsWith('s') ? key : `${key}s`;
-  return perms[key] || perms[keySingular] || perms[keyPlural];
+  const canonicalKey = metadataService.getCanonicalObjectKey ? metadataService.getCanonicalObjectKey(key) : key;
+  const keySingular = canonicalKey.endsWith('ies') ? `${canonicalKey.slice(0, -3)}y` : (canonicalKey.endsWith('s') ? canonicalKey.slice(0, -1) : canonicalKey);
+  const keyPlural = canonicalKey.endsWith('y') ? `${canonicalKey.slice(0, -1)}ies` : (canonicalKey.endsWith('s') ? canonicalKey : `${canonicalKey}s`);
+  return perms[key] || perms[canonicalKey] || perms[keySingular] || perms[keyPlural];
 };
 
 
@@ -42,6 +43,16 @@ const getRecords = async (req, res, next) => {
       }
     } else if ((objPerm && objPerm.viewAll === false) || req.query.owner_id) {
       options.owner_id = req.user?.id;
+    }
+
+    if (req.query.page || req.query.pageSize || req.query.limit) {
+      options.page = parseInt(req.query.page, 10) || 1;
+      options.pageSize = parseInt(req.query.pageSize || req.query.limit, 10) || 25;
+      options.paginated = true;
+    }
+
+    if (req.query.search || req.query.q) {
+      options.search = String(req.query.search || req.query.q).trim();
     }
 
     const records = await objectService.listRecords(objectType, organizationId, options);
