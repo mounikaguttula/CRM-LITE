@@ -348,16 +348,73 @@ const objectService = {
    * List records from universal_table for any objectType.
    */
   listRecords: async (objectKey, organizationId, options = {}) => {
+    const isPaginated = Boolean(options.paginated || options.page || options.pageSize);
+    const reqPage = Math.max(1, parseInt(options.page, 10) || 1);
+    const reqPageSize = Math.max(1, parseInt(options.pageSize, 10) || 25);
+
     if (!objectKey || typeof objectKey !== 'string' || objectKey.includes('📁') || objectKey.trim() === '') {
-      return [];
+      return isPaginated ? { success: true, data: [], meta: { page: reqPage, pageSize: reqPageSize, total: 0, totalPages: 0 } } : [];
     }
 
     const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
     const targetTypeId = objDef ? objDef.id : (isUuid(objectKey) ? objectKey : null);
     if (!targetTypeId) {
-      return [];
+      return isPaginated ? { success: true, data: [], meta: { page: reqPage, pageSize: reqPageSize, total: 0, totalPages: 0 } } : [];
     }
 
+    if (isPaginated) {
+      let query = supabase
+        .from('universal_table')
+        .select('*', { count: 'exact' })
+        .eq('is_deleted', false)
+        .eq('object_type_id', targetTypeId);
+
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+
+      if (options.owner_ids && Array.isArray(options.owner_ids) && options.owner_ids.length > 0) {
+        query = query.in('owner_id', options.owner_ids);
+      } else if (options.owner_id) {
+        query = query.eq('owner_id', options.owner_id);
+      }
+
+      if (options.search) {
+        const searchClean = String(options.search).trim();
+        if (searchClean) {
+          query = query.ilike('name', `%${searchClean}%`);
+        }
+      }
+
+      query = query.order('created_at', { ascending: false });
+      query = query.range((reqPage - 1) * reqPageSize, reqPage * reqPageSize - 1);
+
+      const { data: rows, count, error } = await query;
+
+      if (error) {
+        if ((error.code === 'PGRST103' || (error.message && error.message.includes('range not satisfiable'))) && reqPage > 1) {
+          return objectService.listRecords(objectKey, organizationId, { ...options, page: 1 });
+        }
+        console.error(`Supabase ERROR for '${objectKey}':`, error.message, error.code, error.details);
+        throw { statusCode: 500, message: `Failed to fetch records for '${objectKey}': ${error.message}` };
+      }
+
+      const normalizedData = (rows || []).map(objectService.normalizeRecord);
+      const totalCount = typeof count === 'number' ? count : normalizedData.length;
+
+      return {
+        success: true,
+        data: normalizedData,
+        meta: {
+          page: reqPage,
+          pageSize: reqPageSize,
+          total: totalCount,
+          totalPages: Math.max(1, Math.ceil(totalCount / reqPageSize)),
+        },
+      };
+    }
+
+    // Unpaginated fallback for legacy bulk/export callers
     let allRows = [];
     let page = 0;
     const pageSize = 1000;
@@ -380,6 +437,13 @@ const objectService = {
         query = query.in('owner_id', options.owner_ids);
       } else if (options.owner_id) {
         query = query.eq('owner_id', options.owner_id);
+      }
+
+      if (options.search) {
+        const searchClean = String(options.search).trim();
+        if (searchClean) {
+          query = query.ilike('name', `%${searchClean}%`);
+        }
       }
 
       query = query.range(page * pageSize, (page + 1) * pageSize - 1);
@@ -405,6 +469,7 @@ const objectService = {
 
     return allRows.map(objectService.normalizeRecord);
   },
+
 
   /**
    * Fetch single record by ID from universal_table.

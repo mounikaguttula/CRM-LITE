@@ -1971,34 +1971,47 @@ function ObjectListContent({ objectTypeId }) {
     resetImportState();
   };
 
-  // Pagination States
+  // Pagination & Search States
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [totalServerRecords, setTotalServerRecords] = useState(0);
+  const [serverTotalPages, setServerTotalPages] = useState(1);
+  const [isServerPaginated, setIsServerPaginated] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const reqSeqRef = useRef(0);
 
   const [backendFields, setBackendFields] = useState([]);
   const [lookupMap, setLookupMap] = useState({});
 
+  // 1. Reset search & pagination when switching object types
   useEffect(() => {
     setCurrentPage(1);
-  }, [objectTypeId, query, pageSize]);
+    setQuery('');
+    setDebouncedQuery('');
+    setRecords([]);
+    setTotalServerRecords(0);
+    setServerTotalPages(1);
+  }, [objectTypeId]);
 
+  // 2. Debounce search query input (250ms) and reset page to 1 on search change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+      setCurrentPage(1);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // 3. Static Metadata & User Lookup Effect (runs ONLY when objectTypeId changes)
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    setError(null);
-    resetImportState();
 
-    Promise.all([
-      apiGet(`/objects/${objectTypeId}`),
-      apiGet(`/metadata/objects/${objectTypeId}/fields`).catch(() => apiGet(`/objects/${objectTypeId}/fields`)).catch(() => null),
-      apiGet('/objects/users').catch(() => apiGet('/users')).catch(() => ({ data: [] })),
-      apiGet('/objects/companies').catch(() => apiGet('/companies')).catch(() => ({ data: [] })),
-      apiGet('/objects/contacts').catch(() => apiGet('/contacts')).catch(() => ({ data: [] })),
-    ])
-      .then(([recRes, fieldRes, userRes, compRes, contRes]) => {
+    const fieldsReq = apiGet(`/metadata/objects/${objectTypeId}/fields`).catch(() => apiGet(`/objects/${objectTypeId}/fields`)).catch(() => null);
+    const usersReq = apiGet('/objects/users').catch(() => apiGet('/users')).catch(() => ({ data: [] }));
+
+    Promise.all([fieldsReq, usersReq])
+      .then(([fieldRes, userRes]) => {
         if (!isMounted) return;
-        const dataList = Array.isArray(recRes) ? recRes : recRes?.data || [];
-        setRecords(dataList);
 
         const fieldsData = Array.isArray(fieldRes) ? fieldRes : fieldRes?.data || [];
         if (fieldsData && fieldsData.length > 0) {
@@ -2007,11 +2020,9 @@ function ObjectListContent({ objectTypeId }) {
 
         const map = {};
         const uList = Array.isArray(userRes) ? userRes : userRes?.data || [];
-        const cList = Array.isArray(compRes) ? compRes : compRes?.data || [];
-        const ctList = Array.isArray(contRes) ? contRes : contRes?.data || [];
 
-        [...uList, ...cList, ...ctList].forEach((item) => {
-          const itemId = item.id || item._id || item.user_id || item.company_id || item.contact_id;
+        uList.forEach((item) => {
+          const itemId = item.id || item._id || item.user_id;
           if (itemId) {
             map[itemId] = item;
           }
@@ -2019,16 +2030,79 @@ function ObjectListContent({ objectTypeId }) {
         setLookupMap(map);
       })
       .catch((err) => {
-        console.error(`Error loading records for ${objectTypeId}:`, err);
-        if (isMounted) setError(err.message || `Failed to fetch ${objectTypeId} records.`);
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
+        console.warn(`Error loading metadata for ${objectTypeId}:`, err);
       });
+
     return () => {
       isMounted = false;
     };
   }, [objectTypeId]);
+
+  // 4. Record List Fetching Effect (runs on objectTypeId, currentPage, pageSize, debouncedQuery change)
+  useEffect(() => {
+    let isMounted = true;
+    const currentReqId = ++reqSeqRef.current;
+
+    setLoading(true);
+    setError(null);
+    resetImportState();
+
+    const searchParam = debouncedQuery ? `&search=${encodeURIComponent(debouncedQuery)}` : '';
+    apiGet(`/objects/${objectTypeId}?page=${currentPage}&pageSize=${pageSize}${searchParam}`)
+      .then((recRes) => {
+        if (!isMounted || currentReqId !== reqSeqRef.current) return;
+
+        const isPaginatedRes = Boolean(recRes && recRes.meta && typeof recRes.meta.total === 'number');
+        let dataList = [];
+
+        if (isPaginatedRes) {
+          setIsServerPaginated(true);
+          dataList = Array.isArray(recRes.data) ? recRes.data : [];
+          setTotalServerRecords(recRes.meta.total);
+          setServerTotalPages(recRes.meta.totalPages || 1);
+
+          // If backend returned a clamped page (e.g. search narrowed results and current page was out of bounds)
+          if (recRes.meta.page && recRes.meta.page !== currentPage) {
+            setCurrentPage(recRes.meta.page);
+          }
+        } else {
+          setIsServerPaginated(false);
+          dataList = Array.isArray(recRes) ? recRes : recRes?.data || [];
+          setTotalServerRecords(dataList.length);
+          setServerTotalPages(Math.max(1, Math.ceil(dataList.length / pageSize)));
+        }
+
+        setRecords(dataList);
+
+        // Merge fetched record items into lookupMap for company/contact self-resolution
+        const cleanKey = String(objectTypeId || '').toLowerCase();
+        if (cleanKey.includes('company') || cleanKey.includes('contact')) {
+          setLookupMap((prev) => {
+            const next = { ...prev };
+            dataList.forEach((item) => {
+              if (item.id) next[item.id] = item;
+            });
+            return next;
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error loading records for ${objectTypeId}:`, err);
+        if (isMounted && currentReqId === reqSeqRef.current) {
+          setError(err.message || `Failed to fetch ${objectTypeId} records.`);
+        }
+      })
+      .finally(() => {
+        if (isMounted && currentReqId === reqSeqRef.current) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [objectTypeId, currentPage, pageSize, debouncedQuery, resetImportState]);
+
 
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
 
@@ -2225,24 +2299,31 @@ function ObjectListContent({ objectTypeId }) {
   }, [matchedFields, columns]);
 
   const filteredRecords = useMemo(() => {
+    if (isServerPaginated) return records;
     return records.filter((r) => {
       if (!query) return true;
       return Object.values(r).some((val) =>
         String(val || '').toLowerCase().includes(query.toLowerCase())
       );
     });
-  }, [records, query]);
+  }, [records, query, isServerPaginated]);
 
-  const totalRecords = filteredRecords.length;
-  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const totalRecords = isServerPaginated ? totalServerRecords : filteredRecords.length;
+  const totalPages = isServerPaginated ? serverTotalPages : Math.max(1, Math.ceil(totalRecords / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
-  const startIndex = (safeCurrentPage - 1) * pageSize;
-  const endIndex = Math.min(startIndex + pageSize, totalRecords);
+  const startIndex = isServerPaginated
+    ? (totalRecords === 0 ? 0 : (safeCurrentPage - 1) * pageSize)
+    : (safeCurrentPage - 1) * pageSize;
+  const endIndex = isServerPaginated
+    ? Math.min(safeCurrentPage * pageSize, totalRecords)
+    : Math.min(startIndex + pageSize, totalRecords);
 
   const currentRecordsPage = useMemo(() => {
+    if (isServerPaginated) return records;
     return filteredRecords.slice(startIndex, endIndex);
-  }, [filteredRecords, startIndex, endIndex]);
+  }, [records, filteredRecords, startIndex, endIndex, isServerPaginated]);
+
 
   const isAllVisibleSelected = useMemo(() => {
     if (!currentRecordsPage || currentRecordsPage.length === 0) return false;
@@ -2781,7 +2862,7 @@ function ObjectListContent({ objectTypeId }) {
             {meta.pluralDisplayName}
           </h1>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--text-dim)' }}>
-            {records.length > 0 ? `${records.length} ${meta.pluralDisplayName.toLowerCase()}` : getModuleSubtitle(objectTypeId, meta.pluralDisplayName)}
+            {totalRecords > 0 ? `${totalRecords.toLocaleString()} ${meta.pluralDisplayName.toLowerCase()}` : ((totalServerRecords === 0 && isServerPaginated) || (query && totalRecords === 0) ? `0 ${meta.pluralDisplayName.toLowerCase()}` : getModuleSubtitle(objectTypeId, meta.pluralDisplayName))}
           </p>
         </div>
 

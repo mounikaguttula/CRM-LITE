@@ -17,11 +17,21 @@ const PLATFORM_FIELDS = [
 ];
 
 
+const inMemoryCache = {
+  permissions: new Map(),
+  objectDefs: new Map(),
+  clear() {
+    this.permissions.clear();
+    this.objectDefs.clear();
+  }
+};
+
 /**
- * Helper: Invalidate metadata cache in Redis whenever metadata schema changes.
+ * Helper: Invalidate metadata cache in Redis & in-memory whenever metadata schema changes.
  * Also clears permissions cache so record APIs pick up fresh role data.
  */
 const invalidateMetadataCache = async (organizationId) => {
+  inMemoryCache.clear();
   if (!redisClient || !redisClient.isOpen) return;
 
 
@@ -34,32 +44,69 @@ const invalidateMetadataCache = async (organizationId) => {
     if (staleKeys.length > 0) {
       await redisClient.del(staleKeys);
     }
-    console.log(`🗑 Redis caches invalidated: ${staleKeys.length} key(s) cleared (metadata + permissions).`);
+    console.log(`🗑 Redis & in-memory caches invalidated: ${staleKeys.length} key(s) cleared (metadata + permissions).`);
   } catch (err) {
     console.error('❌ Redis Cache Invalidation Error:', err.message);
   }
 };
 
 
+
+const CANONICAL_MAP = {
+  company: 'company',
+  companies: 'company',
+  deal: 'deal',
+  deals: 'deal',
+  contact: 'contact',
+  contacts: 'contact',
+  lead: 'lead',
+  leads: 'lead',
+  task: 'task',
+  tasks: 'task',
+  note: 'note',
+  notes: 'note',
+  form: 'form',
+  forms: 'form',
+  campaign: 'campaign',
+  campaigns: 'campaign',
+  product: 'product',
+  products: 'product',
+  line_item: 'line_item',
+  line_items: 'line_item',
+};
+
+const getCanonicalObjectKey = (rawKey) => {
+  if (!rawKey) return '';
+  const clean = String(rawKey).trim().toLowerCase();
+  if (CANONICAL_MAP[clean]) return CANONICAL_MAP[clean];
+  if (clean.endsWith('ies')) return `${clean.slice(0, -3)}y`;
+  if (clean.endsWith('s') && !clean.endsWith('ss')) return clean.slice(0, -1);
+  return clean;
+};
+
 /**
  * Metadata Service
  * Interfaces directly with Supabase tables: object_type_definitions, field_definitions, Organization.
  */
 const metadataService = {
+  getCanonicalObjectKey,
+
   /**
    * Fetch object type definition by API name or ID.
    */
   getObjectTypeByApiName: async (objectKey, organizationId) => {
     if (!objectKey) return null;
 
+    const cacheKey = `${String(objectKey).toLowerCase()}_${organizationId || 'global'}`;
+    const cached = inMemoryCache.objectDefs.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < 60000)) {
+      return cached.data;
+    }
 
     const lowerKey = String(objectKey).toLowerCase();
-    const keyPlural = lowerKey.endsWith('s') ? lowerKey : `${lowerKey}s`;
-    const keySingular = lowerKey.endsWith('ies')
-      ? `${lowerKey.slice(0, -3)}y`
-      : lowerKey.endsWith('s')
-        ? lowerKey.slice(0, -1)
-        : lowerKey;
+    const canonicalKey = getCanonicalObjectKey(lowerKey);
+    const keyPlural = canonicalKey.endsWith('y') ? `${canonicalKey.slice(0, -1)}ies` : (canonicalKey.endsWith('s') ? canonicalKey : `${canonicalKey}s`);
+    const keySingular = canonicalKey;
 
 
     let query = supabase.from('object_type_definitions').select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at');
@@ -87,6 +134,7 @@ const metadataService = {
 
     if (objDefs && objDefs.length > 0) {
       const matched = objDefs.find((o) => o.organization_id === organizationId) || objDefs[0];
+      inMemoryCache.objectDefs.set(cacheKey, { timestamp: Date.now(), data: matched });
       return matched;
     }
 
@@ -98,6 +146,7 @@ const metadataService = {
         .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at')
         .or(`api_name.eq.${lowerKey},api_name.eq.${keyPlural},api_name.eq.${keySingular}`);
       if (fallbackDefs && fallbackDefs.length > 0) {
+        inMemoryCache.objectDefs.set(cacheKey, { timestamp: Date.now(), data: fallbackDefs[0] });
         return fallbackDefs[0];
       }
     }
@@ -483,19 +532,18 @@ const metadataService = {
    * Cache is invalidated by invalidateMetadataCache() whenever permissions change.
    */
   getPermissions: async (user) => {
-    console.log(`\n=================== 🔐 PERMISSIONS FETCH START ===================`);
-    console.log(`[Permissions] Incoming User:`, {
-      id: user?.id,
-      email: user?.email,
-      role: user?.role,
-      role_id: user?.role_id,
-      organization_id: user?.organization_id,
-    });
-
-
     let roleId = user?.role_id;
+    const userId = user?.id || user?.user_id || 'anon';
+    const orgId = user?.organization_id || 'global';
+    const roleName = user?.role || user?.role_name || '';
+
+    const cacheKey = `perm_${userId}_${orgId}_${roleId || ''}_${roleName}`;
+    const cached = inMemoryCache.permissions.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < 10000)) {
+      return cached.data;
+    }
+
     if (!roleId && user?.id && isUuid(user.id)) {
-      console.log(`[Permissions] role_id missing from user object. Querying users table for id=${user.id}...`);
       const { data: dbUser, error: uErr } = await supabase
         .from('users')
         .select('role_id')
@@ -503,13 +551,11 @@ const metadataService = {
         .maybeSingle();
       if (uErr) console.error(`[Permissions] Error querying users table:`, uErr.message);
       roleId = dbUser?.role_id;
-      console.log(`[Permissions] Resolved role_id from users DB table:`, roleId || 'NULL');
     }
 
 
     // Get all object definitions
     const objectDefs = await metadataService.getObjectDefinitions(user?.organization_id);
-    console.log(`[Permissions] Retrieved ${objectDefs.length} object definitions:`, objectDefs.map(o => ({ id: o.id, api_name: o.api_name })));
 
 
     // Fetch database permission records for this role (Object + Field permissions)
@@ -551,8 +597,9 @@ const metadataService = {
       }
       const dbPerm = matchingPerms.length > 0 ? matchingPerms[0] : null;
       const apiName = obj.api_name;
-      const keySingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
-      const keyPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
+      const canonicalKey = getCanonicalObjectKey(apiName);
+      const keySingular = canonicalKey;
+      const keyPlural = canonicalKey.endsWith('y') ? `${canonicalKey.slice(0, -1)}ies` : (canonicalKey.endsWith('s') ? canonicalKey : `${canonicalKey}s`);
 
       const isSystemAdmin = (user?.role || '').toLowerCase().includes('admin') || !roleId;
 
@@ -608,6 +655,7 @@ const metadataService = {
 
 
       permissions[apiName] = objPerm;
+      permissions[canonicalKey] = objPerm;
       permissions[keySingular] = objPerm;
       permissions[keyPlural] = objPerm;
     }
@@ -620,9 +668,7 @@ const metadataService = {
       permissions.dashboardScope = { canViewGroup: false, groupHelperText: null };
     }
 
-    console.log(`[Permissions] Final Resolved Permissions Map:`, JSON.stringify(permissions, null, 2));
-    console.log(`=================== 🔐 PERMISSIONS FETCH END ===================\n`);
-
+    inMemoryCache.permissions.set(cacheKey, { timestamp: Date.now(), data: permissions });
     return permissions;
   },
 
