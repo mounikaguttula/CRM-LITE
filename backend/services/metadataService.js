@@ -381,7 +381,7 @@ const metadataService = {
           { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
           { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
           { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
+          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], isTitle: false },
           { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
         ];
       } else if (lowerKey.includes('deal')) {
@@ -411,7 +411,7 @@ const metadataService = {
         { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
         { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
         { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-        { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
+        { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], isTitle: false },
         { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
       ];
       stdLeadFields.forEach((slf) => {
@@ -531,8 +531,8 @@ const metadataService = {
    * Results are cached in Redis by org_id + role_id for 300 seconds.
    * Cache is invalidated by invalidateMetadataCache() whenever permissions change.
    */
-  getPermissions: async (user) => {
-    let roleId = user?.role_id;
+  getPermissions: async (user, preFetchedObjectDefs = null, preFetchedRoleId = null) => {
+    let roleId = preFetchedRoleId || user?.role_id;
     const userId = user?.id || user?.user_id || 'anon';
     const orgId = user?.organization_id || 'global';
     const roleName = user?.role || user?.role_name || '';
@@ -543,22 +543,21 @@ const metadataService = {
       return cached.data;
     }
 
-    if (!roleId && user?.id && isUuid(user.id)) {
-      const { data: dbUser, error: uErr } = await supabase
-        .from('users')
-        .select('role_id')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (uErr) console.error(`[Permissions] Error querying users table:`, uErr.message);
-      roleId = dbUser?.role_id;
+    // Parallel fetch: user role resolution (if missing) + object definitions (if not pre-fetched)
+    const userRoleQuery = (!roleId && user?.id && isUuid(user.id))
+      ? supabase.from('users').select('role_id').eq('id', user.id).maybeSingle()
+      : Promise.resolve({ data: null });
+
+    const objDefsQuery = preFetchedObjectDefs
+      ? Promise.resolve(preFetchedObjectDefs)
+      : metadataService.getObjectDefinitions(user?.organization_id);
+
+    const [dbUserRes, objectDefs] = await Promise.all([userRoleQuery, objDefsQuery]);
+    if (!roleId && dbUserRes?.data?.role_id) {
+      roleId = dbUserRes.data.role_id;
     }
 
-
-    // Get all object definitions
-    const objectDefs = await metadataService.getObjectDefinitions(user?.organization_id);
-
-
-    // Fetch database permission records for this role (Object + Field permissions)
+    // Fetch database permission records for this role (Object + Field permissions) concurrently
     let permRecords = [];
     let fieldPermRecords = [];
     if (roleId && isUuid(roleId)) {
@@ -589,8 +588,7 @@ const metadataService = {
       fieldPermissions: fieldPermissionsMap,
     };
 
-
-    for (const obj of objectDefs) {
+    for (const obj of (objectDefs || [])) {
       const matchingPerms = permRecords.filter(p => p.object_type_id === obj.id);
       if (matchingPerms.length > 1) {
         console.error(`⚠️ INTEGRITY WARNING: Encountered ${matchingPerms.length} duplicate permission rows for role_id=${roleId}, object_type_id=${obj.id} (${obj.api_name}). Resolving deterministically.`);
@@ -653,7 +651,6 @@ const metadataService = {
         }
       }
 
-
       permissions[apiName] = objPerm;
       permissions[canonicalKey] = objPerm;
       permissions[keySingular] = objPerm;
@@ -661,7 +658,7 @@ const metadataService = {
     }
 
     try {
-      const dashboardScope = await metadataService.resolveDashboardScope(user);
+      const dashboardScope = await metadataService.resolveDashboardScope(user, roleId, user?.role, permRecords);
       permissions.dashboardScope = dashboardScope;
     } catch (dsErr) {
       console.warn('[Permissions] Error resolving dashboardScope:', dsErr.message);
@@ -676,7 +673,7 @@ const metadataService = {
    * Resolves dashboard scope permissions and helper text for a given user context.
    * Leverages existing dynamic role hierarchy (roleService.getRolesByOrganization) and object permissions.
    */
-  resolveDashboardScope: async (user) => {
+  resolveDashboardScope: async (user, preFetchedRoleId = null, preFetchedRoleName = null, preFetchedOpRows = null) => {
     if (!user) {
       return { canViewGroup: false, groupHelperText: null };
     }
@@ -684,8 +681,8 @@ const metadataService = {
     const roleService = require('./roleService');
     const orgId = user.organization_id || '40f7407a-a751-4090-9012-f383b1e68de5';
 
-    let roleId = user.role_id;
-    let roleName = user.role || user.role_name || '';
+    let roleId = preFetchedRoleId || user.role_id;
+    let roleName = preFetchedRoleName || user.role || user.role_name || '';
 
     if ((!roleId || !roleName) && user.id && isUuid(user.id)) {
       const { data: dbUser } = await supabase
@@ -695,8 +692,8 @@ const metadataService = {
         .maybeSingle();
 
       if (dbUser) {
-        if (dbUser.role_id) roleId = dbUser.role_id;
-        if (dbUser.roles?.role_name) roleName = dbUser.roles.role_name;
+        if (!roleId && dbUser.role_id) roleId = dbUser.role_id;
+        if (!roleName && dbUser.roles?.role_name) roleName = dbUser.roles.role_name;
       }
     }
 
@@ -722,13 +719,19 @@ const metadataService = {
     }
 
     let isViewAll = rNameLower.includes('admin') || userRoleIndex === 0;
-    if (!isViewAll && roleId && isUuid(roleId)) {
-      const { data: opRows } = await supabase
-        .from('object_permissions')
-        .select('view_all')
-        .eq('role_id', roleId);
-      if (opRows && opRows.some((row) => row.view_all === true)) {
-        isViewAll = true;
+    if (!isViewAll) {
+      if (preFetchedOpRows && Array.isArray(preFetchedOpRows)) {
+        if (preFetchedOpRows.some((row) => row.view_all === true)) {
+          isViewAll = true;
+        }
+      } else if (roleId && isUuid(roleId)) {
+        const { data: opRows } = await supabase
+          .from('object_permissions')
+          .select('view_all')
+          .eq('role_id', roleId);
+        if (opRows && opRows.some((row) => row.view_all === true)) {
+          isViewAll = true;
+        }
       }
     }
 
@@ -838,7 +841,7 @@ const metadataService = {
    * @param {String} action - Action ('create', 'read', 'update', 'delete')
    * @param {Object} [record=null] - Target record object for scope checking
    */
-  checkPermission: async (user, objectType, action, record = null) => {
+  checkPermission: async (user, objectType, action, record = null, permsOverride = null) => {
     if (!objectType || !action) return;
 
     const actionMap = {
@@ -852,7 +855,7 @@ const metadataService = {
     const targetAction = String(action).toLowerCase();
     const targetProp = actionMap[targetAction] || 'canRead';
 
-    const perms = await metadataService.getPermissions(user);
+    const perms = permsOverride || (await metadataService.getPermissions(user));
     if (!perms) return;
 
     const key = String(objectType).toLowerCase();
@@ -1062,8 +1065,8 @@ const metadataService = {
     // Measure Permissions query execution time (Object + Field Permissions)
     const tPermStart = Date.now();
     
-    // Resolve Role ID
-    let roleId = user?.role_id;
+    // Resolve Role ID without secondary DB query
+    let roleId = user?.role_id || userRes?.data?.role_id;
     let tRoleResolve = 0;
     if (!roleId && user?.id && isUuid(user.id)) {
       const tRoleStart = Date.now();
@@ -1163,7 +1166,7 @@ const metadataService = {
     }
 
     try {
-      const dashboardScope = await metadataService.resolveDashboardScope(user);
+      const dashboardScope = await metadataService.resolveDashboardScope(user, roleId, user?.role, permRecords);
       permissions.dashboardScope = dashboardScope;
     } catch (dsErr) {
       console.warn('[PlatformMetadata] Error resolving dashboardScope:', dsErr.message);
@@ -1238,7 +1241,7 @@ const metadataService = {
             { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
             { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
             { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-            { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
+            { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], isTitle: false },
             { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
           ];
         } else if (lowerKey.includes('deal')) {
@@ -1268,7 +1271,7 @@ const metadataService = {
           { id: 'f_alternate_email', name: 'alternate_email', label: 'Alternate Email ID', type: 'email', isTitle: false },
           { id: 'f_phone', name: 'phone', label: 'Phone Number', type: 'phone', isTitle: false },
           { id: 'f_company', name: 'company', label: 'Company Name', type: 'text', isTitle: false },
-          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'], isTitle: false },
+          { id: 'f_lead_source', name: 'lead_source', label: 'Lead Source', type: 'picklist', options: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], picklist_values: ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'], isTitle: false },
           { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
         ];
         stdLeadFields.forEach((slf) => {
