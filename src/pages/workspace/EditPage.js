@@ -582,7 +582,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         } else if (name.includes('contact') || label.includes('preferred contact')) {
           optionsList = ['Email', 'Mobile'];
         } else if (name === 'source' || name === 'lead_source' || label.includes('source')) {
-          optionsList = ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Other'];
+          optionsList = ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'];
         } else if (name === 'status' || label.includes('status')) {
           optionsList = ['New', 'Qualified', 'Not Qualified', 'Converted'];
         } else if (name === 'stage' || label.includes('stage')) {
