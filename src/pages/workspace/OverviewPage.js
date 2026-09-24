@@ -364,6 +364,8 @@ function DashboardContent() {
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
+
+
   React.useEffect(() => {
     let isMounted = true;
     async function fetchUserMetrics() {
@@ -371,24 +373,35 @@ function DashboardContent() {
         setScopeLoading(true);
         const scopeParam = activeScope === 'group' ? 'group' : 'individual';
 
-        const [dealsRes, leadsRes, contactsRes, companiesRes] = await Promise.all([
-          apiGet(`/objects/deal?scope=${scopeParam}`).catch(() => apiGet(`/objects/deals?scope=${scopeParam}`).catch(() => [])),
-          apiGet(`/objects/lead?scope=${scopeParam}`).catch(() => apiGet(`/objects/leads?scope=${scopeParam}`).catch(() => [])),
-          apiGet(`/objects/contact?scope=${scopeParam}`).catch(() => apiGet(`/objects/contacts?scope=${scopeParam}`).catch(() => [])),
-          apiGet(`/objects/company?scope=${scopeParam}`).catch(() => apiGet(`/objects/companies?scope=${scopeParam}`).catch(() => [])),
-        ]);
+        // High-performance dedicated Dashboard Summary API call
+        const summaryRes = await apiGet(`/api/dashboard/summary?scope=${scopeParam}`).catch((err) => {
+          console.warn('[Dashboard Summary API] Fallback triggered due to error:', err.message);
+          return null;
+        });
 
         if (!isMounted) return;
 
-        const dealsData = Array.isArray(dealsRes) ? dealsRes : (dealsRes?.data || []);
-        const leadsData = Array.isArray(leadsRes) ? leadsRes : (leadsRes?.data || []);
-        const contactsData = Array.isArray(contactsRes) ? contactsRes : (contactsRes?.data || []);
-        const companiesData = Array.isArray(companiesRes) ? companiesRes : (companiesRes?.data || []);
+        if (summaryRes && summaryRes.records) {
+          setUserDeals(summaryRes.records.deals || []);
+          setUserLeads(summaryRes.records.leads || []);
+          setUserContacts(summaryRes.records.contacts || []);
+          setUserCompanies(summaryRes.records.companies || []);
+        } else {
+          // Robust fallback to individual object queries if summary API is unavailable
+          const [dealsRes, leadsRes, contactsRes, companiesRes] = await Promise.all([
+            apiGet(`/objects/deal?scope=${scopeParam}`).catch(() => apiGet(`/objects/deals?scope=${scopeParam}`).catch(() => [])),
+            apiGet(`/objects/lead?scope=${scopeParam}`).catch(() => apiGet(`/objects/leads?scope=${scopeParam}`).catch(() => [])),
+            apiGet(`/objects/contact?scope=${scopeParam}`).catch(() => apiGet(`/objects/contacts?scope=${scopeParam}`).catch(() => [])),
+            apiGet(`/objects/company?scope=${scopeParam}`).catch(() => apiGet(`/objects/companies?scope=${scopeParam}`).catch(() => [])),
+          ]);
 
-        setUserDeals(dealsData);
-        setUserLeads(leadsData);
-        setUserContacts(contactsData);
-        setUserCompanies(companiesData);
+          if (!isMounted) return;
+
+          setUserDeals(Array.isArray(dealsRes) ? dealsRes : (dealsRes?.data || []));
+          setUserLeads(Array.isArray(leadsRes) ? leadsRes : (leadsRes?.data || []));
+          setUserContacts(Array.isArray(contactsRes) ? contactsRes : (contactsRes?.data || []));
+          setUserCompanies(Array.isArray(companiesRes) ? companiesRes : (companiesRes?.data || []));
+        }
       } catch (err) {
         console.warn('Dashboard user metrics fetch error:', err.message);
       } finally {

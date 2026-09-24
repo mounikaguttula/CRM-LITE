@@ -6,7 +6,11 @@ const isUuid = (val) => Boolean(val && typeof val === 'string' && /^[0-9a-f]{8}-
 // In-memory persistent hierarchy store per organization
 const PERSISTED_HIERARCHY = {};
 
+// In-memory roles cache per organization
+const rolesCache = new Map();
+
 const invalidateMetadataCache = async (organizationId) => {
+  rolesCache.clear();
   if (!redisClient || !redisClient.isOpen) return;
   try {
     // Clear both metadata and permissions cache keys so record APIs and
@@ -81,6 +85,12 @@ const DEFAULT_ROLES = [
  */
 class RoleService {
   async getRolesByOrganization(organizationId) {
+    const cacheKey = organizationId || 'global';
+    const cached = rolesCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < 60000)) {
+      return cached.data;
+    }
+
     let orgRoles = [];
 
     if (organizationId && isUuid(organizationId)) {
@@ -213,6 +223,7 @@ class RoleService {
       });
     }
 
+    rolesCache.set(cacheKey, { timestamp: Date.now(), data: rolesList });
     return rolesList;
   }
 

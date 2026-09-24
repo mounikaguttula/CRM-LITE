@@ -23,6 +23,7 @@ const campaignRoutes = require('./routes/campaignRoutes');
 const publicRoutes = require('./routes/publicRoutes');
 const companyRoutes = require('./routes/companyRoutes');
 const formRoutes = require('./routes/formRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 
 const app = express();
@@ -89,6 +90,8 @@ app.use('/users', userRoutes);
 app.use('/api/users', userRoutes);
 app.use('/roles', roleRoutes);
 app.use('/api/roles', roleRoutes);
+app.use('/', dashboardRoutes);
+app.use('/api', dashboardRoutes);
 app.use('/', objectRoutes);
 
 

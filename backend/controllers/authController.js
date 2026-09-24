@@ -167,7 +167,7 @@ const verifyResetToken = async (req, res, next) => {
     }
 
     // 5. Generate standard long-lived token (7d)
-    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email.split('@')[0];
+    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email;
     const initials = fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
 
     const tokenPayload = {

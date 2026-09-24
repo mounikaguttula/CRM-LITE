@@ -5,6 +5,7 @@ import { apiGet, apiPost } from '../../api/client';
 import AccessDenied from '../../components/AccessDenied';
 import { ChevronRight, ArrowLeft, Save, Plus, X, AlertTriangle, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import CustomPicklist from '../../components/CustomPicklist';
+import { deriveLookupRequirements } from '../../utils/lookupUtils';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
 const C = {
@@ -43,43 +44,63 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
 
   useEffect(() => {
     let isMounted = true;
-    Promise.all([
-      apiGet(`/metadata/objects/${objectTypeId}/fields`).catch(() => apiGet(`/objects/${objectTypeId}/fields`)).catch(() => []),
-      apiGet('/users').catch(() => ({ data: [] })),
-      apiGet('/objects/companies').catch(() => apiGet('/companies')).catch(() => ({ data: [] })),
-      apiGet('/objects/contacts').catch(() => apiGet('/contacts')).catch(() => ({ data: [] })),
-      apiGet('/objects/deals').catch(() => apiGet('/deals')).catch(() => ({ data: [] })),
-      apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9').catch(() => ({ data: [] }))
-    ]).then(([fList, uRes, cRes, ctRes, dRes, pRes]) => {
+
+    async function loadFormData() {
+      // Phase 1: fetch field metadata (single request, always needed)
+      let fieldsData = [];
+      try {
+        const fRes = await apiGet(`/metadata/objects/${objectTypeId}/fields`)
+          .catch(() => apiGet(`/objects/${objectTypeId}/fields`))
+          .catch(() => []);
+        fieldsData = Array.isArray(fRes) ? fRes : (fRes?.data || []);
+      } catch (_) { /* ignore, fall through with empty fields */ }
+
       if (!isMounted) return;
-      const fieldsData = Array.isArray(fList) ? fList : (fList?.data || []);
       if (fieldsData.length > 0) setFields(fieldsData);
 
-      const usersList = Array.isArray(uRes) ? uRes : (uRes?.data || []);
-      const compList = Array.isArray(cRes) ? cRes : (cRes?.data || []);
-      const contactList = Array.isArray(ctRes) ? ctRes : (ctRes?.data || []);
-      const dealsList = Array.isArray(dRes) ? dRes : (dRes?.data || []);
-      const productsList = Array.isArray(pRes) ? pRes : (pRes?.data || []);
+      // Phase 2: derive which lookup data sources are required
+      // Primary: field.type === 'lookup'; Fallback: field-name heuristics
+      const needs = deriveLookupRequirements(fieldsData);
+
+      // Phase 3: fetch ONLY the required lookup data sources in parallel.
+      // companies, contacts, deals, products use page=1&pageSize=25 to avoid
+      // downloading the entire tenant dataset. The paginated response { data, meta }
+      // is already handled by the resolved[k] normalization below.
+      const reqEntries = [];
+      if (needs.users)     reqEntries.push(['users',     apiGet('/users').catch(() => ({ data: [] }))]);
+      if (needs.companies) reqEntries.push(['companies', apiGet('/objects/companies?page=1&pageSize=25').catch(() => apiGet('/companies?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.contacts)  reqEntries.push(['contacts',  apiGet('/objects/contacts?page=1&pageSize=25').catch(() => apiGet('/contacts?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.deals)     reqEntries.push(['deals',     apiGet('/objects/deals?page=1&pageSize=25').catch(() => ({ data: [] }))]);
+      if (needs.products)  reqEntries.push(['products',  apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9?page=1&pageSize=25').catch(() => ({ data: [] }))]);
+
+      const keys    = reqEntries.map(([k]) => k);
+      const results = await Promise.all(reqEntries.map(([, p]) => p));
+      if (!isMounted) return;
+
+      const resolved = {};
+      keys.forEach((k, i) => {
+        const r = results[i];
+        resolved[k] = Array.isArray(r) ? r : (r?.data || []);
+      });
 
       setLookupData({
-        users: usersList.length > 0 ? usersList : (currentUser ? [currentUser] : []),
-        companies: compList,
-        contacts: contactList,
-        deals: dealsList,
-        products: productsList,
+        users:     resolved.users     || (currentUser ? [currentUser] : []),
+        companies: resolved.companies || [],
+        contacts:  resolved.contacts  || [],
+        deals:     resolved.deals     || [],
+        products:  resolved.products  || [],
       });
 
       // Parse query params for pre-filled lookup values
       const queryParams = new URLSearchParams(location.search);
       const prefill = {};
-      queryParams.forEach((value, key) => {
-        prefill[key] = value;
-      });
+      queryParams.forEach((value, key) => { prefill[key] = value; });
       if (Object.keys(prefill).length > 0) {
         setFormData((prev) => ({ ...prefill, ...prev }));
       }
-    });
+    }
 
+    loadFormData();
     return () => { isMounted = false; };
   }, [objectTypeId, location.search, currentUser]);
 
@@ -291,6 +312,10 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
 
     let fieldEl;
 
+    const isExplicitLookup = f.type === 'lookup';
+    const isExplicitNonLookup = Boolean(f.type && f.type !== 'lookup');
+    const isLookupField = isExplicitLookup || (!isExplicitNonLookup && (isOwner || isCompany || isContact || isDeal || isProduct));
+
     if (f.type === 'picklist' || f.type === 'dropdown') {
       const rawOptions = (Array.isArray(f.options) && f.options.length > 0)
         ? f.options
@@ -330,7 +355,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
           hasError={hasError}
         />
       );
-    } else if (f.type === 'lookup' || isOwner || isCompany || isContact || isDeal || isProduct) {
+    } else if (isLookupField) {
       const options = isOwner
         ? lookupData.users
         : isContact
