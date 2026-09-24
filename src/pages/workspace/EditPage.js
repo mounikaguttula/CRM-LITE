@@ -5,6 +5,7 @@ import { apiGet, apiPut } from '../../api/client';
 import AccessDenied from '../../components/AccessDenied';
 import { ChevronRight, ArrowLeft, Save, X, AlertTriangle, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import CustomPicklist from '../../components/CustomPicklist';
+import { deriveLookupRequirements } from '../../utils/lookupUtils';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
 const C = {
@@ -95,124 +96,174 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     setLoading(true);
     setSubmitError(null);
 
-    Promise.all([
-      apiGet(`/objects/${objectTypeId}/${recordId}`).catch(() => apiGet(`/${objectTypeId}/${recordId}`)),
-      apiGet(`/metadata/objects/${objectTypeId}/fields`).catch(() => apiGet(`/objects/${objectTypeId}/fields`)).catch(() => []),
-      apiGet('/users').catch(() => apiGet('/user')).catch(() => ({ data: [] })),
-      apiGet('/objects/companies').catch(() => apiGet('/objects/company')).catch(() => apiGet('/companies')).catch(() => apiGet('/company')).catch(() => ({ data: [] })),
-      apiGet('/objects/contacts').catch(() => apiGet('/objects/contact')).catch(() => apiGet('/contacts')).catch(() => apiGet('/contact')).catch(() => ({ data: [] })),
-      apiGet('/objects/deals').catch(() => apiGet('/deals')).catch(() => ({ data: [] })),
-      apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9').catch(() => ({ data: [] }))
-    ])
-      .then(([rec, fList, uRes, cRes, ctRes, dRes, pRes]) => {
+    async function loadEditData() {
+      // Phase 1: fetch record + field metadata in parallel (both always needed)
+      const [rec, fRes] = await Promise.all([
+        apiGet(`/objects/${objectTypeId}/${recordId}`).catch(() => apiGet(`/${objectTypeId}/${recordId}`)),
+        apiGet(`/metadata/objects/${objectTypeId}/fields`)
+          .catch(() => apiGet(`/objects/${objectTypeId}/fields`))
+          .catch(() => []),
+      ]);
+
+      if (!isMounted) return;
+      const recData = rec?.data || rec;
+
+      const fieldsData = Array.isArray(fRes) ? fRes : (fRes?.data || []);
+      if (fieldsData.length > 0) setFields(fieldsData);
+
+      // Phase 2: derive which lookup data sources are required
+      // Primary: field.type === 'lookup'; Fallback: field-name heuristics
+      const needs = deriveLookupRequirements(fieldsData);
+
+      // Phase 3: fetch ONLY the required lookup data sources in parallel.
+      // companies, contacts, deals, products use page=1&pageSize=25 to avoid
+      // downloading the entire tenant dataset. The paginated response { data, meta }
+      // is already handled by the resolved[k] normalization below.
+      const reqEntries = [];
+      if (needs.users)     reqEntries.push(['users',     apiGet('/users').catch(() => apiGet('/user')).catch(() => ({ data: [] }))]);
+      if (needs.companies) reqEntries.push(['companies', apiGet('/objects/companies?page=1&pageSize=25').catch(() => apiGet('/objects/company?page=1&pageSize=25')).catch(() => apiGet('/companies?page=1&pageSize=25')).catch(() => apiGet('/company?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.contacts)  reqEntries.push(['contacts',  apiGet('/objects/contacts?page=1&pageSize=25').catch(() => apiGet('/objects/contact?page=1&pageSize=25')).catch(() => apiGet('/contacts?page=1&pageSize=25')).catch(() => apiGet('/contact?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.deals)     reqEntries.push(['deals',     apiGet('/objects/deals?page=1&pageSize=25').catch(() => apiGet('/deals?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.products)  reqEntries.push(['products',  apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9?page=1&pageSize=25').catch(() => ({ data: [] }))]);
+
+      const keys    = reqEntries.map(([k]) => k);
+      const results = await Promise.all(reqEntries.map(([, p]) => p));
+      if (!isMounted) return;
+
+      const resolved = {};
+      keys.forEach((k, i) => {
+        const r = results[i];
+        resolved[k] = Array.isArray(r) ? r : (r?.data || r?.users || r?.companies || r?.contacts || []);
+      });
+
+      const usersList    = resolved.users     || [];
+      let   compList     = resolved.companies  || [];
+      let   contactList  = resolved.contacts   || [];
+      const dealsList    = resolved.deals      || [];
+      const productsList = resolved.products   || [];
+
+      // ── Selected-value safety net ─────────────────────────────────────────
+      // If the record has an existing company or contact relationship whose ID is
+      // not in the first-page results, fetch that single record by ID and prepend
+      // it so the dropdown always shows the human-readable name, never a raw UUID.
+      const existingParentId    = recData?.parent_id    || recData?.company_id    || recData?.company    || null;
+      const existingSecondaryId = recData?.secondary_parent_id || recData?.contact_id || recData?.contact || null;
+
+      const parentInList    = !existingParentId    || !isUuid(existingParentId)    || compList.some((c) => c.id === existingParentId);
+      const secondaryInList = !existingSecondaryId || !isUuid(existingSecondaryId) || contactList.some((c) => c.id === existingSecondaryId);
+
+      const missingFetches = [];
+      if (!parentInList   ) missingFetches.push(['parentRec',    apiGet(`/objects/company/${existingParentId}`).catch(() => apiGet(`/objects/companies/${existingParentId}`)).catch(() => null)]);
+      if (!secondaryInList) missingFetches.push(['secondaryRec', apiGet(`/objects/contact/${existingSecondaryId}`).catch(() => apiGet(`/objects/contacts/${existingSecondaryId}`)).catch(() => null)]);
+
+      if (missingFetches.length > 0) {
+        const missingResults = await Promise.all(missingFetches.map(([, p]) => p));
         if (!isMounted) return;
-        const recData = rec?.data || rec;
-
-        const fieldsData = Array.isArray(fList) ? fList : (fList?.data || []);
-        if (fieldsData.length > 0) setFields(fieldsData);
-
-        const usersList = Array.isArray(uRes) ? uRes : (uRes?.data || uRes?.users || []);
-        const compList = Array.isArray(cRes)
-          ? cRes
-          : (cRes?.data || cRes?.companies || cRes?.results || cRes?.items || []);
-        const contactList = Array.isArray(ctRes)
-          ? ctRes
-          : (ctRes?.data || ctRes?.contacts || ctRes?.results || ctRes?.items || []);
-        const dealsList = Array.isArray(dRes) ? dRes : (dRes?.data || []);
-        const productsList = Array.isArray(pRes) ? pRes : (pRes?.data || []);
-
-        const finalUsers = usersList.length > 0 ? usersList : (currentUser ? [currentUser] : []);
-        const finalCompanies = compList;
-        
-        setLookupData({
-          users: finalUsers,
-          companies: finalCompanies,
-          contacts: contactList,
-          deals: dealsList,
-          products: productsList,
+        missingFetches.forEach(([label], idx) => {
+          const row = missingResults[idx];
+          if (!row) return;
+          const rawRec = row?.data || row;
+          const rec = (rawRec && !Array.isArray(rawRec) && rawRec.id) ? rawRec : null;
+          if (!rec) return;
+          if (label === 'parentRec' && !compList.some((c) => c.id === rec.id)) {
+            compList = [rec, ...compList];
+          }
+          if (label === 'secondaryRec' && !contactList.some((c) => c.id === rec.id)) {
+            contactList = [rec, ...contactList];
+          }
         });
-        const humanName = (isUuid(recData?.name) || !recData?.name)
-          ? (recData?.company_name || recData?.account_name || recData?.data?.company_name || recData?.data?.name || recData?.title || '')
-          : recData.name;
+      }
+      // ── End selected-value safety net ─────────────────────────────────────
 
-        const initialForm = recData ? { ...recData, ...(humanName ? { name: humanName } : {}) } : {};
+      const finalUsers     = usersList.length > 0 ? usersList : (currentUser ? [currentUser] : []);
+      const finalCompanies = compList;
 
-        // Inspect product line items for Deal / Opportunity objects
-        let dealItems = [];
-        if (recData?.line_items && Array.isArray(recData.line_items) && recData.line_items.length > 0) {
-          dealItems = recData.line_items;
-        } else if (recData?.data?.line_items && Array.isArray(recData.data.line_items) && recData.data.line_items.length > 0) {
-          dealItems = recData.data.line_items;
-        } else {
-          const keysToTry = [recordId, recData?.id, recData?._id].filter(Boolean);
-          for (const k of keysToTry) {
-            try {
-              const saved = localStorage.getItem(`crm_line_items_${k}`);
-              if (saved) {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  dealItems = parsed;
-                  break;
-                }
+      const humanName = (isUuid(recData?.name) || !recData?.name)
+        ? (recData?.company_name || recData?.account_name || recData?.data?.company_name || recData?.data?.name || recData?.title || '')
+        : recData.name;
+
+      const initialForm = recData ? { ...recData, ...(humanName ? { name: humanName } : {}) } : {};
+
+      // Inspect product line items for Deal / Opportunity objects
+      let dealItems = [];
+      if (recData?.line_items && Array.isArray(recData.line_items) && recData.line_items.length > 0) {
+        dealItems = recData.line_items;
+      } else if (recData?.data?.line_items && Array.isArray(recData.data.line_items) && recData.data.line_items.length > 0) {
+        dealItems = recData.data.line_items;
+      } else {
+        const keysToTry = [recordId, recData?.id, recData?._id].filter(Boolean);
+        for (const k of keysToTry) {
+          try {
+            const saved = localStorage.getItem(`crm_line_items_${k}`);
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                dealItems = parsed;
+                break;
               }
-            } catch (e) { }
-          }
-        }
-
-        if (dealItems.length > 0) {
-          setLineItemsCount(dealItems.length);
-          const lineTotal = dealItems.reduce((s, it) => s + (Number(it.total) || 0), 0);
-          initialForm.amount = lineTotal;
-        } else {
-          setLineItemsCount(0);
-        }
-
-        // Resolve company field value to match an existing option value in finalCompanies
-        if (initialForm) {
-          const compRaw = initialForm.company_id ?? initialForm.company ?? initialForm.account_id ?? initialForm.account ?? initialForm.organization_id ?? initialForm.organization ?? initialForm.company_name ?? initialForm.display_name;
-          if (compRaw) {
-            const normalizeValue = (val) => {
-              const raw = typeof val === 'object' && val !== null
-                ? (val.id || val.name || val.company_name || val.organization_name || val.account_name || val.display_name || val.code || '')
-                : String(val || '');
-              return raw.trim().toLowerCase();
-            };
-            const compStr = normalizeValue(compRaw);
-            const match = finalCompanies.find((c) => {
-              const values = [
-                c.id,
-                c._id,
-                c.name,
-                c.company_name,
-                c.organization_name,
-                c.account_name,
-                c.display_name,
-                c.code,
-              ]
-                .filter(Boolean)
-                .map((v) => String(v).trim().toLowerCase());
-              return values.includes(compStr);
-            });
-            if (match) {
-              const companyValue = match.id || match._id || match.name || match.company_name || match.organization_name || match.account_name || match.display_name || match.code;
-              initialForm.company_id = companyValue;
-              initialForm.company = companyValue;
-              if (initialForm.account_id !== undefined) initialForm.account_id = companyValue;
-              if (initialForm.account !== undefined) initialForm.account = companyValue;
-              if (initialForm.organization_id !== undefined) initialForm.organization_id = companyValue;
-              if (initialForm.organization !== undefined) initialForm.organization = companyValue;
             }
+          } catch (e) { }
+        }
+      }
+
+      if (dealItems.length > 0) {
+        setLineItemsCount(dealItems.length);
+        const lineTotal = dealItems.reduce((s, it) => s + (Number(it.total) || 0), 0);
+        initialForm.amount = lineTotal;
+      } else {
+        setLineItemsCount(0);
+      }
+
+      // Resolve company field value to match an existing option value in finalCompanies
+      if (initialForm) {
+        const compRaw = initialForm.company_id ?? initialForm.company ?? initialForm.account_id ?? initialForm.account ?? initialForm.organization_id ?? initialForm.organization ?? initialForm.company_name ?? initialForm.display_name;
+        if (compRaw) {
+          const normalizeValue = (val) => {
+            const raw = typeof val === 'object' && val !== null
+              ? (val.id || val.name || val.company_name || val.organization_name || val.account_name || val.display_name || val.code || '')
+              : String(val || '');
+            return raw.trim().toLowerCase();
+          };
+          const compStr = normalizeValue(compRaw);
+          const match = finalCompanies.find((c) => {
+            const values = [
+              c.id,
+              c._id,
+              c.name,
+              c.company_name,
+              c.organization_name,
+              c.account_name,
+              c.display_name,
+              c.code,
+            ]
+              .filter(Boolean)
+              .map((v) => String(v).trim().toLowerCase());
+            return values.includes(compStr);
+          });
+          if (match) {
+            const companyValue = match.id || match._id || match.name || match.company_name || match.organization_name || match.account_name || match.display_name || match.code;
+            initialForm.company_id = companyValue;
+            initialForm.company = companyValue;
+            if (initialForm.account_id !== undefined) initialForm.account_id = companyValue;
+            if (initialForm.account !== undefined) initialForm.account = companyValue;
+            if (initialForm.organization_id !== undefined) initialForm.organization_id = companyValue;
+            if (initialForm.organization !== undefined) initialForm.organization = companyValue;
           }
         }
+      }
 
-        if (initialForm) setFormData(initialForm);
+      if (initialForm) setFormData(initialForm);
 
-        setLookupData({
-          users: finalUsers,
-          companies: finalCompanies,
-          contacts: contactList,
-        });
-      })
+      setLookupData({
+        users:     finalUsers,
+        companies: finalCompanies,
+        contacts:  contactList,
+        deals:     dealsList,
+        products:  productsList,
+      });
+    }
+
+    loadEditData()
       .catch((err) => {
         console.error(`Error loading record ${recordId} for edit:`, err);
         if (isMounted) setSubmitError(err.message || 'Failed to fetch record from backend server.');
@@ -562,6 +613,10 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
     let fieldEl;
 
+    const isExplicitLookup = f.type === 'lookup';
+    const isExplicitNonLookup = Boolean(f.type && f.type !== 'lookup');
+    const isLookupField = isExplicitLookup || (!isExplicitNonLookup && (isOwner || isCompany || isContact || isDeal || isProduct));
+
     if (f.type === 'picklist' || f.type === 'dropdown') {
       const rawOptions = (Array.isArray(f.options) && f.options.length > 0)
         ? f.options
@@ -602,7 +657,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
           hasError={hasError}
         />
       );
-    } else if (f.type === 'lookup' || isOwner || isCompany || isContact || isDeal || isProduct) {
+    } else if (isLookupField) {
       const options = isOwner
         ? lookupData.users
         : isContact

@@ -27,10 +27,10 @@ const getRecords = async (req, res, next) => {
     const objectType = req.params.objectType || req.path.replace(/^\//, '').split('/')[0];
     const organizationId = req.user?.organization_id;
 
-    // Enforce permission check
-    await metadataService.checkPermission(req.user, objectType, 'read');
-
+    // Enforce permission check & retrieve permissions once
     const perms = await metadataService.getPermissions(req.user);
+    await metadataService.checkPermission(req.user, objectType, 'read', null, perms);
+
     const objPerm = getPermForObject(perms, objectType);
 
     const options = {};

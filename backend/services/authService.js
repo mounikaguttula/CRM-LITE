@@ -22,8 +22,8 @@ const login = async (email, password) => {
     throw { statusCode: 401, message: 'Invalid credentials. Password incorrect.' };
   }
 
-  const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email.split('@')[0];
-  const initials = fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email;
+  const initials = fullName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase();
   const resolvedRole = user.roles?.role_name || (user.role_id ? 'Administrator' : 'User');
 
   const tokenPayload = {
@@ -39,6 +39,8 @@ const login = async (email, password) => {
 
   const userProfile = {
     id: user.id,
+    first_name: user.first_name,
+    last_name: user.last_name,
     name: fullName,
     email: user.email,
     role: resolvedRole,
@@ -153,12 +155,14 @@ const getUserProfile = async (userId) => {
     throw { statusCode: 404, message: 'User profile not found.' };
   }
 
-  const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email.split('@')[0];
+  const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email;
   const initials = fullName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase();
   const roleName = user.roles?.role_name || (user.role_id ? 'Administrator' : 'User');
 
   return {
     id: user.id,
+    first_name: user.first_name,
+    last_name: user.last_name,
     name: fullName,
     email: user.email,
     role: roleName,

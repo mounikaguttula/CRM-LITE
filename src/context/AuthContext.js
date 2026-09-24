@@ -26,9 +26,9 @@ export function AuthProvider({ children }) {
         const currentUser = res?.data || res?.user || res;
 
         if (isMounted) {
-          if (currentUser && (currentUser.name || currentUser.email || currentUser.first_name)) {
-            const userName = currentUser.name || `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() || currentUser.email || 'User';
-            const initials = userName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+          if (currentUser && (currentUser.name || currentUser.email || currentUser.first_name || currentUser.last_name)) {
+            const userName = `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() || currentUser.name || currentUser.email || 'User';
+            const initials = userName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase();
             const formattedUser = {
               ...currentUser,
               name: userName,
@@ -68,8 +68,8 @@ export function AuthProvider({ children }) {
         throw new Error(res?.message || 'Invalid authentication response from backend server.');
       }
 
-      const userName = authUser.name || `${authUser.first_name || ''} ${authUser.last_name || ''}`.trim() || authUser.email || 'User';
-      const initials = userName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+      const userName = `${authUser.first_name || ''} ${authUser.last_name || ''}`.trim() || authUser.name || authUser.email || 'User';
+      const initials = userName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase();
       const formattedUser = {
         ...authUser,
         name: userName,

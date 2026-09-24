@@ -78,7 +78,12 @@ function NavigationPage({ onNavigate }) {
     }
   };
 
-  const displayName = user?.name || currentUser?.full_name || currentUser?.name || user?.email || 'User';
+  const resolveUserName = (u) => {
+    if (!u) return '';
+    const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim();
+    return fullName || u.name || u.full_name || u.email || '';
+  };
+  const displayName = resolveUserName(user) || resolveUserName(currentUser) || 'User';
   const companyName = company?.name || 'CRM Workspace';
   const userInitials = displayName && displayName !== 'User'
     ? displayName.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase()

@@ -1354,9 +1354,11 @@ const metadataService = {
     let userInfo = user;
     if (userRes?.data) {
       const dbUser = userRes.data;
-      const freshName = `${dbUser.first_name || ''} ${dbUser.last_name || ''}`.trim() || dbUser.email;
+      const freshName = `${dbUser.first_name || ''} ${dbUser.last_name || ''}`.trim() || dbUser.name || dbUser.email;
       userInfo = {
         ...user,
+        first_name: dbUser.first_name,
+        last_name: dbUser.last_name,
         name: freshName,
         email: dbUser.email || user.email,
         role: dbUser.role || user.role || 'User',
