@@ -140,11 +140,24 @@ const resolveParentByName = async (nameInput, targetObjectKey, organizationId, f
     };
   }
 
-  if (matches.length === 1) {
-    return matches[0];
-  }
-
   return null;
+};
+
+// Supported Aliases for Company and Contact payload keys (in ID precedence order)
+const COMPANY_ALIASES = ['company_id', 'Company_id', 'parent_id', 'company', 'Company', 'company_name'];
+const CONTACT_ALIASES = ['contact_id', 'Contact_id', 'secondary_parent_id', 'contact', 'Contact', 'contact_name'];
+
+/**
+ * Normalizes incoming payload to extract the canonical alias value for Company or Contact.
+ * Follows ID precedence order. Returns undefined if no relationship alias is present in payload.
+ */
+const extractPayloadAliasValue = (payload, aliases) => {
+  for (const key of aliases) {
+    if (payload[key] !== undefined) {
+      return payload[key];
+    }
+  }
+  return undefined;
 };
 
 // Helper to extract separated relationship inputs and resolve relationships
@@ -243,11 +256,13 @@ const resolveRecordRelationships = async (payload, cleanObjKey, organizationId) 
     if (parentRow) {
       resolvedParent = parentRow.id;
       resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || companyNameInput;
-    } else {
+    } else if (expectedTarget) {
       throw {
         statusCode: 400,
         message: `Validation Error: Company '${companyNameInput}' was not found. Please provide a valid Company Name or Company ID.`,
       };
+    } else {
+      resolvedParentName = companyNameInput;
     }
   }
 
@@ -267,11 +282,13 @@ const resolveRecordRelationships = async (payload, cleanObjKey, organizationId) 
     if (secondaryRow) {
       resolvedSecondary = secondaryRow.id;
       resolvedSecondaryName = secondaryRow.name || secondaryRow.data?.name || secondaryRow.data?.contact_name || contactNameInput;
-    } else {
+    } else if (expectedSecondaryTarget) {
       throw {
         statusCode: 400,
         message: `Validation Error: Contact '${contactNameInput}' was not found. Please provide a valid Contact Name or Contact ID.`,
       };
+    } else {
+      resolvedSecondaryName = contactNameInput;
     }
   }
 
@@ -593,6 +610,8 @@ const objectService = {
         customData.company_name = null;
       } else if (relRes.resolvedParentName) {
         customData.company_name = relRes.resolvedParentName;
+        customData.company = relRes.resolvedParentName;
+        customData.Company = relRes.resolvedParentName;
       } else {
         customData.company_name = null;
       }
@@ -613,6 +632,8 @@ const objectService = {
         customData.contact_name = null;
       } else if (relRes.resolvedSecondaryName) {
         customData.contact_name = relRes.resolvedSecondaryName;
+        customData.contact = relRes.resolvedSecondaryName;
+        customData.Contact = relRes.resolvedSecondaryName;
       } else {
         customData.contact_name = null;
       }
@@ -702,59 +723,63 @@ const objectService = {
 
     const cleanObjKey = String(objectKey || '').toLowerCase();
 
-    let payloadCompVal = undefined;
-    if (payload.company !== undefined && payload.company !== existing.parent_id) {
-      payloadCompVal = payload.company;
-    } else if (payload.company_id !== undefined && payload.company_id !== existing.parent_id) {
-      payloadCompVal = payload.company_id;
-    } else if (payload.parent_id !== undefined && payload.parent_id !== existing.parent_id) {
-      payloadCompVal = payload.parent_id;
-    } else if (payload.Company !== undefined && payload.Company !== existing.parent_id) {
-      payloadCompVal = payload.Company;
-    } else if (payload.Company_id !== undefined && payload.Company_id !== existing.parent_id) {
-      payloadCompVal = payload.Company_id;
-    } else if (payload.company !== undefined) {
-      payloadCompVal = payload.company;
-    } else if (payload.company_id !== undefined) {
-      payloadCompVal = payload.company_id;
-    } else if (payload.parent_id !== undefined) {
-      payloadCompVal = payload.parent_id;
-    }
+    // 1. Normalize & resolve Company Relationship for Update
+    const payloadCompVal = extractPayloadAliasValue(payload, COMPANY_ALIASES);
 
     let resolvedParent = existing.parent_id;
+    let isCompTextValue = false;
+    let compTextVal = null;
+
     if (payloadCompVal !== undefined) {
       if (payloadCompVal === null || payloadCompVal === '' || payloadCompVal === 'null') {
         resolvedParent = null;
+        isCompTextValue = false;
+        compTextVal = null;
       } else if (isUuid(payloadCompVal)) {
         resolvedParent = payloadCompVal;
+        isCompTextValue = false;
+        compTextVal = null;
+      } else {
+        // Non-UUID text value (e.g. Lead company name like "TechMantra")
+        resolvedParent = null;
+        isCompTextValue = true;
+        compTextVal = String(payloadCompVal).trim();
+      }
+    } else if (!resolvedParent && (existing.company || existing.company_name)) {
+      const extComp = existing.company || existing.company_name;
+      if (extComp && !isUuid(extComp)) {
+        isCompTextValue = true;
+        compTextVal = String(extComp).trim();
       }
     }
 
-    let payloadContactVal = undefined;
-    if (payload.contact !== undefined && payload.contact !== existing.secondary_parent_id) {
-      payloadContactVal = payload.contact;
-    } else if (payload.contact_id !== undefined && payload.contact_id !== existing.secondary_parent_id) {
-      payloadContactVal = payload.contact_id;
-    } else if (payload.secondary_parent_id !== undefined && payload.secondary_parent_id !== existing.secondary_parent_id) {
-      payloadContactVal = payload.secondary_parent_id;
-    } else if (payload.Contact !== undefined && payload.Contact !== existing.secondary_parent_id) {
-      payloadContactVal = payload.Contact;
-    } else if (payload.Contact_id !== undefined && payload.Contact_id !== existing.secondary_parent_id) {
-      payloadContactVal = payload.Contact_id;
-    } else if (payload.contact !== undefined) {
-      payloadContactVal = payload.contact;
-    } else if (payload.contact_id !== undefined) {
-      payloadContactVal = payload.contact_id;
-    } else if (payload.secondary_parent_id !== undefined) {
-      payloadContactVal = payload.secondary_parent_id;
-    }
+    // 2. Normalize & resolve Contact Relationship for Update
+    const payloadContactVal = extractPayloadAliasValue(payload, CONTACT_ALIASES);
 
     let resolvedSecondary = existing.secondary_parent_id;
+    let isContactTextValue = false;
+    let contactTextVal = null;
+
     if (payloadContactVal !== undefined) {
       if (payloadContactVal === null || payloadContactVal === '' || payloadContactVal === 'null') {
         resolvedSecondary = null;
+        isContactTextValue = false;
+        contactTextVal = null;
       } else if (isUuid(payloadContactVal)) {
         resolvedSecondary = payloadContactVal;
+        isContactTextValue = false;
+        contactTextVal = null;
+      } else {
+        // Non-UUID text value
+        resolvedSecondary = null;
+        isContactTextValue = true;
+        contactTextVal = String(payloadContactVal).trim();
+      }
+    } else if (!resolvedSecondary && (existing.contact || existing.contact_name)) {
+      const extCont = existing.contact || existing.contact_name;
+      if (extCont && !isUuid(extCont)) {
+        isContactTextValue = true;
+        contactTextVal = String(extCont).trim();
       }
     }
 
@@ -787,7 +812,13 @@ const objectService = {
       customData.company_id = resolvedParent;
       customData.Company = resolvedParent;
       customData.Company_id = resolvedParent;
-    } else {
+    } else if (isCompTextValue && compTextVal) {
+      customData.company = compTextVal;
+      customData.company_name = compTextVal;
+      customData.Company = compTextVal;
+      customData.company_id = null;
+      customData.Company_id = null;
+    } else if (payloadCompVal !== undefined) {
       customData.company = null;
       customData.company_id = null;
       customData.Company = null;
@@ -800,7 +831,13 @@ const objectService = {
       customData.contact_id = resolvedSecondary;
       customData.Contact = resolvedSecondary;
       customData.Contact_id = resolvedSecondary;
-    } else {
+    } else if (isContactTextValue && contactTextVal) {
+      customData.contact = contactTextVal;
+      customData.contact_name = contactTextVal;
+      customData.Contact = contactTextVal;
+      customData.contact_id = null;
+      customData.Contact_id = null;
+    } else if (payloadContactVal !== undefined) {
       customData.contact = null;
       customData.contact_id = null;
       customData.Contact = null;
@@ -858,13 +895,22 @@ const objectService = {
       }
     }
 
+    // Unlink child relationship foreign keys prior to hard delete
+    await supabase
+      .from('universal_table')
+      .update({ parent_id: null })
+      .eq('parent_id', id)
+      .eq('organization_id', organizationId);
+
+    await supabase
+      .from('universal_table')
+      .update({ secondary_parent_id: null })
+      .eq('secondary_parent_id', id)
+      .eq('organization_id', organizationId);
+
     const { error } = await supabase
       .from('universal_table')
-      .update({
-        is_deleted: true,
-        deleted_by: userId || null,
-        deleted_at: new Date().toISOString(),
-      })
+      .delete()
       .eq('id', id)
       .eq('organization_id', organizationId);
 
@@ -972,20 +1018,28 @@ const objectService = {
       allowedIds.push(id);
     }
 
-    // 4. Perform single bulk soft-delete update for authorized records
+    // 4. Unlink child relationship foreign keys & perform single bulk hard-delete query
     if (allowedIds.length > 0) {
-      const { error: updateErr } = await supabase
+      await supabase
         .from('universal_table')
-        .update({
-          is_deleted: true,
-          deleted_by: user.id || null,
-          deleted_at: new Date().toISOString(),
-        })
+        .update({ parent_id: null })
+        .in('parent_id', allowedIds)
+        .eq('organization_id', organizationId);
+
+      await supabase
+        .from('universal_table')
+        .update({ secondary_parent_id: null })
+        .in('secondary_parent_id', allowedIds)
+        .eq('organization_id', organizationId);
+
+      const { error: deleteErr } = await supabase
+        .from('universal_table')
+        .delete()
         .in('id', allowedIds)
         .eq('organization_id', organizationId);
 
-      if (updateErr) {
-        throw { statusCode: 400, message: `Failed to update records during bulk delete: ${updateErr.message}` };
+      if (deleteErr) {
+        throw { statusCode: 400, message: `Failed to delete records during bulk delete: ${deleteErr.message}` };
       }
     }
 
