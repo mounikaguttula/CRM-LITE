@@ -12,6 +12,8 @@ import {
   TrendingUp,
   TrendingDown,
   MoreHorizontal,
+  ArrowUp,
+  ArrowDown,
   Mail,
   Phone,
   ArrowUpRight,
@@ -1993,6 +1995,13 @@ function ObjectListContent({ objectTypeId }) {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const reqSeqRef = useRef(0);
 
+  // Filter & Sort Popover States
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' for Ascending, 'desc' for Descending
+  const [filterStatus, setFilterStatus] = useState('ALL');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef(null);
+
   const [backendFields, setBackendFields] = useState([]);
   const [lookupMap, setLookupMap] = useState({});
 
@@ -2061,7 +2070,10 @@ function ObjectListContent({ objectTypeId }) {
     resetImportState();
 
     const searchParam = debouncedQuery ? `&search=${encodeURIComponent(debouncedQuery)}` : '';
-    apiGet(`/objects/${objectTypeId}?page=${currentPage}&pageSize=${pageSize}${searchParam}`)
+    const sortParam = `&sortBy=${encodeURIComponent(sortBy)}&sortOrder=${encodeURIComponent(sortOrder)}`;
+    const statusParam = filterStatus && filterStatus !== 'ALL' ? `&status=${encodeURIComponent(filterStatus)}` : '';
+
+    apiGet(`/objects/${objectTypeId}?page=${currentPage}&pageSize=${pageSize}${sortParam}${statusParam}${searchParam}`)
       .then((recRes) => {
         if (!isMounted || currentReqId !== reqSeqRef.current) return;
 
@@ -2114,7 +2126,7 @@ function ObjectListContent({ objectTypeId }) {
     return () => {
       isMounted = false;
     };
-  }, [objectTypeId, currentPage, pageSize, debouncedQuery, resetImportState]);
+  }, [objectTypeId, currentPage, pageSize, debouncedQuery, resetImportState, sortBy, sortOrder, filterStatus]);
 
 
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
@@ -2124,14 +2136,34 @@ function ObjectListContent({ objectTypeId }) {
     pluralDisplayName: rawMeta?.pluralDisplayName || (objectTypeId ? objectTypeId.charAt(0).toUpperCase() + objectTypeId.slice(1) : 'Records'),
   }), [rawMeta, objectTypeId]);
 
-  const cleanObjKey = String(objectTypeId || '').toLowerCase();
-  const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
-  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
-  const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
+  const userRoleStr = String(currentUser?.role || currentUser?.role_name || '').toLowerCase();
+  const isSystemAdmin = userRoleStr.includes('admin') || userRoleStr.includes('administrator');
 
-  const canDeleteRecord = objPerm ? objPerm.canDelete !== false : true;
-  const canCreateRecord = objPerm ? objPerm.canCreate !== false : true;
-  const canUpdateRecord = objPerm ? (objPerm.canUpdate !== false && objPerm.canEdit !== false) : true;
+  const metaApiName = String(rawMeta?.api_name || rawMeta?.name || objectTypeId || '').toLowerCase();
+  const cleanObjKey = metaApiName;
+  const keySingular = cleanObjKey.endsWith('ies') ? `${cleanObjKey.slice(0, -3)}y` : (cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey);
+  const keyPlural = cleanObjKey.endsWith('y') ? `${cleanObjKey.slice(0, -1)}ies` : (cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`);
+  const rawIdKey = String(objectTypeId || '').toLowerCase();
+
+  const objPerm = permissions ? (
+    permissions[cleanObjKey] ||
+    permissions[keySingular] ||
+    permissions[keyPlural] ||
+    permissions[rawIdKey] ||
+    (rawMeta?.id && permissions[rawMeta.id])
+  ) : null;
+
+  const canDeleteRecord = objPerm
+    ? (objPerm.canDelete === true || objPerm.can_delete === true)
+    : isSystemAdmin;
+
+  const canCreateRecord = objPerm
+    ? (objPerm.canCreate === true || objPerm.can_create === true)
+    : isSystemAdmin;
+
+  const canUpdateRecord = objPerm
+    ? ((objPerm.canUpdate === true || objPerm.can_update === true) && objPerm.canEdit !== false)
+    : isSystemAdmin;
 
   const [deleteModalRecord, setDeleteModalRecord] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -2143,6 +2175,17 @@ function ObjectListContent({ objectTypeId }) {
   const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState(null);
+
+  // Close filter popover on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Clear selection on page, query, object, or page size change
   useEffect(() => {
@@ -2156,12 +2199,22 @@ function ObjectListContent({ objectTypeId }) {
 
   const handleDeleteRecordClick = (e, recordId, recordTitle) => {
     e.stopPropagation();
+    if (!canDeleteRecord) {
+      showToast("You don't have permission to delete this record.", 'error');
+      return;
+    }
     setDeleteModalRecord({ id: recordId, title: recordTitle || 'this record' });
     setDeleteError(null);
   };
 
   const confirmDeleteRecord = async () => {
     if (!deleteModalRecord) return;
+    if (!canDeleteRecord) {
+      const msg = "You don't have permission to delete this record.";
+      setDeleteError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -2177,7 +2230,9 @@ function ObjectListContent({ objectTypeId }) {
       showToast(`"${deletedTitle}" deleted successfully!`, 'success');
     } catch (err) {
       console.error('Delete record error:', err);
-      setDeleteError(err?.message || 'Failed to delete record.');
+      const errMsg = err?.response?.data?.message || err?.message || "You don't have permission to delete this record.";
+      setDeleteError(errMsg);
+      showToast(errMsg, 'error');
     } finally {
       setDeleting(false);
     }
@@ -2313,13 +2368,53 @@ function ObjectListContent({ objectTypeId }) {
 
   const filteredRecords = useMemo(() => {
     if (isServerPaginated) return records;
-    return records.filter((r) => {
+
+    let list = records.filter((r) => {
+      if (filterStatus && filterStatus !== 'ALL') {
+        const s = String(r.status || r.stage || (r.data && (r.data.status || r.data.stage)) || '').toLowerCase();
+        if (s !== filterStatus.toLowerCase()) return false;
+      }
+
       if (!query) return true;
-      return Object.values(r).some((val) =>
-        String(val || '').toLowerCase().includes(query.toLowerCase())
-      );
+
+      const q = query.toLowerCase();
+      return Object.values(r).some((val) => {
+        if (typeof val === 'object' && val !== null) {
+          return JSON.stringify(val).toLowerCase().includes(q);
+        }
+        return String(val || '').toLowerCase().includes(q);
+      });
     });
-  }, [records, query, isServerPaginated]);
+
+    return [...list].sort((a, b) => {
+      let valA = a[sortBy] !== undefined ? a[sortBy] : (a.data && a.data[sortBy]);
+      let valB = b[sortBy] !== undefined ? b[sortBy] : (b.data && b.data[sortBy]);
+
+      if (sortBy === 'name' || sortBy === 'title') {
+        valA = a.name || a.lead_name || a.contact_name || a.first_name || '';
+        valB = b.name || b.lead_name || b.contact_name || b.first_name || '';
+      } else if (sortBy === 'created_at' || sortBy === 'created_date') {
+        valA = new Date(a.created_at || a.created_date || 0).getTime();
+        valB = new Date(b.created_at || b.created_date || 0).getTime();
+      }
+
+      if (valA === undefined || valA === null) valA = '';
+      if (valB === undefined || valB === null) valB = '';
+
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return sortOrder === 'asc' ? valA - valB : valB - valA;
+      }
+
+      const strA = String(valA).toLowerCase();
+      const strB = String(valB).toLowerCase();
+
+      let cmp = 0;
+      if (strA < strB) cmp = -1;
+      if (strA > strB) cmp = 1;
+
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+  }, [records, query, filterStatus, sortBy, sortOrder, isServerPaginated]);
 
   const totalRecords = isServerPaginated ? totalServerRecords : filteredRecords.length;
   const totalPages = isServerPaginated ? serverTotalPages : Math.max(1, Math.ceil(totalRecords / pageSize));
@@ -2333,9 +2428,38 @@ function ObjectListContent({ objectTypeId }) {
     : Math.min(startIndex + pageSize, totalRecords);
 
   const currentRecordsPage = useMemo(() => {
-    if (isServerPaginated) return records;
-    return filteredRecords.slice(startIndex, endIndex);
-  }, [records, filteredRecords, startIndex, endIndex, isServerPaginated]);
+    const rawList = isServerPaginated ? records : filteredRecords.slice(startIndex, endIndex);
+
+    return [...rawList].sort((a, b) => {
+      let valA = a[sortBy] !== undefined ? a[sortBy] : (a.data && a.data[sortBy]);
+      let valB = b[sortBy] !== undefined ? b[sortBy] : (b.data && b.data[sortBy]);
+
+      if (sortBy === 'name' || sortBy === 'title') {
+        valA = a.name || a.lead_name || a.contact_name || a.first_name || '';
+        valB = b.name || b.lead_name || b.contact_name || b.first_name || '';
+      } else if (sortBy === 'created_at' || sortBy === 'created_date') {
+        valA = new Date(a.created_at || a.created_date || 0).getTime();
+        valB = new Date(b.created_at || b.created_date || 0).getTime();
+      }
+
+      if (valA === undefined || valA === null) valA = '';
+      if (valB === undefined || valB === null) valB = '';
+
+      const isAsc = sortOrder === 'asc';
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return isAsc ? valA - valB : valB - valA;
+      }
+
+      const strA = String(valA).toLowerCase();
+      const strB = String(valB).toLowerCase();
+
+      let cmp = 0;
+      if (strA < strB) cmp = -1;
+      if (strA > strB) cmp = 1;
+
+      return isAsc ? cmp : -cmp;
+    });
+  }, [records, filteredRecords, startIndex, endIndex, isServerPaginated, sortBy, sortOrder]);
 
 
   const isAllVisibleSelected = useMemo(() => {
@@ -2954,7 +3078,7 @@ function ObjectListContent({ objectTypeId }) {
 
       {/* Main Table Panel */}
       <div className="glass" style={{ padding: 8, borderRadius: 16 }}>
-        {selectedRecordIds.size > 0 && (
+        {canDeleteRecord && selectedRecordIds.size > 0 && (
           <div
             style={{
               display: 'flex',
@@ -3040,23 +3164,165 @@ function ObjectListContent({ objectTypeId }) {
             />
           </div>
 
-          <button
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: 'transparent',
-              border: '1px solid var(--panel-border)',
-              color: 'var(--text-dim)',
-              padding: '8px 14px',
-              borderRadius: 10,
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
-          >
-            <SlidersHorizontal size={13} /> Filter
-          </button>
+          <div style={{ position: 'relative' }} ref={filterRef}>
+            <button
+              type="button"
+              onClick={() => setIsFilterOpen((prev) => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? 'rgba(79, 70, 229, 0.08)' : 'transparent',
+                border: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '1px solid #4f46e5' : '1px solid var(--panel-border)',
+                color: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '#4f46e5' : 'var(--text-dim)',
+                padding: '8px 14px',
+                borderRadius: 10,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <SlidersHorizontal size={13} />
+              <span>Filter</span>
+              {(sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', marginLeft: 2 }} />
+              )}
+            </button>
+
+            {isFilterOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  right: 0,
+                  width: 270,
+                  background: '#ffffff',
+                  borderRadius: 14,
+                  border: '1px solid #e2e8f0',
+                  boxShadow: '0 20px 30px -10px rgba(0,0,0,0.15), 0 4px 12px rgba(0,0,0,0.05)',
+                  padding: '16px',
+                  zIndex: 9999,
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <SlidersHorizontal size={14} style={{ color: '#4f46e5' }} /> Filter & Sort
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsFilterOpen(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Sort By Field */}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', marginBottom: 5 }}>
+                    Sort By Field
+                  </label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      fontSize: 12.5,
+                      color: '#1e293b',
+                      outline: 'none',
+                      background: '#f8fafc',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="created_at">Created Date</option>
+                    <option value="name">Name / Title</option>
+                    <option value="email">Email</option>
+                    <option value="status">Status</option>
+                  </select>
+                </div>
+
+                {/* Sort Order: Ascending vs Descending */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                    Order (Ascending / Descending)
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setSortOrder('asc')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 5,
+                        padding: '7px 8px',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        fontWeight: sortOrder === 'asc' ? 700 : 500,
+                        border: sortOrder === 'asc' ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
+                        background: sortOrder === 'asc' ? '#eef2ff' : '#ffffff',
+                        color: sortOrder === 'asc' ? '#4f46e5' : '#475569',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <ArrowUp size={13} /> Ascending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSortOrder('desc')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 5,
+                        padding: '7px 8px',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        fontWeight: sortOrder === 'desc' ? 700 : 500,
+                        border: sortOrder === 'desc' ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
+                        background: sortOrder === 'desc' ? '#eef2ff' : '#ffffff',
+                        color: sortOrder === 'desc' ? '#4f46e5' : '#475569',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <ArrowDown size={13} /> Descending
+                    </button>
+                  </div>
+                </div>
+
+                {/* Reset Filter Button */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSortBy('created_at');
+                      setSortOrder('desc');
+                      setFilterStatus('ALL');
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#64748b',
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ overflowX: 'auto' }} className="orbit-scrollbar">
@@ -3081,20 +3347,22 @@ function ObjectListContent({ objectTypeId }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
               <thead>
                 <tr style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  <th style={{ width: 42, padding: '12px 12px 12px 18px', borderBottom: '1px solid var(--panel-border)', textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={isAllVisibleSelected}
-                      ref={(input) => {
-                        if (input) {
-                          input.indeterminate = !isAllVisibleSelected && isSomeVisibleSelected;
-                        }
-                      }}
-                      onChange={handleToggleSelectAllVisible}
-                      title="Select/Deselect visible records on current page"
-                      style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
-                    />
-                  </th>
+                  {canDeleteRecord && (
+                    <th style={{ width: 42, padding: '12px 12px 12px 18px', borderBottom: '1px solid var(--panel-border)', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={isAllVisibleSelected}
+                        ref={(input) => {
+                          if (input) {
+                            input.indeterminate = !isAllVisibleSelected && isSomeVisibleSelected;
+                          }
+                        }}
+                        onChange={handleToggleSelectAllVisible}
+                        title="Select/Deselect visible records on current page"
+                        style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
+                      />
+                    </th>
+                  )}
                   {columns.map((col) => (
                     <th
                       key={col.key}
@@ -3125,17 +3393,19 @@ function ObjectListContent({ objectTypeId }) {
                       style={{ borderBottom: '1px solid rgba(99,102,241,0.08)', cursor: 'pointer' }}
                       className="glass-hover"
                     >
-                      <td
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ width: 42, padding: '14px 12px 14px 18px', textAlign: 'center' }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedRecordIds.has(r.id)}
-                          onChange={(e) => handleToggleSelectRecord(e, r.id)}
-                          style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
-                        />
-                      </td>
+                      {canDeleteRecord && (
+                        <td
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ width: 42, padding: '14px 12px 14px 18px', textAlign: 'center' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedRecordIds.has(r.id)}
+                            onChange={(e) => handleToggleSelectRecord(e, r.id)}
+                            style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
+                          />
+                        </td>
+                      )}
                       {columns.map((col) => {
                         const raw = r[col.key] !== undefined ? r[col.key] : (r.data && r.data[col.key]);
                         if (col.isTitle) {
@@ -3337,7 +3607,6 @@ function ObjectListContent({ objectTypeId }) {
                               );
                             })()
                           )}
-                          <IconBtn icon={MoreHorizontal} />
                         </div>
                       </td>
                     </tr>

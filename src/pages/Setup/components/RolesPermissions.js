@@ -535,15 +535,18 @@ export default function RolesPermissions() {
 
     const initObjMatrix = {};
     dynamicObjects.forEach((obj) => {
-      const isCustom = !obj.is_system && (obj.api_name?.endsWith('__c') || obj.display_name === 'Project' || obj.display_name === 'Vehicle');
-      
+      const key = obj.id || obj.api_name;
+      let defaultPerms;
       if (isReadOnly) {
-        initObjMatrix[obj.id || obj.api_name] = { create: false, read: true, update: false, delete: false, view_all: false, modify_all: false };
-      } else if (isExecutive && isCustom) {
-        initObjMatrix[obj.id || obj.api_name] = { create: true, read: true, update: true, delete: false, view_all: false, modify_all: false };
+        defaultPerms = { create: false, read: true, update: false, delete: false, view_all: false, modify_all: false };
+      } else if (isExecutive) {
+        defaultPerms = { create: true, read: true, update: true, delete: false, view_all: false, modify_all: false };
       } else {
-        initObjMatrix[obj.id || obj.api_name] = { create: true, read: true, update: true, delete: true, view_all: true, modify_all: true };
+        defaultPerms = { create: true, read: true, update: true, delete: true, view_all: true, modify_all: true };
       }
+      initObjMatrix[key] = defaultPerms;
+      if (obj.id) initObjMatrix[obj.id] = defaultPerms;
+      if (obj.api_name) initObjMatrix[obj.api_name] = defaultPerms;
     });
 
     // Fetch live backend details from Supabase API
@@ -568,8 +571,8 @@ export default function RolesPermissions() {
           };
 
           if (matchedObj) {
-            const canonicalKey = matchedObj.id || matchedObj.api_name;
-            initObjMatrix[canonicalKey] = permObj;
+            if (matchedObj.id) initObjMatrix[matchedObj.id] = permObj;
+            if (matchedObj.api_name) initObjMatrix[matchedObj.api_name] = permObj;
           } else if (op.object_type_id) {
             initObjMatrix[op.object_type_id] = permObj;
           }
@@ -724,27 +727,26 @@ export default function RolesPermissions() {
     setSaving(true);
 
     try {
-      // Deduplicate objectPermissions payload by target UUID
+      // Construct objectPermissions payload directly from dynamicObjects list
       const seenObjects = new Set();
-      const objectPermissions = Object.entries(objectPermsMatrix)
-        .map(([objKey, perms]) => {
-          const matchedObj = dynamicObjects.find(o => o.id === objKey || o.api_name === objKey);
-          const targetId = matchedObj?.id || objKey;
-          if (seenObjects.has(targetId)) return null;
-          seenObjects.add(targetId);
+      const objectPermissions = dynamicObjects.map((obj) => {
+        const objKey = obj.id || obj.api_name;
+        const perms = objectPermsMatrix[obj.id] || objectPermsMatrix[obj.api_name] || objectPermsMatrix[objKey] || { create: false, read: true, update: false, delete: false, view_all: false, modify_all: false };
+        const targetId = obj.id || objKey;
+        if (seenObjects.has(targetId)) return null;
+        seenObjects.add(targetId);
 
-          return {
-            object_type_id: targetId,
-            api_name: matchedObj?.api_name || objKey,
-            can_create: Boolean(perms.create),
-            can_read: Boolean(perms.read),
-            can_update: Boolean(perms.update),
-            can_delete: Boolean(perms.delete),
-            view_all: Boolean(perms.view_all),
-            modify_all: Boolean(perms.modify_all),
-          };
-        })
-        .filter(Boolean);
+        return {
+          object_type_id: targetId,
+          api_name: obj.api_name || objKey,
+          can_create: Boolean(perms.create),
+          can_read: Boolean(perms.read),
+          can_update: Boolean(perms.update),
+          can_delete: Boolean(perms.delete),
+          view_all: Boolean(perms.view_all),
+          modify_all: Boolean(perms.modify_all),
+        };
+      }).filter(Boolean);
 
       const fieldPermissions = Object.entries(fieldPermsMatrix).map(([fieldId, perms]) => ({
         field_id: fieldId,
