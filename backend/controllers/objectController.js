@@ -55,6 +55,15 @@ const getRecords = async (req, res, next) => {
       options.search = String(req.query.search || req.query.q).trim();
     }
 
+    if (req.query.sortBy) {
+      options.sortBy = String(req.query.sortBy).trim();
+      options.sortOrder = String(req.query.sortOrder || 'desc').trim().toLowerCase();
+    }
+
+    if (req.query.status) {
+      options.status = String(req.query.status).trim();
+    }
+
     const records = await objectService.listRecords(objectType, organizationId, options);
     return res.status(200).json(records);
   } catch (err) {
@@ -260,6 +269,9 @@ const deleteRecord = async (req, res, next) => {
 
     return successResponse(res, null, `${objectType} record deleted successfully.`);
   } catch (err) {
+    if (err?.statusCode === 403 || (err?.message && err.message.includes('permission'))) {
+      return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message || "You don't have permission to delete this record." });
+    }
     next(err);
   }
 };
@@ -295,6 +307,9 @@ const bulkDeleteRecords = async (req, res, next) => {
 
     return successResponse(res, result, `Bulk delete completed for ${objectType}.`);
   } catch (err) {
+    if (err?.statusCode === 403 || (err?.message && err.message.includes('permission'))) {
+      return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message || "You don't have permission to delete this record." });
+    }
     next(err);
   }
 };

@@ -928,10 +928,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const { objectTypes, permissions, currentUser, organization, company } = useWorkspace();
   const navigate = useNavigate();
 
-  const cleanObjKey = String(objectTypeId || '').toLowerCase();
-  const keySingular = cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey;
-  const keyPlural = cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`;
-  const objPerm = permissions ? (permissions[cleanObjKey] || permissions[keySingular] || permissions[keyPlural]) : null;
+  const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
+  const metaApiName = String(rawMeta?.api_name || rawMeta?.name || objectTypeId || '').toLowerCase();
+  const cleanObjKey = metaApiName;
+  const keySingular = cleanObjKey.endsWith('ies') ? `${cleanObjKey.slice(0, -3)}y` : (cleanObjKey.endsWith('s') ? cleanObjKey.slice(0, -1) : cleanObjKey);
+  const keyPlural = cleanObjKey.endsWith('y') ? `${cleanObjKey.slice(0, -1)}ies` : (cleanObjKey.endsWith('s') ? cleanObjKey : `${cleanObjKey}s`);
+  const rawIdKey = String(objectTypeId || '').toLowerCase();
+
+  const objPerm = permissions ? (
+    permissions[cleanObjKey] ||
+    permissions[keySingular] ||
+    permissions[keyPlural] ||
+    permissions[rawIdKey] ||
+    (rawMeta?.id && permissions[rawMeta.id])
+  ) : null;
 
   const [record, setRecord] = useState(null);
   const [fields, setFields] = useState([]);
@@ -1646,7 +1656,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     }
   };
 
-  const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
   const rawEffectiveFields = fields.length > 0 ? fields : (rawMeta?.fields || []);
 
   const objDetailApiName = String(rawMeta?.api_name || objectTypeId || '').toLowerCase();
@@ -1668,14 +1677,28 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
   const isAlreadyConvertedLead = cleanObjKey.includes('lead') && (currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted));
 
-  const canDeleteRecord = objPerm ? (objPerm.canDelete !== false && !isAlreadyConvertedLead) : !isAlreadyConvertedLead;
-  const canUpdateRecord = objPerm ? (objPerm.canUpdate !== false && objPerm.canEdit !== false) : true;
+  const userRoleStr = String(currentUser?.role || currentUser?.role_name || '').toLowerCase();
+  const isSystemAdmin = userRoleStr.includes('admin') || userRoleStr.includes('administrator');
+
+  const canDeleteRecord = objPerm
+    ? ((objPerm.canDelete === true || objPerm.can_delete === true) && !isAlreadyConvertedLead)
+    : (isSystemAdmin && !isAlreadyConvertedLead);
+
+  const canUpdateRecord = objPerm
+    ? ((objPerm.canUpdate === true || objPerm.can_update === true) && objPerm.canEdit !== false)
+    : isSystemAdmin;
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(false);
   const [deleteRecordError, setDeleteRecordError] = useState(null);
 
   const confirmDeleteDetailPageRecord = async () => {
+    if (!canDeleteRecord) {
+      const msg = "You don't have permission to delete this record.";
+      setDeleteRecordError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     setDeletingRecord(true);
     setDeleteRecordError(null);
     try {
@@ -1684,7 +1707,9 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       handleClose();
     } catch (err) {
       console.error('Delete record error:', err);
-      setDeleteRecordError(err?.message || 'Failed to delete record.');
+      const msg = err?.response?.data?.message || err?.message || "You don't have permission to delete this record.";
+      setDeleteRecordError(msg);
+      showToast(msg, 'error');
     } finally {
       setDeletingRecord(false);
     }
@@ -2287,22 +2312,27 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               >
                 <Edit3 size={15} /> Edit
               </button>
-              {canDeleteRecord && (
-                <button
-                  onClick={() => { setShowDeleteModal(true); setDeleteRecordError(null); }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 7,
-                    padding: '10px 18px', borderRadius: 12,
-                    fontSize: 13, fontWeight: 700, color: '#ffffff',
-                    background: 'linear-gradient(135deg, #f43f5e, #e11d48)',
-                    border: 'none', cursor: 'pointer',
-                    boxShadow: '0 8px 20px -10px rgba(244,63,94,0.55)',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <Trash2 size={15} /> Delete
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  if (!canDeleteRecord) {
+                    showToast("You don't have permission to delete this record.", 'error');
+                    return;
+                  }
+                  setShowDeleteModal(true);
+                  setDeleteRecordError(null);
+                }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '10px 18px', borderRadius: 12,
+                  fontSize: 13, fontWeight: 700, color: '#ffffff',
+                  background: canDeleteRecord ? 'linear-gradient(135deg, #f43f5e, #e11d48)' : '#94a3b8',
+                  border: 'none', cursor: 'pointer',
+                  boxShadow: canDeleteRecord ? '0 8px 20px -10px rgba(244,63,94,0.55)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Trash2 size={15} /> Delete
+              </button>
               <button
                 onClick={handleClose}
                 style={{

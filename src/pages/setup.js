@@ -599,7 +599,7 @@ function Setup() {
       items: [
         { id: 'modules', label: 'Modules', icon: Boxes },
         { id: 'validation', label: 'Record Rules', icon: FileText },
-        { id: 'automations', label: 'Flow Automations', icon: Workflow },
+        // { id: 'automations', label: 'Flow Automations', icon: Workflow },
       ],
     },
   ];
@@ -719,111 +719,111 @@ function Setup() {
   return (
     <WorkspaceProvider>
       <div className="orbit-root">
-      <div className="orbit-bg-mesh" />
-      <div className="app-shell">
-        {/* ── Sidebar ── */}
-        <aside style={{
-          width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column',
-          padding: '28px 16px', height: '100vh', position: 'sticky', top: 0,
-          background: 'linear-gradient(180deg, #0d1117 0%, #0d1420 40%, #111827 100%)',
-          borderRight: '1px solid rgba(255,255,255,0.06)',
-          overflow: 'hidden', zIndex: 100
-        }}>
-        {/* Sidebar glow orb */}
-        <div style={{ position: 'absolute', top: -60, left: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.12), transparent 70%)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', bottom: 40, right: -40, width: 160, height: 160, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.08), transparent 70%)', pointerEvents: 'none' }} />
+        <div className="orbit-bg-mesh" />
+        <div className="app-shell">
+          {/* ── Sidebar ── */}
+          <aside style={{
+            width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column',
+            padding: '28px 16px', height: '100vh', position: 'sticky', top: 0,
+            background: 'linear-gradient(180deg, #0d1117 0%, #0d1420 40%, #111827 100%)',
+            borderRight: '1px solid rgba(255,255,255,0.06)',
+            overflow: 'hidden', zIndex: 100
+          }}>
+            {/* Sidebar glow orb */}
+            <div style={{ position: 'absolute', top: -60, left: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.12), transparent 70%)', pointerEvents: 'none' }} />
+            <div style={{ position: 'absolute', bottom: 40, right: -40, width: 160, height: 160, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.08), transparent 70%)', pointerEvents: 'none' }} />
 
-        {/* Logo / Back */}
-        <div style={{ padding: '0 8px 24px', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: 20, position: 'relative', zIndex: 1 }}>
-          <Link to="/workspace/dashboard" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, color: '#fff', textDecoration: 'none', fontSize: '0.88rem', fontWeight: 700 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg, #00b09b, #4facfe)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <ArrowLeft size={15} style={{ color: '#fff' }} />
-            </div>
-            <span>CRM Setup Admin</span>
-          </Link>
-        </div>
-
-        {/* Nav */}
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflowY: 'auto', position: 'relative', zIndex: 1 }}>
-          {navGroups.map((group) => (
-            <div key={group.id} style={{ marginBottom: 8 }}>
-              {group.title && (
-                <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em', textTransform: 'uppercase', padding: '6px 12px', marginBottom: 4 }}>
-                  {group.title}
+            {/* Logo / Back */}
+            <div style={{ padding: '0 8px 24px', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: 20, position: 'relative', zIndex: 1 }}>
+              <Link to="/workspace/dashboard" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, color: '#fff', textDecoration: 'none', fontSize: '0.88rem', fontWeight: 700 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg, #00b09b, #4facfe)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ArrowLeft size={15} style={{ color: '#fff' }} />
                 </div>
-              )}
-              {group.items.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleNavigate(item.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 11,
-                      padding: '10px 14px', borderRadius: 12, border: 'none',
-                      width: '100%', textAlign: 'left', cursor: 'pointer',
-                      fontSize: '0.85rem', fontWeight: isActive ? 600 : 400,
-                      color: isActive ? '#fff' : 'rgba(255,255,255,0.55)',
-                      background: isActive
-                        ? 'linear-gradient(135deg, rgba(0,176,155,0.25), rgba(79,172,254,0.15))'
-                        : 'transparent',
-                      borderLeft: isActive ? '2px solid #00b09b' : '2px solid transparent',
-                      transition: 'all 0.22s ease',
-                      position: 'relative', overflow: 'hidden',
-                    }}
-                    onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'rgba(255,255,255,0.85)'; }}}
-                    onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.55)'; }}}
-                  >
-                    <div style={{
-                      width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                      background: isActive ? 'linear-gradient(135deg, #00b09b, #4facfe)' : 'rgba(255,255,255,0.06)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: isActive ? '0 4px 12px rgba(0,176,155,0.35)' : 'none',
-                      transition: 'all 0.22s ease',
-                    }}>
-                      <Icon size={15} style={{ color: isActive ? '#fff' : 'rgba(255,255,255,0.5)' }} />
-                    </div>
-                    <span>{item.label}</span>
-                    {isActive && item.id !== 'dashboard' && <ChevronRight size={13} style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)' }} />}
-                  </button>
-                );
-              })}
+                <span>CRM Setup Admin</span>
+              </Link>
             </div>
-          ))}
-        </nav>
 
-        {/* Sidebar footer */}
-        <div style={{ position: 'relative', zIndex: 1, padding: '16px 12px', borderRadius: 14, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #667eea, #764ba2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.8rem', color: '#fff', flexShrink: 0 }}>
-              {(() => {
-                const name = user?.name || currentUser?.name || '';
-                return name ? name.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase() : 'U';
-              })()}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.name || currentUser?.name || 'User'}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d699', boxShadow: '0 0 6px rgba(0,214,153,0.6)' }} />
-                <span style={{ fontSize: '0.7rem', color: '#00d699' }}>Online</span>
+            {/* Nav */}
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflowY: 'auto', position: 'relative', zIndex: 1 }}>
+              {navGroups.map((group) => (
+                <div key={group.id} style={{ marginBottom: 8 }}>
+                  {group.title && (
+                    <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em', textTransform: 'uppercase', padding: '6px 12px', marginBottom: 4 }}>
+                      {group.title}
+                    </div>
+                  )}
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleNavigate(item.id)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 11,
+                          padding: '10px 14px', borderRadius: 12, border: 'none',
+                          width: '100%', textAlign: 'left', cursor: 'pointer',
+                          fontSize: '0.85rem', fontWeight: isActive ? 600 : 400,
+                          color: isActive ? '#fff' : 'rgba(255,255,255,0.55)',
+                          background: isActive
+                            ? 'linear-gradient(135deg, rgba(0,176,155,0.25), rgba(79,172,254,0.15))'
+                            : 'transparent',
+                          borderLeft: isActive ? '2px solid #00b09b' : '2px solid transparent',
+                          transition: 'all 0.22s ease',
+                          position: 'relative', overflow: 'hidden',
+                        }}
+                        onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'rgba(255,255,255,0.85)'; } }}
+                        onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.55)'; } }}
+                      >
+                        <div style={{
+                          width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                          background: isActive ? 'linear-gradient(135deg, #00b09b, #4facfe)' : 'rgba(255,255,255,0.06)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          boxShadow: isActive ? '0 4px 12px rgba(0,176,155,0.35)' : 'none',
+                          transition: 'all 0.22s ease',
+                        }}>
+                          <Icon size={15} style={{ color: isActive ? '#fff' : 'rgba(255,255,255,0.5)' }} />
+                        </div>
+                        <span>{item.label}</span>
+                        {isActive && item.id !== 'dashboard' && <ChevronRight size={13} style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)' }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
+
+            {/* Sidebar footer */}
+            <div style={{ position: 'relative', zIndex: 1, padding: '16px 12px', borderRadius: 14, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #667eea, #764ba2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.8rem', color: '#fff', flexShrink: 0 }}>
+                  {(() => {
+                    const name = user?.name || currentUser?.name || '';
+                    return name ? name.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2).toUpperCase() : 'U';
+                  })()}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.name || currentUser?.name || 'User'}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d699', boxShadow: '0 0 6px rgba(0,214,153,0.6)' }} />
+                    <span style={{ fontSize: '0.7rem', color: '#00d699' }}>Online</span>
+                  </div>
+                </div>
+                <SignOutIconButton onClick={handleLogout} />
               </div>
             </div>
-            <SignOutIconButton onClick={handleLogout} />
-          </div>
-        </div>
-      </aside>
+          </aside>
 
-      {/* ── Main Content ── */}
-      <div className="app-main">
-        {/* Shared Navbar Header — same as workspace */}
-        <header className="app-header">
-          <Navbar onMenuToggle={() => {}} />
-        </header>
-        <main className="app-content orbit-scrollbar fade-in">
-        {/* Global CSS animations */}
-        <style>{`
+          {/* ── Main Content ── */}
+          <div className="app-main">
+            {/* Shared Navbar Header — same as workspace */}
+            <header className="app-header">
+              <Navbar onMenuToggle={() => { }} />
+            </header>
+            <main className="app-content orbit-scrollbar fade-in">
+              {/* Global CSS animations */}
+              <style>{`
           @keyframes slideUp {
             from { opacity: 0; transform: translateY(24px); }
             to { opacity: 1; transform: translateY(0); }
@@ -856,419 +856,419 @@ function Setup() {
           }
         `}</style>
 
-        {activeTab === 'dashboard' && (
-          <div>
-            {/* ══ Hero Banner ══ */}
-            <div
-              ref={heroBannerRef}
-              style={{
-                borderRadius: 22, marginBottom: 24, position: 'relative', overflow: 'hidden',
-                background: 'linear-gradient(135deg, #0d1117 0%, #0a1628 30%, #0d2137 55%, #0a2020 80%, #0d1117 100%)',
-                padding: '28px 32px 24px',
-                boxShadow: '0 20px 60px -16px rgba(0,176,155,0.18), 0 8px 32px -8px rgba(13,17,23,0.4)',
-                animation: 'slideUp 0.6s cubic-bezier(0.22,1,0.36,1) both',
-              }}
-            >
-              {/* Interactive cursor-following canvas particle field */}
-              <HeroParticleCanvas containerRef={heroBannerRef} />
-
-              {/* Glow orbs */}
-              <div style={{ position: 'absolute', top: -80, right: 60, width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.2), transparent 65%)', animation: 'float 7s ease-in-out infinite' }} />
-              <div style={{ position: 'absolute', bottom: -60, right: 200, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.15), transparent 65%)', animation: 'float 9s ease-in-out infinite reverse' }} />
-              <div style={{ position: 'absolute', top: 20, right: 340, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle, rgba(245,87,108,0.1), transparent 65%)', animation: 'float 6s ease-in-out infinite 1s' }} />
-              {/* Grid texture */}
-              <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
-
-              <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              {activeTab === 'dashboard' && (
                 <div>
-                  {/* Badge */}
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, background: 'rgba(0,176,155,0.12)', backdropFilter: 'blur(12px)', border: '1px solid rgba(0,176,155,0.3)', marginBottom: 12, animation: 'fadeSlideIn 0.5s 0.1s both' }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d699', animation: 'pulseGlow 2s ease-in-out infinite' }} />
-                    <Cpu size={11} style={{ color: '#00b09b' }} />
-                    <span style={{ fontSize: '0.66rem', fontWeight: 700, color: '#00d699', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-                      {userRoleStr ? `${userRoleStr.toUpperCase()} CONSOLE` : 'ADMINISTRATION CONSOLE'}
-                    </span>
-                  </div>
-                  <h1 style={{ margin: '0 0 8px', fontSize: '1.5rem', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.15, animation: 'fadeSlideIn 0.5s 0.2s both' }}>
-                    Setup & <span style={{ background: 'linear-gradient(90deg, #00b09b, #4facfe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Administration</span>
-                  </h1>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.48)', maxWidth: 480, lineHeight: 1.65, animation: 'fadeSlideIn 0.5s 0.3s both' }}>
-                    Manage your CRM platform — configure modules, schemas, users, roles, and workspace settings.
-                  </p>
-                </div>
-              </div>
-            </div>
+                  {/* ══ Hero Banner ══ */}
+                  <div
+                    ref={heroBannerRef}
+                    style={{
+                      borderRadius: 22, marginBottom: 24, position: 'relative', overflow: 'hidden',
+                      background: 'linear-gradient(135deg, #0d1117 0%, #0a1628 30%, #0d2137 55%, #0a2020 80%, #0d1117 100%)',
+                      padding: '28px 32px 24px',
+                      boxShadow: '0 20px 60px -16px rgba(0,176,155,0.18), 0 8px 32px -8px rgba(13,17,23,0.4)',
+                      animation: 'slideUp 0.6s cubic-bezier(0.22,1,0.36,1) both',
+                    }}
+                  >
+                    {/* Interactive cursor-following canvas particle field */}
+                    <HeroParticleCanvas containerRef={heroBannerRef} />
 
-            {/* ══ KPI Row ══ */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18, marginBottom: 24 }}>
-              {kpiCards.map((card) => (
-                <KpiCard key={card.label} {...card} onNavigate={handleNavigate} />
-              ))}
-            </div>
+                    {/* Glow orbs */}
+                    <div style={{ position: 'absolute', top: -80, right: 60, width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,176,155,0.2), transparent 65%)', animation: 'float 7s ease-in-out infinite' }} />
+                    <div style={{ position: 'absolute', bottom: -60, right: 200, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,172,254,0.15), transparent 65%)', animation: 'float 9s ease-in-out infinite reverse' }} />
+                    <div style={{ position: 'absolute', top: 20, right: 340, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle, rgba(245,87,108,0.1), transparent 65%)', animation: 'float 6s ease-in-out infinite 1s' }} />
+                    {/* Grid texture */}
+                    <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
 
-            {/* ══ Middle: Quick Actions + System ══ */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 20, marginBottom: 22 }}>
-              {/* Quick Actions */}
-              <div style={{
-                background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
-                backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.8)',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
-                padding: '26px 30px',
-                animation: 'slideUp 0.6s 0.3s cubic-bezier(0.22,1,0.36,1) both',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
-                  <div>
-                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Quick Actions</div>
-                    <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Jump to common admin tasks</div>
-                  </div>
-                  <div style={{ width: 36, height: 36, borderRadius: 11, background: 'linear-gradient(135deg, #f6d365, #fda085)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(246,211,101,0.35)' }}>
-                    <Zap size={16} style={{ color: '#fff' }} />
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {quickActions.map((a, i) => {
-                    const Icon = a.icon;
-                    return (
-                      <div
-                        key={a.label}
-                        onClick={() => handleNavigate(a.tab)}
-                        style={{
-                          padding: '16px 18px', borderRadius: 16, cursor: 'pointer',
-                          border: '1px solid rgba(0,0,0,0.05)',
-                          background: a.bg,
-                          display: 'flex', alignItems: 'center', gap: 13,
-                          transition: 'all 0.25s cubic-bezier(0.22,1,0.36,1)',
-                          animation: `slideUp 0.5s ${0.4 + i * 0.06}s cubic-bezier(0.22,1,0.36,1) both`,
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${a.color}20`; e.currentTarget.style.borderColor = `${a.color}30`; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = 'rgba(0,0,0,0.05)'; }}
-                      >
-                        <div style={{ width: 40, height: 40, borderRadius: 12, background: `${a.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `1px solid ${a.color}20` }}>
-                          <Icon size={18} style={{ color: a.color }} />
+                    <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        {/* Badge */}
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, background: 'rgba(0,176,155,0.12)', backdropFilter: 'blur(12px)', border: '1px solid rgba(0,176,155,0.3)', marginBottom: 12, animation: 'fadeSlideIn 0.5s 0.1s both' }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d699', animation: 'pulseGlow 2s ease-in-out infinite' }} />
+                          <Cpu size={11} style={{ color: '#00b09b' }} />
+                          <span style={{ fontSize: '0.66rem', fontWeight: 700, color: '#00d699', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+                            {userRoleStr ? `${userRoleStr.toUpperCase()} CONSOLE` : 'ADMINISTRATION CONSOLE'}
+                          </span>
                         </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#0d1117' }}>{a.label}</div>
-                            {a.badge && (
-                              <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: `${a.color}18`, color: a.color, border: `1px solid ${a.color}30` }}>
-                                {a.badge}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ fontSize: '0.7rem', color: '#8a9bb0', marginTop: 1 }}>{a.desc}</div>
-                        </div>
-                        <ArrowUpRight size={14} style={{ color: a.color, opacity: 0.5, flexShrink: 0 }} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Configuration Overview */}
-              <div style={{
-                background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
-                backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.8)',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
-                padding: '26px 28px', display: 'flex', flexDirection: 'column',
-                animation: 'slideUp 0.6s 0.4s cubic-bezier(0.22,1,0.36,1) both',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                  <div>
-                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Configuration Overview</div>
-                    <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Current CRM configuration</div>
-                  </div>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: 11,
-                    background: 'linear-gradient(135deg, #00b09b, #4facfe)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 4px 14px rgba(0,176,155,0.3)'
-                  }}>
-                    <Sliders size={16} style={{ color: '#fff' }} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-                  {configLoading ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 0' }}>
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 13, background: '#f8fafc' }}>
-                          <div style={{ height: 14, width: '40%', borderRadius: 4, background: '#e2e8f0' }} />
-                          <div style={{ height: 14, width: '15%', borderRadius: 4, background: '#cbd5e1' }} />
-                        </div>
-                      ))}
-                    </div>
-                  ) : configError ? (
-                    <div style={{ padding: '24px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                      <span style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 600 }}>{configError}</span>
-                      <button
-                        type="button"
-                        onClick={fetchConfigurationOverview}
-                        style={{
-                          padding: '6px 14px', borderRadius: 8, border: '1px solid #cbd5e1',
-                          background: '#fff', fontSize: '0.78rem', fontWeight: 600, color: '#475569', cursor: 'pointer'
-                        }}
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  ) : (
-                    [
-                      { label: 'Modules', key: 'modules', icon: Boxes, color: '#00b09b', onClick: () => setActiveTab('modules') },
-                      { label: 'Fields', key: 'fields', icon: FileText, color: '#4facfe', onClick: () => setActiveTab('modules') },
-                      { label: 'Record Rules', key: 'recordRules', icon: ShieldCheck, color: '#a18cd1', onClick: () => setActiveTab('validation') },
-                      { label: 'Automations', key: 'automations', icon: Workflow, color: '#ff9a9e', onClick: () => setActiveTab('automations') },
-                      { label: 'Forms', key: 'forms', icon: FileText, color: '#f5576c', onClick: () => navigate('/forms') },
-                    ].map((item) => {
-                      const Icon = item.icon;
-                      const val = configData?.[item.key] ?? 0;
-                      return (
-                        <div
-                          key={item.label}
-                          onClick={item.onClick}
-                          style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '11px 14px', borderRadius: 13,
-                            border: '1px solid rgba(0,0,0,0.04)',
-                            background: '#fafcff',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = '#ffffff';
-                            e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
-                            e.currentTarget.style.borderColor = `${item.color}40`;
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = '#fafcff';
-                            e.currentTarget.style.boxShadow = 'none';
-                            e.currentTarget.style.borderColor = 'rgba(0,0,0,0.04)';
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{
-                              width: 28, height: 28, borderRadius: 8,
-                              background: `${item.color}12`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center'
-                            }}>
-                              <Icon size={14} style={{ color: item.color }} />
-                            </div>
-                            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#1e293b' }}>{item.label}</span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>{val}</span>
-                            <ChevronRight size={14} style={{ color: '#94a3b8' }} />
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ══ Bottom: Activity + Current User ══ */}
-            <div className="setup-lower-grid">
-              {/* Activity Timeline (~60-65% width on desktop) */}
-              <div style={{
-                background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
-                backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.8)',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
-                padding: '26px 28px',
-                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                animation: 'slideUp 0.6s 0.5s cubic-bezier(0.22,1,0.36,1) both',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                  <div>
-                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Recent Activity</div>
-                    <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Latest admin operations</div>
-                  </div>
-                  <div style={{ width: 36, height: 36, borderRadius: 11, background: 'linear-gradient(135deg, #667eea, #764ba2)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(102,126,234,0.35)' }}>
-                    <Clock size={16} style={{ color: '#fff' }} />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'center' }}>
-                  {activityLoading ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '8px 0' }}>
-                      {[1, 2, 3, 4].map((n) => (
-                        <div key={n} style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 10, background: '#f1f5f9' }} />
-                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                            <div style={{ height: 13, width: '55%', borderRadius: 4, background: '#f1f5f9' }} />
-                            <div style={{ height: 10, width: '40%', borderRadius: 4, background: '#f8fafc' }} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : activityError ? (
-                    <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem', fontWeight: 500 }}>
-                      {activityError}
-                    </div>
-                  ) : activities.length === 0 ? (
-                    <div style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>
-                      No recent activity
-                    </div>
-                  ) : (
-                    activities.slice(0, 4).map((item, idx, list) => {
-                      const { title, target, actorName, color, Icon } = getActivityMeta(item);
-                      const relativeTime = formatRelativeTime(item.createdAt || item.created_at);
-                      const metaText = [target, actorName && actorName !== 'User' ? actorName : null, relativeTime].filter(Boolean).join(' • ');
-
-                      return (
-                        <div key={item.id || idx} style={{ display: 'flex', gap: 14, paddingBottom: idx < list.length - 1 ? 14 : 0, animation: `fadeSlideIn 0.4s ${0.1 + idx * 0.05}s both` }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 32, flexShrink: 0 }}>
-                            <div style={{
-                              width: 32, height: 32, borderRadius: 10,
-                              background: `${color}10`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              border: `1.5px solid ${color}25`, zIndex: 1,
-                            }}>
-                              <Icon size={14} style={{ color: color }} />
-                            </div>
-                            {idx < list.length - 1 && (
-                              <div style={{ width: 2, flex: 1, background: `linear-gradient(to bottom, ${color}30, transparent)`, marginTop: 4, borderRadius: 1 }} />
-                            )}
-                          </div>
-                          <div style={{ flex: 1, paddingTop: 3, paddingBottom: idx < list.length - 1 ? 6 : 0, minWidth: 0 }}>
-                            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#0d1117', lineHeight: 1.3 }}>{title}</div>
-                            <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {metaText}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Current User Card (~35-40% width on desktop) */}
-              <div style={{
-                background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
-                backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.8)',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
-                padding: '24px 26px', position: 'relative', overflow: 'hidden',
-                display: 'flex', flexDirection: 'column', gap: 14,
-                animation: 'slideUp 0.6s 0.55s cubic-bezier(0.22,1,0.36,1) both',
-              }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #00b09b, #4facfe, #764ba2)' }} />
-                
-                {userProfileLoading ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0' }}>
-                    <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                      <div style={{ width: 44, height: 44, borderRadius: 14, background: '#f1f5f9' }} />
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ height: 14, width: '60%', borderRadius: 4, background: '#f1f5f9' }} />
-                        <div style={{ height: 10, width: '40%', borderRadius: 4, background: '#f8fafc' }} />
+                        <h1 style={{ margin: '0 0 8px', fontSize: '1.5rem', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.15, animation: 'fadeSlideIn 0.5s 0.2s both' }}>
+                          Setup & <span style={{ background: 'linear-gradient(90deg, #00b09b, #4facfe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Administration</span>
+                        </h1>
+                        <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.48)', maxWidth: 480, lineHeight: 1.65, animation: 'fadeSlideIn 0.5s 0.3s both' }}>
+                          Manage your CRM platform — configure modules, schemas, users, roles, and workspace settings.
+                        </p>
                       </div>
                     </div>
-                    <div style={{ height: 32, borderRadius: 8, background: '#f1f5f9' }} />
-                    <div style={{ height: 32, borderRadius: 8, background: '#f1f5f9' }} />
                   </div>
-                ) : userProfileError ? (
-                  <div style={{ padding: '18px 16px', textAlign: 'center', color: '#ef4444', fontSize: '0.85rem', fontWeight: 500 }}>
-                    {userProfileError}
+
+                  {/* ══ KPI Row ══ */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18, marginBottom: 24 }}>
+                    {kpiCards.map((card) => (
+                      <KpiCard key={card.label} {...card} onNavigate={handleNavigate} />
+                    ))}
                   </div>
-                ) : (
-                  <>
-                    <div>
-                      <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#8a9bb0', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                        CURRENT USER & ACCESS
+
+                  {/* ══ Middle: Quick Actions + System ══ */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 20, marginBottom: 22 }}>
+                    {/* Quick Actions */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
+                      backdropFilter: 'blur(24px)',
+                      border: '1px solid rgba(255,255,255,0.8)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
+                      padding: '26px 30px',
+                      animation: 'slideUp 0.6s 0.3s cubic-bezier(0.22,1,0.36,1) both',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+                        <div>
+                          <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Quick Actions</div>
+                          <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Jump to common admin tasks</div>
+                        </div>
+                        <div style={{ width: 36, height: 36, borderRadius: 11, background: 'linear-gradient(135deg, #f6d365, #fda085)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(246,211,101,0.35)' }}>
+                          <Zap size={16} style={{ color: '#fff' }} />
+                        </div>
                       </div>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        {quickActions.map((a, i) => {
+                          const Icon = a.icon;
+                          return (
+                            <div
+                              key={a.label}
+                              onClick={() => handleNavigate(a.tab)}
+                              style={{
+                                padding: '16px 18px', borderRadius: 16, cursor: 'pointer',
+                                border: '1px solid rgba(0,0,0,0.05)',
+                                background: a.bg,
+                                display: 'flex', alignItems: 'center', gap: 13,
+                                transition: 'all 0.25s cubic-bezier(0.22,1,0.36,1)',
+                                animation: `slideUp 0.5s ${0.4 + i * 0.06}s cubic-bezier(0.22,1,0.36,1) both`,
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${a.color}20`; e.currentTarget.style.borderColor = `${a.color}30`; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = 'rgba(0,0,0,0.05)'; }}
+                            >
+                              <div style={{ width: 40, height: 40, borderRadius: 12, background: `${a.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `1px solid ${a.color}20` }}>
+                                <Icon size={18} style={{ color: a.color }} />
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#0d1117' }}>{a.label}</div>
+                                  {a.badge && (
+                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: `${a.color}18`, color: a.color, border: `1px solid ${a.color}30` }}>
+                                      {a.badge}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: '#8a9bb0', marginTop: 1 }}>{a.desc}</div>
+                              </div>
+                              <ArrowUpRight size={14} style={{ color: a.color, opacity: 0.5, flexShrink: 0 }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Configuration Overview */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
+                      backdropFilter: 'blur(24px)',
+                      border: '1px solid rgba(255,255,255,0.8)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
+                      padding: '26px 28px', display: 'flex', flexDirection: 'column',
+                      animation: 'slideUp 0.6s 0.4s cubic-bezier(0.22,1,0.36,1) both',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                        <div>
+                          <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Configuration Overview</div>
+                          <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Current CRM configuration</div>
+                        </div>
                         <div style={{
-                          width: 46, height: 46, borderRadius: 14,
-                          background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                          width: 36, height: 36, borderRadius: 11,
+                          background: 'linear-gradient(135deg, #00b09b, #4facfe)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontWeight: 800, fontSize: '0.98rem', color: '#fff',
-                          boxShadow: '0 6px 18px rgba(102,126,234,0.35)', flexShrink: 0,
+                          boxShadow: '0 4px 14px rgba(0,176,155,0.3)'
                         }}>
-                          {userProfileData?.avatar || 'U'}
+                          <Sliders size={16} style={{ color: '#fff' }} />
                         </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontWeight: 800, fontSize: '0.96rem', color: '#0d1117', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {userProfileData?.name || user?.name || currentUser?.name || 'User'}
-                            </span>
-                            <div style={{
-                              width: 7, height: 7, borderRadius: '50%',
-                              background: userProfileData?.status === 'inactive' ? '#ef4444' : '#00d699',
-                              boxShadow: `0 0 6px ${userProfileData?.status === 'inactive' ? 'rgba(239,68,68,0.5)' : 'rgba(0,214,153,0.5)'}`,
-                              flexShrink: 0
-                            }} />
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                        {configLoading ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 0' }}>
+                            {[1, 2, 3, 4, 5].map((n) => (
+                              <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 13, background: '#f8fafc' }}>
+                                <div style={{ height: 14, width: '40%', borderRadius: 4, background: '#e2e8f0' }} />
+                                <div style={{ height: 14, width: '15%', borderRadius: 4, background: '#cbd5e1' }} />
+                              </div>
+                            ))}
                           </div>
-                          <div style={{ fontSize: '0.76rem', color: '#8a9bb0', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {userProfileData?.email || user?.email || currentUser?.email || ''}
+                        ) : configError ? (
+                          <div style={{ padding: '24px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                            <span style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 600 }}>{configError}</span>
+                            <button
+                              type="button"
+                              onClick={fetchConfigurationOverview}
+                              style={{
+                                padding: '6px 14px', borderRadius: 8, border: '1px solid #cbd5e1',
+                                background: '#fff', fontSize: '0.78rem', fontWeight: 600, color: '#475569', cursor: 'pointer'
+                              }}
+                            >
+                              Retry
+                            </button>
                           </div>
+                        ) : (
+                          [
+                            { label: 'Modules', key: 'modules', icon: Boxes, color: '#00b09b', onClick: () => setActiveTab('modules') },
+                            { label: 'Fields', key: 'fields', icon: FileText, color: '#4facfe', onClick: () => setActiveTab('modules') },
+                            { label: 'Record Rules', key: 'recordRules', icon: ShieldCheck, color: '#a18cd1', onClick: () => setActiveTab('validation') },
+                            // { label: 'Automations', key: 'automations', icon: Workflow, color: '#ff9a9e', onClick: () => setActiveTab('automations') },
+                            { label: 'Forms', key: 'forms', icon: FileText, color: '#f5576c', onClick: () => navigate('/forms') },
+                          ].map((item) => {
+                            const Icon = item.icon;
+                            const val = configData?.[item.key] ?? 0;
+                            return (
+                              <div
+                                key={item.label}
+                                onClick={item.onClick}
+                                style={{
+                                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                  padding: '11px 14px', borderRadius: 13,
+                                  border: '1px solid rgba(0,0,0,0.04)',
+                                  background: '#fafcff',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#ffffff';
+                                  e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
+                                  e.currentTarget.style.borderColor = `${item.color}40`;
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#fafcff';
+                                  e.currentTarget.style.boxShadow = 'none';
+                                  e.currentTarget.style.borderColor = 'rgba(0,0,0,0.04)';
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <div style={{
+                                    width: 28, height: 28, borderRadius: 8,
+                                    background: `${item.color}12`,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                  }}>
+                                    <Icon size={14} style={{ color: item.color }} />
+                                  </div>
+                                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#1e293b' }}>{item.label}</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>{val}</span>
+                                  <ChevronRight size={14} style={{ color: '#94a3b8' }} />
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══ Bottom: Activity + Current User ══ */}
+                  <div className="setup-lower-grid">
+                    {/* Activity Timeline (~60-65% width on desktop) */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
+                      backdropFilter: 'blur(24px)',
+                      border: '1px solid rgba(255,255,255,0.8)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
+                      padding: '26px 28px',
+                      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                      animation: 'slideUp 0.6s 0.5s cubic-bezier(0.22,1,0.36,1) both',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                        <div>
+                          <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0d1117' }}>Recent Activity</div>
+                          <div style={{ fontSize: '0.75rem', color: '#8a9bb0', marginTop: 2 }}>Latest admin operations</div>
                         </div>
+                        <div style={{ width: 36, height: 36, borderRadius: 11, background: 'linear-gradient(135deg, #667eea, #764ba2)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(102,126,234,0.35)' }}>
+                          <Clock size={16} style={{ color: '#fff' }} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'center' }}>
+                        {activityLoading ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '8px 0' }}>
+                            {[1, 2, 3, 4].map((n) => (
+                              <div key={n} style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                                <div style={{ width: 32, height: 32, borderRadius: 10, background: '#f1f5f9' }} />
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                  <div style={{ height: 13, width: '55%', borderRadius: 4, background: '#f1f5f9' }} />
+                                  <div style={{ height: 10, width: '40%', borderRadius: 4, background: '#f8fafc' }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : activityError ? (
+                          <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem', fontWeight: 500 }}>
+                            {activityError}
+                          </div>
+                        ) : activities.length === 0 ? (
+                          <div style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>
+                            No recent activity
+                          </div>
+                        ) : (
+                          activities.slice(0, 4).map((item, idx, list) => {
+                            const { title, target, actorName, color, Icon } = getActivityMeta(item);
+                            const relativeTime = formatRelativeTime(item.createdAt || item.created_at);
+                            const metaText = [target, actorName && actorName !== 'User' ? actorName : null, relativeTime].filter(Boolean).join(' • ');
+
+                            return (
+                              <div key={item.id || idx} style={{ display: 'flex', gap: 14, paddingBottom: idx < list.length - 1 ? 14 : 0, animation: `fadeSlideIn 0.4s ${0.1 + idx * 0.05}s both` }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 32, flexShrink: 0 }}>
+                                  <div style={{
+                                    width: 32, height: 32, borderRadius: 10,
+                                    background: `${color}10`,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    border: `1.5px solid ${color}25`, zIndex: 1,
+                                  }}>
+                                    <Icon size={14} style={{ color: color }} />
+                                  </div>
+                                  {idx < list.length - 1 && (
+                                    <div style={{ width: 2, flex: 1, background: `linear-gradient(to bottom, ${color}30, transparent)`, marginTop: 4, borderRadius: 1 }} />
+                                  )}
+                                </div>
+                                <div style={{ flex: 1, paddingTop: 3, paddingBottom: idx < list.length - 1 ? 6 : 0, minWidth: 0 }}>
+                                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#0d1117', lineHeight: 1.3 }}>{title}</div>
+                                  <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {metaText}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, background: '#fafcff', borderRadius: 14, border: '1px solid rgba(0,0,0,0.04)', padding: '11px 13px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Role</span>
-                        <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#667eea', background: 'rgba(102,126,234,0.08)', padding: '2px 8px', borderRadius: 6 }}>
-                          {userProfileData?.roleName || 'User'}
-                        </span>
-                      </div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Account Status</span>
-                        <span style={{ fontSize: '0.76rem', fontWeight: 700, color: userProfileData?.status === 'inactive' ? '#ef4444' : '#00b09b', textTransform: 'capitalize' }}>
-                          ● {userProfileData?.status ? (userProfileData.status.charAt(0).toUpperCase() + userProfileData.status.slice(1)) : 'Active'}
-                        </span>
-                      </div>
+                    {/* Current User Card (~35-40% width on desktop) */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.78)', borderRadius: 22,
+                      backdropFilter: 'blur(24px)',
+                      border: '1px solid rgba(255,255,255,0.8)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04), 0 12px 40px -12px rgba(0,0,0,0.08)',
+                      padding: '24px 26px', position: 'relative', overflow: 'hidden',
+                      display: 'flex', flexDirection: 'column', gap: 14,
+                      animation: 'slideUp 0.6s 0.55s cubic-bezier(0.22,1,0.36,1) both',
+                    }}>
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #00b09b, #4facfe, #764ba2)' }} />
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Record Access</span>
-                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', textAlign: 'right', maxWidth: '62%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {userProfileData?.recordAccess || 'Assigned Records'}
-                        </span>
-                      </div>
+                      {userProfileLoading ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0' }}>
+                          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                            <div style={{ width: 44, height: 44, borderRadius: 14, background: '#f1f5f9' }} />
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <div style={{ height: 14, width: '60%', borderRadius: 4, background: '#f1f5f9' }} />
+                              <div style={{ height: 10, width: '40%', borderRadius: 4, background: '#f8fafc' }} />
+                            </div>
+                          </div>
+                          <div style={{ height: 32, borderRadius: 8, background: '#f1f5f9' }} />
+                          <div style={{ height: 32, borderRadius: 8, background: '#f1f5f9' }} />
+                        </div>
+                      ) : userProfileError ? (
+                        <div style={{ padding: '18px 16px', textAlign: 'center', color: '#ef4444', fontSize: '0.85rem', fontWeight: 500 }}>
+                          {userProfileError}
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#8a9bb0', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                              CURRENT USER & ACCESS
+                            </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Configuration</span>
-                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', textAlign: 'right', maxWidth: '62%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {userProfileData?.configurationAccess || 'Restricted'}
-                        </span>
-                      </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                              <div style={{
+                                width: 46, height: 46, borderRadius: 14,
+                                background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontWeight: 800, fontSize: '0.98rem', color: '#fff',
+                                boxShadow: '0 6px 18px rgba(102,126,234,0.35)', flexShrink: 0,
+                              }}>
+                                {userProfileData?.avatar || 'U'}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontWeight: 800, fontSize: '0.96rem', color: '#0d1117', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {userProfileData?.name || user?.name || currentUser?.name || 'User'}
+                                  </span>
+                                  <div style={{
+                                    width: 7, height: 7, borderRadius: '50%',
+                                    background: userProfileData?.status === 'inactive' ? '#ef4444' : '#00d699',
+                                    boxShadow: `0 0 6px ${userProfileData?.status === 'inactive' ? 'rgba(239,68,68,0.5)' : 'rgba(0,214,153,0.5)'}`,
+                                    flexShrink: 0
+                                  }} />
+                                </div>
+                                <div style={{ fontSize: '0.76rem', color: '#8a9bb0', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {userProfileData?.email || user?.email || currentUser?.email || ''}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Last Login</span>
-                        <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#64748b' }}>
-                          {formatRelativeTime(userProfileData?.lastLoginAt) || 'Just now'}
-                        </span>
-                      </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, background: '#fafcff', borderRadius: 14, border: '1px solid rgba(0,0,0,0.04)', padding: '11px 13px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Role</span>
+                              <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#667eea', background: 'rgba(102,126,234,0.08)', padding: '2px 8px', borderRadius: 6 }}>
+                                {userProfileData?.roleName || 'User'}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Account Status</span>
+                              <span style={{ fontSize: '0.76rem', fontWeight: 700, color: userProfileData?.status === 'inactive' ? '#ef4444' : '#00b09b', textTransform: 'capitalize' }}>
+                                ● {userProfileData?.status ? (userProfileData.status.charAt(0).toUpperCase() + userProfileData.status.slice(1)) : 'Active'}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Record Access</span>
+                              <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', textAlign: 'right', maxWidth: '62%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {userProfileData?.recordAccess || 'Assigned Records'}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Configuration</span>
+                              <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', textAlign: 'right', maxWidth: '62%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {userProfileData?.configurationAccess || 'Restricted'}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8a9bb0' }}>Last Login</span>
+                              <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#64748b' }}>
+                                {formatRelativeTime(userProfileData?.lastLoginAt) || 'Just now'}
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </>
-                )}
-              </div>
-            </div>
+                  </div>
+                </div>
+              )}
+
+              {(activeTab === 'objects' || activeTab === 'deals' || activeTab === 'modules') && (
+                selectedObject
+                  ? <ObjectDetail objectKey={selectedObject} onBack={() => setSelectedObject(null)} />
+                  : <ObjectManager onSelectObject={(key) => setSelectedObject(key)} />
+              )}
+              {activeTab === 'users' && <UserManagement />}
+              {(activeTab === 'roles' || activeTab === 'profiles') && <RolesPermissions />}
+              {activeTab === 'company' && <CompanyInfo />}
+              {activeTab === 'general' && <CompanyInfo />}
+              {activeTab === 'validation' && <ValidationRulesPage />}
+              {activeTab === 'automations' && <FlowAutomations />}
+            </main>
           </div>
-        )}
+        </div>
+      </div>
 
-        {(activeTab === 'objects' || activeTab === 'deals' || activeTab === 'modules') && (
-          selectedObject
-            ? <ObjectDetail objectKey={selectedObject} onBack={() => setSelectedObject(null)} />
-            : <ObjectManager onSelectObject={(key) => setSelectedObject(key)} />
-        )}
-        {activeTab === 'users' && <UserManagement />}
-        {(activeTab === 'roles' || activeTab === 'profiles') && <RolesPermissions />}
-        {activeTab === 'company' && <CompanyInfo />}
-        {activeTab === 'general' && <CompanyInfo />}
-        {activeTab === 'validation' && <ValidationRulesPage />}
-        {activeTab === 'automations' && <FlowAutomations />}
-      </main>
-    </div>
-  </div>
-</div>
-
-        {/* Global AI Chatbot Widget — Admin Setup Dashboard */}
-        <AIChatBotWidget />
+      {/* Global AI Chatbot Widget — Admin Setup Dashboard */}
+      <AIChatBotWidget />
     </WorkspaceProvider>
   );
 }

@@ -84,8 +84,8 @@ export function WorkspaceProvider({ children }) {
   let activeObjectPerm = null;
   if (rawObjectTypeParam && dbPerms) {
     const key = String(rawObjectTypeParam).toLowerCase();
-    const keySingular = key.endsWith('s') ? key.slice(0, -1) : key;
-    const keyPlural = key.endsWith('s') ? key : `${key}s`;
+    const keySingular = key.endsWith('ies') ? `${key.slice(0, -3)}y` : (key.endsWith('s') ? key.slice(0, -1) : key);
+    const keyPlural = key.endsWith('y') ? `${key.slice(0, -1)}ies` : (key.endsWith('s') ? key : `${key}s`);
 
     let foundPerm = dbPerms[key] || dbPerms[keySingular] || dbPerms[keyPlural];
 
@@ -95,8 +95,8 @@ export function WorkspaceProvider({ children }) {
       );
       if (matchedObjDef) {
         const apiName = String(matchedObjDef.api_name || matchedObjDef.name || '').toLowerCase();
-        const apiSingular = apiName.endsWith('s') ? apiName.slice(0, -1) : apiName;
-        const apiPlural = apiName.endsWith('s') ? apiName : `${apiName}s`;
+        const apiSingular = apiName.endsWith('ies') ? `${apiName.slice(0, -3)}y` : (apiName.endsWith('s') ? apiName.slice(0, -1) : apiName);
+        const apiPlural = apiName.endsWith('y') ? `${apiName.slice(0, -1)}ies` : (apiName.endsWith('s') ? apiName : `${apiName}s`);
         foundPerm = dbPerms[apiName] || dbPerms[apiSingular] || dbPerms[apiPlural];
       }
     }
@@ -106,16 +106,19 @@ export function WorkspaceProvider({ children }) {
     }
   }
 
+  const userRoleName = String(workspaceData?.currentUser?.role || workspaceData?.currentUser?.role_name || '').toLowerCase();
+  const isSystemAdmin = userRoleName.includes('admin') || userRoleName.includes('administrator') || !workspaceData?.currentUser?.role;
+
   const activePermissions = {
-    canCreate: true,
-    canEdit: true,
-    canUpdate: true,
-    canDelete: true,
-    canRead: true,
-    viewAll: true,
-    modifyAll: true,
     ...(dbPerms || {}),
     ...(activeObjectPerm || {}),
+    canCreate: activeObjectPerm ? Boolean(activeObjectPerm.canCreate || activeObjectPerm.can_create) : isSystemAdmin,
+    canEdit: activeObjectPerm ? Boolean(activeObjectPerm.canUpdate || activeObjectPerm.can_update || activeObjectPerm.canEdit) : isSystemAdmin,
+    canUpdate: activeObjectPerm ? Boolean(activeObjectPerm.canUpdate || activeObjectPerm.can_update) : isSystemAdmin,
+    canDelete: activeObjectPerm ? Boolean(activeObjectPerm.canDelete || activeObjectPerm.can_delete) : isSystemAdmin,
+    canRead: activeObjectPerm ? Boolean(activeObjectPerm.canRead || activeObjectPerm.can_read) : true,
+    viewAll: activeObjectPerm ? Boolean(activeObjectPerm.viewAll || activeObjectPerm.view_all) : isSystemAdmin,
+    modifyAll: activeObjectPerm ? Boolean(activeObjectPerm.modifyAll || activeObjectPerm.modify_all) : isSystemAdmin,
   };
 
   const isOverallLoading = authLoading || (isAuthenticated && (!workspaceData || workspaceLoading));

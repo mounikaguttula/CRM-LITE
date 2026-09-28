@@ -403,7 +403,18 @@ const objectService = {
         }
       }
 
-      query = query.order('created_at', { ascending: false });
+      if (options.status && options.status !== 'ALL') {
+        query = query.filter('status', 'ilike', `%${options.status}%`);
+      }
+
+      const sortCol = (options.sortBy === 'name' || options.sortBy === 'title')
+        ? 'name'
+        : (options.sortBy === 'status')
+        ? 'status'
+        : 'created_at';
+
+      const isAsc = String(options.sortOrder || 'desc').toLowerCase() === 'asc';
+      query = query.order(sortCol, { ascending: isAsc });
       query = query.range((reqPage - 1) * reqPageSize, reqPage * reqPageSize - 1);
 
       const { data: rows, count, error } = await query;
@@ -416,7 +427,38 @@ const objectService = {
         throw { statusCode: 500, message: `Failed to fetch records for '${objectKey}': ${error.message}` };
       }
 
-      const normalizedData = (rows || []).map(objectService.normalizeRecord);
+      let normalizedData = (rows || []).map(objectService.normalizeRecord);
+
+      // Perform field-level sorting on normalized dataset
+      const sortField = options.sortBy || 'created_at';
+      normalizedData.sort((a, b) => {
+        let valA = a[sortField] !== undefined ? a[sortField] : (a.data && a.data[sortField]);
+        let valB = b[sortField] !== undefined ? b[sortField] : (b.data && b.data[sortField]);
+
+        if (sortField === 'name' || sortField === 'title') {
+          valA = a.name || a.lead_name || a.contact_name || a.first_name || '';
+          valB = b.name || b.lead_name || b.contact_name || b.first_name || '';
+        } else if (sortField === 'created_at' || sortField === 'created_date') {
+          valA = new Date(a.created_at || a.created_date || 0).getTime();
+          valB = new Date(b.created_at || b.created_date || 0).getTime();
+        }
+
+        if (valA === undefined || valA === null) valA = '';
+        if (valB === undefined || valB === null) valB = '';
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return isAsc ? valA - valB : valB - valA;
+        }
+
+        const strA = String(valA).toLowerCase();
+        const strB = String(valB).toLowerCase();
+
+        let cmp = 0;
+        if (strA < strB) cmp = -1;
+        if (strA > strB) cmp = 1;
+
+        return isAsc ? cmp : -cmp;
+      });
       const totalCount = typeof count === 'number' ? count : normalizedData.length;
 
       return {

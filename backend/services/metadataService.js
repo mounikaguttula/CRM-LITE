@@ -1133,14 +1133,15 @@ const metadataService = {
 
       let objPerm;
       if (dbPerm) {
+        const isValTrue = (v) => v === true || v === 'true' || v === 1 || v === 'TRUE';
         objPerm = {
-          canCreate: dbPerm.can_create !== false,
-          canRead: dbPerm.can_read !== false,
-          canUpdate: dbPerm.can_update !== false,
-          canEdit: dbPerm.can_update !== false,
-          canDelete: dbPerm.can_delete !== false,
-          viewAll: dbPerm.view_all !== false,
-          modifyAll: dbPerm.modify_all !== false,
+          canCreate: isValTrue(dbPerm.can_create),
+          canRead: isValTrue(dbPerm.can_read),
+          canUpdate: isValTrue(dbPerm.can_update),
+          canEdit: isValTrue(dbPerm.can_update),
+          canDelete: isValTrue(dbPerm.can_delete),
+          viewAll: isValTrue(dbPerm.view_all),
+          modifyAll: isValTrue(dbPerm.modify_all),
         };
       } else {
         const uRole = String(user?.role || '').toLowerCase();
