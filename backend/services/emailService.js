@@ -470,6 +470,39 @@ const emailService = {
     });
   },
 
+  // ─── 6. USER INVITE → Invited User Email ────────────────────────────────
+
+  sendUserInviteEmail: async (toEmail, firstName, orgName, inviterName, token) => {
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const setPasswordUrl = `${clientUrl}/login?resetToken=${token}`;
+
+    console.log('\n==================================================');
+    console.log(`📧 [USER INVITE EMAIL] Sent to: ${toEmail}`);
+    console.log(`🟢 SET PASSWORD LINK: ${setPasswordUrl}`);
+    console.log('==================================================\n');
+
+    const body = `
+      ${badgeRow('badge-user-plus.svg')}
+      <h2 style="text-align:center;margin:12px 0 6px;font-size:24px;color:#1e1b4b;font-weight:800;font-family:Arial,Helvetica,sans-serif;letter-spacing:-0.4px;">You're Invited!</h2>
+      <div style="width:36px;height:3px;background:#6366f1;border-radius:2px;margin:8px auto 20px;"></div>
+      <p style="font-size:15px;color:#1e293b;margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;">Hi <b style="color:#6366f1;font-family:Arial,Helvetica,sans-serif;">${firstName || 'there'}</b>,</p>
+      <p style="font-size:14.5px;color:#475569;line-height:1.65;margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;">
+        <b>${inviterName || 'An administrator'}</b> has invited you to join <b style="color:#1e1b4b;">${orgName}</b> on FounderCRM.<br/><br/>
+        Click the button below to set your password and access your account.
+      </p>
+      ${primaryBtn('Set Your Password →', setPasswordUrl, '#4f46e5')}
+      <p style="text-align:center;font-size:13px;color:#64748b;margin:16px 0 20px;font-family:Arial,Helvetica,sans-serif;">
+        This invite link will expire in <b style="color:#6366f1;">72 hours</b>.
+      </p>
+      ${noticeBox('icon-shield.svg', "If you weren't expecting this invite, you can safely ignore this email. No account will be created without your action.", '#f0f4ff', '#334155')}`;
+
+    return emailService.sendEmail({
+      to: toEmail,
+      subject: `You've been invited to ${orgName} on FounderCRM`,
+      html: wrapEmail(body, 'wave-purple.svg'),
+    });
+  },
+
 };
 
 module.exports = emailService;

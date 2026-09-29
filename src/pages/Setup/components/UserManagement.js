@@ -245,7 +245,7 @@ function UserManagement() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editModalUser, setEditModalUser] = useState(null);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', confirmPassword: '', role_id: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', role_id: '' });
   const [submitting, setSubmitting] = useState(false);
   const [updatingUser, setUpdatingUser] = useState(false);
   const [deleteModalUser, setDeleteModalUser] = useState(null);
@@ -376,10 +376,6 @@ function UserManagement() {
     e.preventDefault();
     setInviteError(null);
     if (!newUser.email || !newUser.name) return;
-    if (newUser.password !== newUser.confirmPassword) {
-      setInviteError("Passwords do not match!");
-      return;
-    }
     setSubmitting(true);
 
     const nameParts = newUser.name.trim().split(/\s+/);
@@ -392,7 +388,6 @@ function UserManagement() {
         email: newUser.email,
         first_name,
         last_name,
-        password: newUser.password,
         role_id: newUser.role_id,
       });
 
@@ -407,7 +402,7 @@ function UserManagement() {
 
       setUsers((prev) => [...prev, normalizedCreated]);
       setShowModal(false);
-      setNewUser({ name: '', email: '', password: '', confirmPassword: '', role_id: '' });
+      setNewUser({ name: '', email: '', role_id: '' });
       setToastMessage(`User "${normalizedCreated.name}" invited successfully!`);
       setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
@@ -658,43 +653,6 @@ function UserManagement() {
                 </div>
               </div>
 
-              {/* Create Password */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Create Password</label>
-                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
-                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
-                    <Lock size={17} />
-                  </div>
-                  <input
-                    type="password"
-                    required
-                    autoComplete="new-password"
-                    placeholder="Minimum 8 characters"
-                    value={newUser.password || ''}
-                    onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
-                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
-                  />
-                </div>
-              </div>
-
-              {/* Confirm Password */}
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#334155', marginBottom: 8 }}>Confirm Password</label>
-                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 12, overflow: 'hidden', height: 46, background: '#f8fafc' }}>
-                  <div style={{ width: 46, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e2e8f0', color: '#64748b', flexShrink: 0, background: '#ffffff' }}>
-                    <Lock size={17} />
-                  </div>
-                  <input
-                    type="password"
-                    required
-                    autoComplete="new-password"
-                    placeholder="Re-enter your password"
-                    value={newUser.confirmPassword || ''}
-                    onChange={(e) => setNewUser((p) => ({ ...p, confirmPassword: e.target.value }))}
-                    style={{ flex: 1, border: 'none', background: 'transparent', height: '100%', padding: '0 14px', fontSize: '0.88rem', color: '#334155', outline: 'none' }}
-                  />
-                </div>
-              </div>
 
               {/* Submit Button */}
               <button
@@ -720,8 +678,8 @@ function UserManagement() {
                 onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
                 onMouseLeave={(e) => e.currentTarget.style.filter = 'brightness(1)'}
               >
-                <CheckCircle2 size={18} />
-                <span>{submitting ? 'Creating User...' : 'Create User'}</span>
+                <Mail size={18} />
+                <span>{submitting ? 'Sending Invite...' : 'Send Invite'}</span>
               </button>
             </form>
           </div>

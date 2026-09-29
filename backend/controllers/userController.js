@@ -1,6 +1,21 @@
 const userService = require('../services/userService');
 const metadataService = require('../services/metadataService');
 const auditService = require('../services/auditService');
+const emailService = require('../services/emailService');
+const supabase = require('../config/supabase');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_change_in_production';
+
+// Shared in-memory invite token store (same as authController's activeResetTokens)
+// We import it from authController to share the same Map instance
+let activeResetTokens;
+try {
+  activeResetTokens = require('./authController').__resetTokens;
+} catch (_) {
+  activeResetTokens = new Map();
+}
 
 /**
  * User Controller
@@ -21,12 +36,50 @@ const roleService = require('../services/roleService');
 const inviteUser = async (req, res, next) => {
   try {
     const organizationId = req.user?.organization_id;
-    const { email, first_name, last_name, password, role_id } = req.body;
+    const { email, first_name, last_name, role_id } = req.body;
 
     // Verify user role assignment authority
     await roleService.canAssignUserRole(req.user, null, role_id, organizationId);
 
-    const newUser = await userService.inviteUser(organizationId, { email, first_name, last_name, password, role_id });
+    // Create user with no password (status: 'invited')
+    const newUser = await userService.inviteUser(organizationId, {
+      email,
+      first_name,
+      last_name,
+      password: null,
+      role_id,
+    });
+
+    // Generate a 72-hour invite token using the same JWT pattern as forgotPassword
+    try {
+      const tokenUuid = crypto.randomUUID();
+      const expiresAt = Date.now() + 72 * 60 * 60 * 1000; // 72 hours
+
+      // Store token in the shared reset tokens map
+      if (activeResetTokens) {
+        activeResetTokens.set(tokenUuid, { email, expiresAt, used: false });
+      }
+
+      const inviteToken = jwt.sign(
+        { email, type: 'password_reset', jti: tokenUuid },
+        JWT_SECRET,
+        { expiresIn: '72h' }
+      );
+
+      // Fetch org name for the email
+      const { data: org } = await supabase
+        .from('organization')
+        .select('organization_name')
+        .eq('id', organizationId)
+        .maybeSingle();
+
+      const orgName = org?.organization_name || 'Your Organization';
+      const inviterName = req.user?.name || `${req.user?.first_name || ''} ${req.user?.last_name || ''}`.trim() || 'An administrator';
+
+      await emailService.sendUserInviteEmail(email, first_name, orgName, inviterName, inviteToken);
+    } catch (mailErr) {
+      console.error('⚠️ Invite email could not be delivered:', mailErr.message || mailErr);
+    }
 
     auditService.logSetupActivity({
       organization_id: organizationId,
@@ -44,6 +97,7 @@ const inviteUser = async (req, res, next) => {
     next(err);
   }
 };
+
 
 const updateUser = async (req, res, next) => {
   try {

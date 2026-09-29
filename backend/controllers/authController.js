@@ -162,8 +162,16 @@ const verifyResetToken = async (req, res, next) => {
       .eq('email', email)
       .maybeSingle();
 
-    if (error || !user || user.status !== 'active') {
+    if (error || !user || (user.status !== 'active' && user.status !== 'invited')) {
       return errorResponse(res, 'The user account is no longer active or could not be found.', 401);
+    }
+
+    // If this was an invite token, activate the user account
+    if (user.status === 'invited') {
+      await supabase
+        .from('users')
+        .update({ status: 'active', updated_at: new Date().toISOString() })
+        .eq('id', user.id);
     }
 
     // 5. Generate standard long-lived token (7d)
@@ -319,4 +327,5 @@ module.exports = {
   logout,
   ping,
   idleTimeout,
+  __resetTokens: activeResetTokens,
 };
