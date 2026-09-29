@@ -204,90 +204,97 @@ export default function RolesPermissions() {
     });
   }, []);
 
-  // Construct initial hierarchy array from roles list
-  const buildInitialHierarchy = useCallback((sourceRoles) => {
-    const defaultDefs = [
-      {
-        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33',
-        roleMatcher: (rName) => rName.includes('admin') || rName.includes('administrator'),
-        defaultName: 'Administrator',
-        authorityDesc: 'Highest authority • Can manage all roles',
+  // Helper to determine styling icons and badges for any role (system or custom)
+  const getRoleStyleMeta = (rNameStr) => {
+    const s = String(rNameStr || '').toLowerCase();
+    if (s.includes('admin')) {
+      return {
         IconComponent: Crown,
         iconBg: '#8b5cf6',
         badgeBg: '#f3e8ff',
         badgeColor: '#7e22ce',
         badgeBorder: '#e9d5ff',
-      },
-      {
-        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a34',
-        roleMatcher: (rName) => rName === 'crm manager' || (rName.includes('manager') && !rName.includes('clone') && !rName.includes('relationship')),
-        defaultName: 'CRM Manager',
-        authorityDesc: 'Can manage CRM Manager Clone, CRM Executive, Relationship Manager, and Read Only User',
+      };
+    }
+    if (s.includes('integration')) {
+      return {
+        IconComponent: Network,
+        iconBg: '#f59e0b',
+        badgeBg: '#fef3c7',
+        badgeColor: '#b45309',
+        badgeBorder: '#fde68a',
+      };
+    }
+    if (s === 'crm manager' || (s.includes('manager') && !s.includes('clone') && !s.includes('relationship'))) {
+      return {
         IconComponent: User,
         iconBg: '#3b82f6',
         badgeBg: '#dbeafe',
         badgeColor: '#1e40af',
         badgeBorder: '#bfdbfe',
-      },
-      {
-        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a38',
-        roleMatcher: (rName) => rName.includes('clone'),
-        defaultName: 'CRM Manager Clone',
-        authorityDesc: 'Can manage CRM Executive, Relationship Manager, and Read Only User',
+      };
+    }
+    if (s.includes('clone')) {
+      return {
         IconComponent: GitBranch,
         iconBg: '#06b6d4',
         badgeBg: '#cffafe',
         badgeColor: '#0e7490',
         badgeBorder: '#a5f3fc',
-      },
-      {
-        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a36',
-        roleMatcher: (rName) => rName.includes('executive'),
-        defaultName: 'CRM Executive',
-        authorityDesc: 'No role-management rights',
+      };
+    }
+    if (s.includes('executive')) {
+      return {
         IconComponent: Briefcase,
         iconBg: '#f97316',
         badgeBg: '#ffedd5',
         badgeColor: '#c2410c',
         badgeBorder: '#fed7aa',
-      },
-      {
-        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a35',
-        roleMatcher: (rName) => rName.includes('relationship'),
-        defaultName: 'Relationship Manager',
-        authorityDesc: 'No role-management rights',
+      };
+    }
+    if (s.includes('relationship')) {
+      return {
         IconComponent: Heart,
         iconBg: '#ec4899',
         badgeBg: '#fce7f3',
         badgeColor: '#be185d',
         badgeBorder: '#fbcfe8',
-      },
-      {
-        id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a37',
-        roleMatcher: (rName) => rName.includes('read only') || rName.includes('viewer'),
-        defaultName: 'Read Only User',
-        authorityDesc: 'No role-management rights',
+      };
+    }
+    if (s.includes('read only') || s.includes('viewer')) {
+      return {
         IconComponent: Users,
         iconBg: '#10b981',
         badgeBg: '#dcfce7',
         badgeColor: '#15803d',
         badgeBorder: '#bbf7d0',
-      },
-    ];
+      };
+    }
+    return {
+      IconComponent: Shield,
+      iconBg: '#6366f1',
+      badgeBg: '#e0e7ff',
+      badgeColor: '#4338ca',
+      badgeBorder: '#c7d2fe',
+    };
+  };
 
-    const list = defaultDefs.map((def, idx) => {
-      const matched = (sourceRoles || []).find((r) => def.roleMatcher((r.role_name || r.name || '').toLowerCase()));
-      const roleObj = matched || { id: def.id, name: def.defaultName, role_name: def.defaultName };
+  // Construct initial hierarchy array dynamically from roles list
+  const buildInitialHierarchy = useCallback((sourceRoles) => {
+    if (!sourceRoles || sourceRoles.length === 0) return [];
+
+    const list = sourceRoles.map((roleObj, idx) => {
+      const rName = roleObj.name || roleObj.role_name || '';
+      const meta = getRoleStyleMeta(rName);
       return {
         ...roleObj,
         level: idx + 1,
         levelLabel: `Level ${idx + 1}`,
-        authorityDesc: def.authorityDesc,
-        IconComponent: def.IconComponent,
-        iconBg: def.iconBg,
-        badgeBg: def.badgeBg,
-        badgeColor: def.badgeColor,
-        badgeBorder: def.badgeBorder,
+        IconComponent: meta.IconComponent,
+        iconBg: meta.iconBg,
+        badgeBg: meta.badgeBg,
+        badgeColor: meta.badgeColor,
+        badgeBorder: meta.badgeBorder,
       };
     });
 
@@ -371,6 +378,17 @@ export default function RolesPermissions() {
           objects_count: 18,
           custom_objects_count: 6,
           updated_at: '30 Jul 2026',
+          status: 'active',
+        },
+        {
+          id: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a38',
+          name: 'CRM Manager Clone',
+          role_name: 'CRM Manager Clone',
+          description: 'CRM CRUD access according to assigned department/team scope.',
+          user_count: 14,
+          objects_count: 18,
+          custom_objects_count: 6,
+          updated_at: '29 Jul 2026',
           status: 'active',
         },
         {
@@ -822,7 +840,13 @@ export default function RolesPermissions() {
         status: 'active',
       };
 
-      setRoles((prev) => [createdObj, ...prev]);
+      setRoles((prev) => {
+        const updated = [...prev, createdObj];
+        const newHierarchy = buildInitialHierarchy(updated);
+        setHierarchyList(newHierarchy);
+        setOriginalHierarchyList(newHierarchy);
+        return updated;
+      });
       setShowCreateModal(false);
       setNewRoleData({ name: '', description: '', cloneFrom: '' });
       showToast(`Role "${createdObj.name}" created successfully.`);

@@ -532,7 +532,12 @@ function Setup() {
           if (Array.isArray(obj?.fields)) {
             obj.fields.forEach((f) => {
               const fName = String(f.api_name || f.name || '').toLowerCase();
-              if (f.is_custom === true || fName.endsWith('__c')) {
+              const isCustom = Boolean(
+                f.is_custom === true ||
+                f.is_system === false ||
+                fName.endsWith('__c')
+              );
+              if (isCustom) {
                 customFldCount++;
               }
             });

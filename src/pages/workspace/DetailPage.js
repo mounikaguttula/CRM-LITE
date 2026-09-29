@@ -994,10 +994,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       apiGet('/objects/contacts').catch(() => apiGet('/contacts')).catch(() => []),
       apiGet('/objects/deals').catch(() => apiGet('/deals')).catch(() => []),
       apiGet('/users').catch(() => []),
-      String(objectTypeId).toLowerCase().includes('deal') ? apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9').catch(() => []) : Promise.resolve([]),
-      String(objectTypeId).toLowerCase().includes('deal') ? apiGet('/objects/8790325a-b8d5-4445-bccb-ebe354a46919').catch(() => []) : Promise.resolve([]),
-      String(objectTypeId).toLowerCase().includes('campaign') ? apiGet('/objects/d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45').catch(() => []) : Promise.resolve([]),
-      String(objectTypeId).toLowerCase().includes('form') ? apiGet('/objects/d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41').catch(() => []) : Promise.resolve([])
+      String(objectTypeId).toLowerCase().includes('deal') ? apiGet('/objects/product').catch(() => apiGet('/objects/products')).catch(() => []) : Promise.resolve([]),
+      String(objectTypeId).toLowerCase().includes('deal') ? apiGet('/objects/deal_line_item').catch(() => apiGet('/objects/deal_line_items')).catch(() => []) : Promise.resolve([]),
+      String(objectTypeId).toLowerCase().includes('campaign') ? apiGet('/objects/form_inquiry').catch(() => apiGet('/objects/form_inquiries')).catch(() => []) : Promise.resolve([]),
+      String(objectTypeId).toLowerCase().includes('form') ? apiGet('/objects/lead').catch(() => apiGet('/objects/leads')).catch(() => []) : Promise.resolve([])
     ])
       .then(([rec, fList, compListRes, contactListRes, dealListRes, userListRes, prodRes, lineItemRes, formRes, leadRes]) => {
         if (!isMounted) return;
@@ -1143,7 +1143,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     const currentObjKey = String(objectTypeId).toLowerCase();
     if (currentObjKey.includes('deal') && recordId) {
       try {
-        const lineItemObjId = '8790325a-b8d5-4445-bccb-ebe354a46919';
+        const lineItemObjId = 'deal_line_item';
         
         const currentItemsMap = {};
         lineItems.forEach(item => {
@@ -1249,7 +1249,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     if (!selectedFormToLink || linkingForm) return;
     setLinkingForm(true);
     try {
-      await apiPut(`/objects/d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a45/${selectedFormToLink}`, { campaign_id: recordId });
+      await apiPut(`/objects/form_inquiry/${selectedFormToLink}`, { campaign_id: recordId }).catch(() => apiPut(`/form_inquiry/${selectedFormToLink}`, { campaign_id: recordId }));
       showToast('Form linked successfully.', 'success');
       
       // Update local state
@@ -1659,7 +1659,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const rawEffectiveFields = fields.length > 0 ? fields : (rawMeta?.fields || []);
 
   const objDetailApiName = String(rawMeta?.api_name || objectTypeId || '').toLowerCase();
-  const isDealObj = objDetailApiName.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441';
+  const isDealObj = objDetailApiName.includes('deal') || String(objectTypeId).toLowerCase().includes('deal');
 
   const readableFields = rawEffectiveFields.filter((f) => {
     const fNameLower = String(f.name || f.api_name || '').toLowerCase();

@@ -124,7 +124,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       if (needs.companies) reqEntries.push(['companies', apiGet('/objects/companies?page=1&pageSize=25').catch(() => apiGet('/objects/company?page=1&pageSize=25')).catch(() => apiGet('/companies?page=1&pageSize=25')).catch(() => apiGet('/company?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
       if (needs.contacts)  reqEntries.push(['contacts',  apiGet('/objects/contacts?page=1&pageSize=25').catch(() => apiGet('/objects/contact?page=1&pageSize=25')).catch(() => apiGet('/contacts?page=1&pageSize=25')).catch(() => apiGet('/contact?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
       if (needs.deals)     reqEntries.push(['deals',     apiGet('/objects/deals?page=1&pageSize=25').catch(() => apiGet('/deals?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
-      if (needs.products)  reqEntries.push(['products',  apiGet('/objects/24b1b608-4cee-4623-a745-6f64052625e9?page=1&pageSize=25').catch(() => ({ data: [] }))]);
+      if (needs.products)  reqEntries.push(['products',  apiGet('/objects/product?page=1&pageSize=25').catch(() => apiGet('/objects/products?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
 
       const keys    = reqEntries.map(([k]) => k);
       const results = await Promise.all(reqEntries.map(([, p]) => p));
@@ -282,7 +282,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
   const effectiveFields = fields.length > 0 ? [...fields] : [...(rawMeta?.fields || [])];
 
   const objApiName = String(rawMeta?.api_name || objectTypeId || '').toLowerCase();
-  const isDealEditObj = objApiName.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441';
+  const isDealEditObj = objApiName.includes('deal') || String(objectTypeId).toLowerCase().includes('deal');
   const fpPerms = permissions?.fieldPermissions || {};
   const visibleFields = effectiveFields
     .filter((f) => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'created_by' && f.name !== 'updated_at' && f.name !== 'updated_by')
@@ -626,26 +626,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         ? f.picklistValues
         : null;
 
-      let optionsList = rawOptions;
-      if (!optionsList || optionsList.length === 0) {
-        const name = (f.name || '').toLowerCase();
-        const label = (f.label || '').toLowerCase();
-        if (name.includes('industry') || label.includes('industry')) {
-          optionsList = ['Manufacturing', 'Retail', 'Healthcare', 'Education', 'Financial Services', 'IT / Software', 'Telecommunications', 'Construction', 'Real Estate', 'Transportation', 'Energy / Utilities', 'Government', 'Agriculture', 'Hospitality', 'Professional Services'];
-        } else if (name.includes('score') || label.includes('score')) {
-          optionsList = ['1', '2', '3', '4', '5'];
-        } else if (name.includes('contact') || label.includes('preferred contact')) {
-          optionsList = ['Email', 'Mobile'];
-        } else if (name === 'source' || name === 'lead_source' || label.includes('source')) {
-          optionsList = ['QR Scan', 'Website', 'Referral', 'Cold Outbound', 'Partner', 'Trade Show', 'Webinar Registration', 'Form Submission', 'CSV Import', 'Netsuite PR', 'Other'];
-        } else if (name === 'status' || label.includes('status')) {
-          optionsList = ['New', 'Qualified', 'Not Qualified', 'Converted'];
-        } else if (name === 'stage' || label.includes('stage')) {
-          optionsList = ['Qualification', 'Needs Analysis', 'Proposal/Quote', 'Negotiation/Review', 'Closed Won', 'Closed Lost'];
-        } else {
-          optionsList = ['Active', 'Inactive'];
-        }
-      }
+      const optionsList = rawOptions || [];
 
       fieldEl = (
         <CustomPicklist

@@ -252,11 +252,9 @@ const getConfigurationOverview = async (req, res, next) => {
 
     const client = require('../config/supabase').supabaseAdmin || require('../config/supabase').supabase;
 
-    // 1. Modules count
-    const { count: modulesCount } = await client
-      .from('object_type_definitions')
-      .select('id', { count: 'exact', head: true })
-      .or(`organization_id.eq.${organizationId},organization_id.is.null`);
+    // 1. Modules count (fetching active user-facing module definitions)
+    const objects = await metadataService.getObjectDefinitions(organizationId);
+    const modulesCount = Array.isArray(objects) ? objects.length : 0;
 
     // 2. Fields count
     const { count: fieldsCount } = await client
