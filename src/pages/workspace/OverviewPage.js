@@ -3172,15 +3172,16 @@ function ObjectListContent({ objectTypeId }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? 'rgba(79, 70, 229, 0.08)' : 'transparent',
-                border: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '1px solid #4f46e5' : '1px solid var(--panel-border)',
-                color: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '#4f46e5' : 'var(--text-dim)',
-                padding: '8px 14px',
+                background: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '#4f46e5' : '#ffffff',
+                border: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '1px solid #4f46e5' : '1px solid #cbd5e1',
+                color: (sortOrder !== 'desc' || sortBy !== 'created_at' || filterStatus !== 'ALL') ? '#ffffff' : '#374151',
+                padding: '8px 16px',
                 borderRadius: 10,
-                fontSize: 12.5,
+                fontSize: 13,
                 fontWeight: 600,
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
               }}
             >
               <SlidersHorizontal size={13} />
@@ -3242,7 +3243,6 @@ function ObjectListContent({ objectTypeId }) {
                   >
                     <option value="created_at">Created Date</option>
                     <option value="name">Name / Title</option>
-                    <option value="email">Email</option>
                     <option value="status">Status</option>
                   </select>
                 </div>
@@ -3297,6 +3297,47 @@ function ObjectListContent({ objectTypeId }) {
                     </button>
                   </div>
                 </div>
+
+                {/* Filter by Status – shown for objects that have a status field */}
+                {!isDealObjList && (
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', marginBottom: 8 }}>
+                      Filter by Status
+                    </label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {[
+                        { value: 'ALL', label: 'All' },
+                        { value: 'New', label: 'New' },
+                        { value: 'Qualified', label: 'Qualified' },
+                        { value: 'Not Qualified', label: 'Not Qualified' },
+                        { value: 'Converted', label: 'Converted' },
+                      ].map(({ value, label }) => {
+                        const isActive = filterStatus === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setFilterStatus(value)}
+                            style={{
+                              padding: '4px 11px',
+                              borderRadius: 20,
+                              fontSize: 11.5,
+                              fontWeight: isActive ? 700 : 500,
+                              border: isActive ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
+                              background: isActive ? '#eef2ff' : '#f8fafc',
+                              color: isActive ? '#4f46e5' : '#475569',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Reset Filter Button */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
@@ -3552,8 +3593,32 @@ function ObjectListContent({ objectTypeId }) {
 
                       <td style={{ padding: '14px 18px' }}>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                          <IconBtn icon={Mail} />
-                          <IconBtn icon={Phone} />
+                          {/* Open record button */}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleRowClick(r.id); }}
+                            className="row-open-btn"
+                            title="Open record"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              padding: '6px 12px',
+                              borderRadius: 8,
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              border: '1px solid #c7d2fe',
+                              background: '#eef2ff',
+                              color: '#4338ca',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s ease, border-color 0.15s ease',
+                              whiteSpace: 'nowrap',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = '#4f46e5'; e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.borderColor = '#4f46e5'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.color = '#4338ca'; e.currentTarget.style.borderColor = '#c7d2fe'; }}
+                          >
+                            Open <ArrowUpRight size={12} />
+                          </button>
                           {canDeleteRecord && (
                             (() => {
                               const isConvertedLead = String(objectTypeId || '').toLowerCase().includes('lead') && (
