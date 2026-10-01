@@ -1451,7 +1451,7 @@ const objectService = {
     // 4. Duplicate checks (in-CSV + existing DB)
     // Option C: Fetch existing records ONCE and reuse for all unique fields.
     // Previously each unique field triggered a separate full-table scan.
-    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code');
+    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code' || f.name === 'hubspot_reference_id');
     const seenCsvValuesMap = new Map();
     uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Set()));
 

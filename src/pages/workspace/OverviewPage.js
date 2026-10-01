@@ -1926,6 +1926,7 @@ function mapHeaderToField(rawHeader, allowedMap) {
   else if (cleanAlpha === 'address' || cleanAlpha === 'street' || cleanAlpha === 'streetaddress') candidateKey = 'address';
   else if (cleanAlpha === 'expectedclosedate' || cleanAlpha === 'closedate' || cleanAlpha === 'closingdate' || cleanAlpha === 'targetdate') candidateKey = 'expected_close_date';
   else if (cleanAlpha === 'description' || cleanAlpha === 'note' || cleanAlpha === 'notes' || cleanAlpha === 'memo' || cleanAlpha === 'comments') candidateKey = 'description';
+  else if (cleanAlpha === 'recordid' || cleanAlpha === 'hubspotrefernceid' || cleanAlpha === 'hubspotrefernceid' || cleanAlpha === 'hubspotreferenceid' || cleanAlpha === 'hubspotid' || cleanAlpha === 'hsrecordid' || cleanAlpha === 'hsobjectid' || cleanAlpha === 'hubspotrefid') candidateKey = 'hubspot_reference_id';
 
   if (!candidateKey) {
     candidateKey = rawLower.replace(/[^a-z0-9_]/g, '_');
