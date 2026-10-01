@@ -6,6 +6,12 @@ import { useAuth } from '../../context/AuthContext';
 import { apiGet, apiPost, apiDelete } from '../../api/client';
 import AccessDenied from '../../components/AccessDenied';
 import {
+  getObjectAllowedFields,
+  mapHeaderToField,
+  getMeaningfulFieldKeys,
+  buildFieldMetadataList,
+} from '../../utils/csvImportMapping';
+import {
   Users,
   Columns3,
   Search,
@@ -1787,165 +1793,7 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
   return String(val);
 }
 
-function getMeaningfulFieldKeys(objectTypeId, fieldsList = []) {
-  const cleanKey = String(objectTypeId || '').toLowerCase();
 
-  if (cleanKey.includes('contact') || cleanKey.includes('person')) {
-    return new Set(['first_name', 'last_name', 'name', 'contact_name', 'email', 'alternate_email', 'phone', 'company', 'title']);
-  }
-  if (cleanKey.includes('company') || cleanKey.includes('account')) {
-    return new Set(['name', 'company_name', 'account_name', 'website', 'domain', 'phone', 'industry', 'number_of_employees', 'address']);
-  }
-  if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
-    return new Set(['name', 'deal_name', 'opportunity_name', 'amount', 'stage', 'expected_close_date', 'company', 'company_id', 'contact', 'contact_id']);
-  }
-  if (cleanKey.includes('lead')) {
-    return new Set(['first_name', 'last_name', 'name', 'email', 'alternate_email', 'phone', 'company', 'title', 'lead_source']);
-  }
-
-  const GENERIC_SET = new Set(['description', 'custom_description', 'notes', 'memo', 'comments', 'created_at', 'updated_at', 'created_by', 'updated_by', 'owner', 'owner_id', 'status', 'is_deleted', 'id', '_id', 'organization_id']);
-  const meaningfulSet = new Set();
-  for (const f of fieldsList) {
-    const fname = String(f.name || f.api_name || '').toLowerCase();
-    if (fname && !GENERIC_SET.has(fname)) {
-      meaningfulSet.add(fname);
-    }
-  }
-  if (meaningfulSet.size === 0) {
-    meaningfulSet.add('name');
-    meaningfulSet.add('title');
-    meaningfulSet.add('subject');
-  }
-  return meaningfulSet;
-}
-
-function getObjectAllowedFields(objectTypeId, fieldsList = []) {
-  const cleanKey = String(objectTypeId || '').toLowerCase();
-  const allowedMap = new Map();
-
-  for (const f of fieldsList) {
-    const fname = f.name || f.api_name;
-    const flabel = f.label || f.display_name || fname;
-    if (fname) {
-      allowedMap.set(String(fname).toLowerCase(), { key: fname, label: String(flabel) });
-    }
-  }
-
-  if (cleanKey.includes('contact') || cleanKey.includes('person')) {
-    allowedMap.set('first_name', { key: 'first_name', label: 'First Name' });
-    allowedMap.set('last_name', { key: 'last_name', label: 'Last Name' });
-    allowedMap.set('email', { key: 'email', label: 'Email' });
-    allowedMap.set('alternate_email', { key: 'alternate_email', label: 'Alternate Email' });
-    allowedMap.set('phone', { key: 'phone', label: 'Phone' });
-    allowedMap.set('company', { key: 'company', label: 'Company' });
-    allowedMap.set('title', { key: 'title', label: 'Job Title' });
-    allowedMap.set('name', { key: 'name', label: 'Full Name' });
-    allowedMap.set('contact_name', { key: 'contact_name', label: 'Contact Name' });
-    allowedMap.set('description', { key: 'description', label: 'Description' });
-    allowedMap.set('address', { key: 'address', label: 'Address' });
-    allowedMap.set('city', { key: 'city', label: 'City' });
-    allowedMap.set('state', { key: 'state', label: 'State' });
-    allowedMap.set('country', { key: 'country', label: 'Country' });
-  } else if (cleanKey.includes('company') || cleanKey.includes('account')) {
-    allowedMap.set('name', { key: 'name', label: 'Company Name' });
-    allowedMap.set('company_name', { key: 'company_name', label: 'Company Name' });
-    allowedMap.set('industry', { key: 'industry', label: 'Industry' });
-    allowedMap.set('website', { key: 'website', label: 'Website' });
-    allowedMap.set('domain', { key: 'domain', label: 'Domain' });
-    allowedMap.set('number_of_employees', { key: 'number_of_employees', label: 'Employees' });
-    allowedMap.set('phone', { key: 'phone', label: 'Phone' });
-    allowedMap.set('city', { key: 'city', label: 'City' });
-    allowedMap.set('state', { key: 'state', label: 'State' });
-    allowedMap.set('country', { key: 'country', label: 'Country' });
-    allowedMap.set('address', { key: 'address', label: 'Address' });
-    allowedMap.set('annual_revenue', { key: 'annual_revenue', label: 'Annual Revenue' });
-    allowedMap.set('description', { key: 'description', label: 'Description' });
-  } else if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
-    allowedMap.set('name', { key: 'name', label: 'Deal Name' });
-    allowedMap.set('deal_name', { key: 'deal_name', label: 'Deal Name' });
-    allowedMap.set('amount', { key: 'amount', label: 'Amount' });
-    allowedMap.set('stage', { key: 'stage', label: 'Stage' });
-    allowedMap.set('expected_close_date', { key: 'expected_close_date', label: 'Close Date' });
-    allowedMap.set('probability', { key: 'probability', label: 'Probability' });
-    allowedMap.set('company', { key: 'company', label: 'Company' });
-    allowedMap.set('company_id', { key: 'company_id', label: 'Company ID' });
-    allowedMap.set('contact', { key: 'contact', label: 'Contact' });
-    allowedMap.set('contact_id', { key: 'contact_id', label: 'Contact ID' });
-    allowedMap.set('description', { key: 'description', label: 'Description' });
-  } else if (cleanKey.includes('lead')) {
-    allowedMap.set('first_name', { key: 'first_name', label: 'First Name' });
-    allowedMap.set('last_name', { key: 'last_name', label: 'Last Name' });
-    allowedMap.set('email', { key: 'email', label: 'Email' });
-    allowedMap.set('alternate_email', { key: 'alternate_email', label: 'Alternate Email' });
-    allowedMap.set('phone', { key: 'phone', label: 'Phone' });
-    allowedMap.set('company', { key: 'company', label: 'Company' });
-    allowedMap.set('title', { key: 'title', label: 'Job Title' });
-    allowedMap.set('lead_source', { key: 'lead_source', label: 'Lead Source' });
-    allowedMap.set('status', { key: 'status', label: 'Status' });
-    allowedMap.set('name', { key: 'name', label: 'Lead Name' });
-    allowedMap.set('description', { key: 'description', label: 'Description' });
-  } else {
-    allowedMap.set('name', { key: 'name', label: 'Name' });
-    allowedMap.set('title', { key: 'title', label: 'Title' });
-    allowedMap.set('status', { key: 'status', label: 'Status' });
-    allowedMap.set('description', { key: 'description', label: 'Description' });
-  }
-
-  return allowedMap;
-}
-
-function mapHeaderToField(rawHeader, allowedMap) {
-  if (!rawHeader) return null;
-  const rawLower = String(rawHeader).toLowerCase().trim();
-  const cleanAlpha = rawLower.replace(/[^a-z0-9]/g, '');
-
-  let candidateKey = null;
-
-  // Evaluate relationship-specific headers FIRST before generic name matching
-  if (cleanAlpha === 'companyid' || cleanAlpha === 'companyuuid' || cleanAlpha === 'parentid') candidateKey = 'company_id';
-  else if (cleanAlpha === 'contactid' || cleanAlpha === 'contactuuid' || cleanAlpha === 'secondaryparentid') candidateKey = 'contact_id';
-  else if (cleanAlpha === 'company' || cleanAlpha === 'companyname' || cleanAlpha === 'organization' || cleanAlpha === 'organizationname' || cleanAlpha === 'account' || cleanAlpha === 'accountname' || cleanAlpha === 'org') candidateKey = 'company';
-  else if (cleanAlpha === 'contact' || cleanAlpha === 'contactname' || cleanAlpha === 'primarycontact' || cleanAlpha === 'personname') candidateKey = 'contact';
-  else if (cleanAlpha === 'name' || cleanAlpha === 'fullname' || cleanAlpha === 'dealname' || cleanAlpha === 'opportunityname') candidateKey = 'name';
-  else if (cleanAlpha === 'first' || cleanAlpha === 'firstname' || cleanAlpha === 'fname' || cleanAlpha === 'givenname') candidateKey = 'first_name';
-  else if (cleanAlpha === 'last' || cleanAlpha === 'lastname' || cleanAlpha === 'lname' || cleanAlpha === 'surname' || cleanAlpha === 'familyname') candidateKey = 'last_name';
-  else if (cleanAlpha === 'email' || cleanAlpha === 'emailaddress' || cleanAlpha === 'workemail' || cleanAlpha === 'primaryemail') candidateKey = 'email';
-  else if (cleanAlpha === 'alternateemail' || cleanAlpha === 'alternateemailid' || cleanAlpha === 'secondaryemail' || cleanAlpha === 'altemail' || cleanAlpha === 'otheremail') candidateKey = 'alternate_email';
-  else if (cleanAlpha === 'phone' || cleanAlpha === 'phonenumber' || cleanAlpha === 'telephone' || cleanAlpha === 'mobile' || cleanAlpha === 'tel' || cleanAlpha === 'cell') candidateKey = 'phone';
-  else if (cleanAlpha === 'title' || cleanAlpha === 'jobtitle' || cleanAlpha === 'designation' || cleanAlpha === 'position' || cleanAlpha === 'role') candidateKey = 'title';
-  else if (cleanAlpha === 'leadsource' || cleanAlpha === 'source') candidateKey = 'lead_source';
-  else if (cleanAlpha === 'status') candidateKey = 'status';
-  else if (cleanAlpha === 'stage' || cleanAlpha === 'dealstage' || cleanAlpha === 'pipelinestage' || cleanAlpha === 'opportunitystage') candidateKey = 'stage';
-  else if (cleanAlpha === 'amount' || cleanAlpha === 'dealvalue' || cleanAlpha === 'value' || cleanAlpha === 'price' || cleanAlpha === 'revenue' || cleanAlpha === 'annualrevenue' || cleanAlpha === 'total') candidateKey = 'amount';
-  else if (cleanAlpha === 'industry' || cleanAlpha === 'sector') candidateKey = 'industry';
-  else if (cleanAlpha === 'website' || cleanAlpha === 'domain' || cleanAlpha === 'url' || cleanAlpha === 'web') candidateKey = 'website';
-  else if (cleanAlpha === 'employees' || cleanAlpha === 'numberofemployees' || cleanAlpha === 'companysize' || cleanAlpha === 'noofemployees') candidateKey = 'number_of_employees';
-  else if (cleanAlpha === 'city' || cleanAlpha === 'town') candidateKey = 'city';
-  else if (cleanAlpha === 'state' || cleanAlpha === 'province' || cleanAlpha === 'region') candidateKey = 'state';
-  else if (cleanAlpha === 'country' || cleanAlpha === 'nation') candidateKey = 'country';
-  else if (cleanAlpha === 'address' || cleanAlpha === 'street' || cleanAlpha === 'streetaddress') candidateKey = 'address';
-  else if (cleanAlpha === 'expectedclosedate' || cleanAlpha === 'closedate' || cleanAlpha === 'closingdate' || cleanAlpha === 'targetdate') candidateKey = 'expected_close_date';
-  else if (cleanAlpha === 'description' || cleanAlpha === 'note' || cleanAlpha === 'notes' || cleanAlpha === 'memo' || cleanAlpha === 'comments') candidateKey = 'description';
-  else if (cleanAlpha === 'recordid' || cleanAlpha === 'hubspotrefernceid' || cleanAlpha === 'hubspotrefernceid' || cleanAlpha === 'hubspotreferenceid' || cleanAlpha === 'hubspotid' || cleanAlpha === 'hsrecordid' || cleanAlpha === 'hsobjectid' || cleanAlpha === 'hubspotrefid') candidateKey = 'hubspot_reference_id';
-
-  if (!candidateKey) {
-    candidateKey = rawLower.replace(/[^a-z0-9_]/g, '_');
-  }
-
-  if (allowedMap.has(candidateKey.toLowerCase())) {
-    return allowedMap.get(candidateKey.toLowerCase());
-  }
-
-  for (const [mapKey, fieldMeta] of allowedMap.entries()) {
-    const cleanMapKey = mapKey.replace(/[^a-z0-9]/g, '');
-    const cleanLabel = (fieldMeta.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (cleanAlpha === cleanMapKey || cleanAlpha === cleanLabel) {
-      return fieldMeta;
-    }
-  }
-
-  return null;
-}
 
 function ObjectListContent({ objectTypeId }) {
   const { objectTypes, permissions, currentUser, organization, company } = useWorkspace();
@@ -2806,7 +2654,7 @@ function ObjectListContent({ objectTypeId }) {
     document.body.removeChild(link);
   };
 
-  const handleFileProcess = (file) => {
+  const handleFileProcess = async (file) => {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.csv')) {
       showToast('Please select a valid .csv file.', 'error');
@@ -2815,6 +2663,23 @@ function ObjectListContent({ objectTypeId }) {
 
     resetImportState();
     setSelectedFile(file);
+
+    let latestFields = backendFields;
+    try {
+      const fieldRes = await apiGet(`/metadata/objects/${objectTypeId}/fields`)
+        .catch(() => apiGet(`/objects/${objectTypeId}/fields`))
+        .catch(() => null);
+
+      const fetchedList = Array.isArray(fieldRes) ? fieldRes : fieldRes?.data || fieldRes?.fields || [];
+      if (fetchedList && fetchedList.length > 0) {
+        latestFields = fetchedList;
+        setBackendFields(fetchedList);
+      }
+    } catch (err) {
+      console.warn('[CSV Import] Could not refresh latest field metadata:', err?.message);
+    }
+
+    const fieldsList = (latestFields && latestFields.length > 0) ? latestFields : (rawMeta?.fields || meta?.fields || []);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -2829,9 +2694,8 @@ function ObjectListContent({ objectTypeId }) {
       const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
       
       const cleanObjKey = String(objectTypeId || '').toLowerCase();
-      const fieldsList = (backendFields && backendFields.length > 0) ? backendFields : (rawMeta?.fields || meta?.fields || []);
 
-      const allowedMap = getObjectAllowedFields(cleanObjKey, fieldsList);
+      const fieldMetadataList = getObjectAllowedFields(cleanObjKey, fieldsList);
       const meaningfulKeys = getMeaningfulFieldKeys(cleanObjKey, fieldsList);
 
       const matchedList = [];
@@ -2839,7 +2703,7 @@ function ObjectListContent({ objectTypeId }) {
       const headerMap = [];
 
       rawHeaders.forEach((h) => {
-        const fieldMatch = mapHeaderToField(h, allowedMap);
+        const fieldMatch = mapHeaderToField(h, fieldMetadataList);
         if (fieldMatch) {
           if (!matchedList.some(m => m.key === fieldMatch.key)) {
             matchedList.push(fieldMatch);
@@ -2857,7 +2721,7 @@ function ObjectListContent({ objectTypeId }) {
       const meaningfulMatched = matchedList.filter(f => meaningfulKeys.has(String(f.key).toLowerCase()));
 
       if (meaningfulMatched.length === 0) {
-        const sampleLabels = Array.from(allowedMap.values())
+        const sampleLabels = fieldMetadataList
           .filter(f => meaningfulKeys.has(String(f.key).toLowerCase()))
           .slice(0, 5)
           .map(f => f.label);
@@ -2950,7 +2814,7 @@ function ObjectListContent({ objectTypeId }) {
       }
 
       if (parsedList.length === 0) {
-        const sampleLabels = Array.from(allowedMap.values())
+        const sampleLabels = fieldMetadataList
           .filter(f => meaningfulKeys.has(String(f.key).toLowerCase()))
           .slice(0, 5)
           .map(f => f.label);
