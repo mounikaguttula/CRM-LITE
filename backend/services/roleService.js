@@ -104,19 +104,22 @@ class RoleService {
       }
     }
 
-    // Fetch system template roles (organization_id is null or is_system = true)
-    let sysRoles = [];
+    // Fetch global system template roles (organization_id is null)
     const { data: systemData } = await supabase
       .from('roles')
       .select('*')
-      .or('organization_id.is.null,is_system.eq.true')
+      .is('organization_id', null)
       .order('created_at', { ascending: true });
 
-    if (systemData && systemData.length > 0) {
-      sysRoles = systemData;
-    } else {
-      sysRoles = DEFAULT_ROLES;
-    }
+    let sysRoles = Array.isArray(systemData) ? [...systemData] : [];
+    const sysNames = new Set(sysRoles.map((sr) => (sr.role_name || sr.name || '').toLowerCase()));
+    DEFAULT_ROLES.forEach((dr) => {
+      const drName = (dr.role_name || dr.name || '').toLowerCase();
+      if (!sysNames.has(drName)) {
+        sysRoles.push(dr);
+        sysNames.add(drName);
+      }
+    });
 
     // Merge custom org roles with standard system template roles so all standard roles are always available
     const combined = [...orgRoles];

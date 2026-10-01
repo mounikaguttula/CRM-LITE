@@ -464,6 +464,30 @@ const metadataService = {
       }
     });
 
+    // Ensure status platform field has accurate picklist_values per object type if not set
+    const lowerObjKey = String(objectKey || '').toLowerCase();
+    allFields.forEach((f, idx) => {
+      if (f.name === 'status') {
+        if (!f.picklist_values && !f.options) {
+          let statusOptions = ['Active', 'Inactive'];
+          if (lowerObjKey.includes('lead')) {
+            statusOptions = ['New', 'Qualified', 'Not Qualified', 'Converted'];
+          } else if (lowerObjKey.includes('company') || lowerObjKey.includes('account')) {
+            statusOptions = ['Active', 'Inactive'];
+          } else if (lowerObjKey.includes('contact')) {
+            statusOptions = ['Active', 'Inactive'];
+          } else if (lowerObjKey.includes('deal')) {
+            statusOptions = ['Active', 'Cancelled', 'Closed', 'Hold'];
+          }
+          allFields[idx] = {
+            ...f,
+            picklist_values: statusOptions,
+            options: statusOptions,
+          };
+        }
+      }
+    });
+
 
     return {
       definition: objDef,

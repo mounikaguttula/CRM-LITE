@@ -1926,6 +1926,7 @@ function mapHeaderToField(rawHeader, allowedMap) {
   else if (cleanAlpha === 'address' || cleanAlpha === 'street' || cleanAlpha === 'streetaddress') candidateKey = 'address';
   else if (cleanAlpha === 'expectedclosedate' || cleanAlpha === 'closedate' || cleanAlpha === 'closingdate' || cleanAlpha === 'targetdate') candidateKey = 'expected_close_date';
   else if (cleanAlpha === 'description' || cleanAlpha === 'note' || cleanAlpha === 'notes' || cleanAlpha === 'memo' || cleanAlpha === 'comments') candidateKey = 'description';
+  else if (cleanAlpha === 'recordid' || cleanAlpha === 'hubspotrefernceid' || cleanAlpha === 'hubspotrefernceid' || cleanAlpha === 'hubspotreferenceid' || cleanAlpha === 'hubspotid' || cleanAlpha === 'hsrecordid' || cleanAlpha === 'hsobjectid' || cleanAlpha === 'hubspotrefid') candidateKey = 'hubspot_reference_id';
 
   if (!candidateKey) {
     candidateKey = rawLower.replace(/[^a-z0-9_]/g, '_');
@@ -2005,7 +2006,7 @@ function ObjectListContent({ objectTypeId }) {
   const [backendFields, setBackendFields] = useState([]);
   const [lookupMap, setLookupMap] = useState({});
 
-  // 1. Reset search & pagination when switching object types
+  // 1. Reset search, filter & pagination when switching object types
   useEffect(() => {
     setCurrentPage(1);
     setQuery('');
@@ -2013,6 +2014,7 @@ function ObjectListContent({ objectTypeId }) {
     setRecords([]);
     setTotalServerRecords(0);
     setServerTotalPages(1);
+    setFilterStatus('ALL');
   }, [objectTypeId]);
 
   // 2. Debounce search query input (250ms) and reset page to 1 on search change
@@ -2279,7 +2281,33 @@ function ObjectListContent({ objectTypeId }) {
   };
 
   const humanize = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
-  const isDealObjList = cleanObjKey.includes('deal') || objectTypeId === 'd3147bfb-5a67-4dc7-8dfd-970041d3e441' || (rawMeta && String(rawMeta.api_name || '').toLowerCase() === 'deal');
+  const isDealObjList = useMemo(() => {
+    const cleanKey = String(objectTypeId || '').toLowerCase();
+    const rawApiName = String(rawMeta?.api_name || rawMeta?.name || '').toLowerCase();
+    const rawDisplayName = String(rawMeta?.displayName || rawMeta?.pluralDisplayName || meta?.displayName || meta?.pluralDisplayName || '').toLowerCase();
+    return (
+      cleanKey.includes('deal') ||
+      rawApiName.includes('deal') ||
+      rawDisplayName.includes('deal')
+    );
+  }, [objectTypeId, rawMeta, meta]);
+
+  const hasStageField = useMemo(() => {
+    if (isDealObjList) return true;
+    return (backendFields || []).some((f) => {
+      const fn = String(f.name || f.api_name || f.id || '').toLowerCase();
+      return fn === 'stage';
+    });
+  }, [isDealObjList, backendFields]);
+
+  const hasStatusField = useMemo(() => {
+    if (isDealObjList) return false;
+    return (backendFields || []).some((f) => {
+      const fn = String(f.name || f.api_name || f.id || '').toLowerCase();
+      const ft = String(f.type || f.field_type || '').toLowerCase();
+      return fn === 'status' || ft === 'status';
+    });
+  }, [isDealObjList, backendFields]);
 
   // 1. Map backend metadata fields to column definitions ({ key, label, type })
   const allColumns = useMemo(() => {
@@ -2396,6 +2424,12 @@ function ObjectListContent({ objectTypeId }) {
       } else if (sortBy === 'created_at' || sortBy === 'created_date') {
         valA = new Date(a.created_at || a.created_date || 0).getTime();
         valB = new Date(b.created_at || b.created_date || 0).getTime();
+      } else if (sortBy === 'stage') {
+        valA = a.stage || (a.data && a.data.stage) || '';
+        valB = b.stage || (b.data && b.data.stage) || '';
+      } else if (sortBy === 'status') {
+        valA = a.status || (a.data && a.data.status) || '';
+        valB = b.status || (b.data && b.data.status) || '';
       }
 
       if (valA === undefined || valA === null) valA = '';
@@ -2440,6 +2474,12 @@ function ObjectListContent({ objectTypeId }) {
       } else if (sortBy === 'created_at' || sortBy === 'created_date') {
         valA = new Date(a.created_at || a.created_date || 0).getTime();
         valB = new Date(b.created_at || b.created_date || 0).getTime();
+      } else if (sortBy === 'stage') {
+        valA = a.stage || (a.data && a.data.stage) || '';
+        valB = b.stage || (b.data && b.data.stage) || '';
+      } else if (sortBy === 'status') {
+        valA = a.status || (a.data && a.data.status) || '';
+        valB = b.status || (b.data && b.data.status) || '';
       }
 
       if (valA === undefined || valA === null) valA = '';
@@ -2462,34 +2502,103 @@ function ObjectListContent({ objectTypeId }) {
   }, [records, filteredRecords, startIndex, endIndex, isServerPaginated, sortBy, sortOrder]);
 
 
+  const isRecordConvertedLead = useCallback((r) => {
+    if (!r) return false;
+    const cleanKey = String(objectTypeId || '').toLowerCase();
+    const rawApiName = String(rawMeta?.api_name || rawMeta?.name || '').toLowerCase();
+    const rawDisplayName = String(rawMeta?.displayName || rawMeta?.pluralDisplayName || meta?.displayName || meta?.pluralDisplayName || '').toLowerCase();
+    const isLead = cleanKey.includes('lead') || rawApiName.includes('lead') || rawDisplayName.includes('lead');
+    if (!isLead) return false;
+    const statusStr = String(r.status || (r.data && r.data.status) || r.stage || (r.data && r.data.stage) || '').trim().toLowerCase();
+    const isConvFlag = Boolean(r.is_converted || (r.data && r.data.is_converted));
+    return statusStr === 'converted' || isConvFlag;
+  }, [objectTypeId, rawMeta, meta]);
+
+  // Clean up selectedRecordIds if any selected records were converted or changed
+  useEffect(() => {
+    setSelectedRecordIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set();
+      records.forEach((r) => {
+        if (prev.has(r.id) && !isRecordConvertedLead(r)) {
+          next.add(r.id);
+        }
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [records, isRecordConvertedLead]);
+
+  const selectableRecordsOnPage = useMemo(() => {
+    if (!currentRecordsPage) return [];
+    return currentRecordsPage.filter((r) => !isRecordConvertedLead(r));
+  }, [currentRecordsPage, isRecordConvertedLead]);
+
   const isAllVisibleSelected = useMemo(() => {
-    if (!currentRecordsPage || currentRecordsPage.length === 0) return false;
-    return currentRecordsPage.every((r) => selectedRecordIds.has(r.id));
-  }, [currentRecordsPage, selectedRecordIds]);
+    if (!selectableRecordsOnPage || selectableRecordsOnPage.length === 0) return false;
+    return selectableRecordsOnPage.every((r) => selectedRecordIds.has(r.id));
+  }, [selectableRecordsOnPage, selectedRecordIds]);
+
+  // Dynamic picklist status/stage options based strictly on object field metadata
+  const availableStatusOptions = useMemo(() => {
+    if (hasStageField) {
+      const stageField = (backendFields || []).find((f) => {
+        const fn = String(f.name || f.api_name || f.id || '').toLowerCase();
+        return fn === 'stage';
+      });
+      const rawOptions = stageField?.options || stageField?.picklist_values || stageField?.picklistValues;
+      if (Array.isArray(rawOptions) && rawOptions.length > 0) {
+        return rawOptions.map(o => typeof o === 'object' ? (o.label || o.value || String(o)) : String(o));
+      }
+      return ['Qualification', 'Discovery', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
+    }
+
+    if (hasStatusField) {
+      const statusField = (backendFields || []).find((f) => {
+        const fn = String(f.name || f.api_name || f.id || '').toLowerCase();
+        const ft = String(f.type || f.field_type || '').toLowerCase();
+        return fn === 'status' || ft === 'status';
+      });
+
+      if (statusField) {
+        const rawOptions = statusField.options || statusField.picklist_values || statusField.picklistValues;
+        if (Array.isArray(rawOptions) && rawOptions.length > 0) {
+          return rawOptions.map(o => typeof o === 'object' ? (o.label || o.value || String(o)) : String(o));
+        }
+      }
+    }
+
+    return [];
+  }, [hasStageField, hasStatusField, backendFields]);
+
+  const statusFilterLabel = useMemo(() => {
+    return hasStageField ? 'Filter by Stage' : 'Filter by Status';
+  }, [hasStageField]);
 
   const isSomeVisibleSelected = useMemo(() => {
-    if (!currentRecordsPage || currentRecordsPage.length === 0) return false;
-    return currentRecordsPage.some((r) => selectedRecordIds.has(r.id));
-  }, [currentRecordsPage, selectedRecordIds]);
+    if (!selectableRecordsOnPage || selectableRecordsOnPage.length === 0) return false;
+    return selectableRecordsOnPage.some((r) => selectedRecordIds.has(r.id));
+  }, [selectableRecordsOnPage, selectedRecordIds]);
 
   const handleToggleSelectAllVisible = () => {
     if (isAllVisibleSelected) {
       setSelectedRecordIds((prev) => {
         const next = new Set(prev);
-        currentRecordsPage.forEach((r) => next.delete(r.id));
+        selectableRecordsOnPage.forEach((r) => next.delete(r.id));
         return next;
       });
     } else {
       setSelectedRecordIds((prev) => {
         const next = new Set(prev);
-        currentRecordsPage.forEach((r) => next.add(r.id));
+        selectableRecordsOnPage.forEach((r) => next.add(r.id));
         return next;
       });
     }
   };
 
-  const handleToggleSelectRecord = (e, recordId) => {
+  const handleToggleSelectRecord = (e, r) => {
     e.stopPropagation();
+    if (isRecordConvertedLead(r)) return;
+    const recordId = typeof r === 'object' && r ? r.id : r;
     setSelectedRecordIds((prev) => {
       const next = new Set(prev);
       if (next.has(recordId)) {
@@ -3227,7 +3336,13 @@ function ObjectListContent({ objectTypeId }) {
                   </label>
                   <select
                     value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSortBy(val);
+                      if (val !== 'stage' && val !== 'status') {
+                        setFilterStatus('ALL');
+                      }
+                    }}
                     style={{
                       width: '100%',
                       padding: '8px 10px',
@@ -3243,7 +3358,8 @@ function ObjectListContent({ objectTypeId }) {
                   >
                     <option value="created_at">Created Date</option>
                     <option value="name">Name / Title</option>
-                    <option value="status">Status</option>
+                    {hasStageField && <option value="stage">Stage</option>}
+                    {hasStatusField && <option value="status">Status</option>}
                   </select>
                 </div>
 
@@ -3298,26 +3414,38 @@ function ObjectListContent({ objectTypeId }) {
                   </div>
                 </div>
 
-                {/* Filter by Status – shown for objects that have a status field */}
-                {!isDealObjList && (
+                {/* Dynamic Filter by Status / Stage - shown ONLY when Stage or Status is selected */}
+                {((sortBy === 'stage' && hasStageField) || (sortBy === 'status' && hasStatusField)) && availableStatusOptions && availableStatusOptions.length > 0 && (
                   <div style={{ marginBottom: 14 }}>
                     <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', marginBottom: 8 }}>
-                      Filter by Status
+                      {statusFilterLabel}
                     </label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {[
-                        { value: 'ALL', label: 'All' },
-                        { value: 'New', label: 'New' },
-                        { value: 'Qualified', label: 'Qualified' },
-                        { value: 'Not Qualified', label: 'Not Qualified' },
-                        { value: 'Converted', label: 'Converted' },
-                      ].map(({ value, label }) => {
-                        const isActive = filterStatus === value;
+                      <button
+                        type="button"
+                        onClick={() => setFilterStatus('ALL')}
+                        style={{
+                          padding: '4px 11px',
+                          borderRadius: 20,
+                          fontSize: 11.5,
+                          fontWeight: filterStatus === 'ALL' ? 700 : 500,
+                          border: filterStatus === 'ALL' ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
+                          background: filterStatus === 'ALL' ? '#eef2ff' : '#f8fafc',
+                          color: filterStatus === 'ALL' ? '#4f46e5' : '#475569',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        All
+                      </button>
+                      {availableStatusOptions.map((optVal) => {
+                        const isActive = String(filterStatus).toLowerCase() === String(optVal).toLowerCase();
                         return (
                           <button
-                            key={value}
+                            key={optVal}
                             type="button"
-                            onClick={() => setFilterStatus(value)}
+                            onClick={() => setFilterStatus(optVal)}
                             style={{
                               padding: '4px 11px',
                               borderRadius: 20,
@@ -3331,7 +3459,7 @@ function ObjectListContent({ objectTypeId }) {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {label}
+                            {optVal}
                           </button>
                         );
                       })}
@@ -3439,12 +3567,22 @@ function ObjectListContent({ objectTypeId }) {
                           onClick={(e) => e.stopPropagation()}
                           style={{ width: 42, padding: '14px 12px 14px 18px', textAlign: 'center' }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={selectedRecordIds.has(r.id)}
-                            onChange={(e) => handleToggleSelectRecord(e, r.id)}
-                            style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
-                          />
+                          {isRecordConvertedLead(r) ? (
+                            <input
+                              type="checkbox"
+                              disabled
+                              checked={false}
+                              title="Converted leads cannot be selected for deletion."
+                              style={{ cursor: 'not-allowed', width: 15, height: 15, opacity: 0.35 }}
+                            />
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={selectedRecordIds.has(r.id)}
+                              onChange={(e) => handleToggleSelectRecord(e, r)}
+                              style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#4f46e5' }}
+                            />
+                          )}
                         </td>
                       )}
                       {columns.map((col) => {
@@ -3621,10 +3759,7 @@ function ObjectListContent({ objectTypeId }) {
                           </button>
                           {canDeleteRecord && (
                             (() => {
-                              const isConvertedLead = String(objectTypeId || '').toLowerCase().includes('lead') && (
-                                String(r.status || r.data?.status || r.stage || r.data?.stage || '').toLowerCase() === 'converted' ||
-                                Boolean(r.is_converted) || Boolean(r.data?.is_converted)
-                              );
+                              const isConvertedLead = isRecordConvertedLead(r);
 
                               if (isConvertedLead) {
                                 return (

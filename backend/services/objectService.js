@@ -5,65 +5,116 @@ const validationRuleService = require('./validationRuleService');
 // Helper to validate UUID format to prevent PostgreSQL syntax errors
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
 
-// Helper to validate that Primary Email and Alternate Email ID are not identical
-const validateDuplicateEmails = (payload) => {
+// Non-email field suffix list (fields whose names contain 'email' but are NOT email address fields)
+const NON_EMAIL_SUFFIXES = ['domain', 'status', 'opt_out', 'optout', 'count', 'score', 'reason', 'type', 'id', 'link', 'date', 'time', 'timestamp'];
+
+const isTrueEmailField = (key, fields = null) => {
+  if (!key || typeof key !== 'string') return false;
+  const lowerKey = key.toLowerCase().trim();
+
+  if (Array.isArray(fields) && fields.length > 0) {
+    const matchedField = fields.find(f => {
+      const fName = String(f.name || f.api_name || '').toLowerCase();
+      return fName === lowerKey;
+    });
+    if (matchedField) {
+      return matchedField.type === 'email' || matchedField.field_type === 'email';
+    }
+  }
+
+  const explicitEmailKeys = [
+    'email', 'work_email', 'primary_email', 'email_address', 'contact_email', 'company_email',
+    'alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email', 'other_email', 'email_2', 'email2', 'alternate_email_address'
+  ];
+  if (explicitEmailKeys.includes(lowerKey)) return true;
+
+  if (lowerKey.includes('email')) {
+    const hasNonEmailSuffix = NON_EMAIL_SUFFIXES.some(s => lowerKey.endsWith(`_${s}`) || lowerKey.endsWith(s));
+    if (!hasNonEmailSuffix) return true;
+  }
+
+  return false;
+};
+
+const sanitizeEmailValue = (rawVal) => {
+  if (rawVal === undefined || rawVal === null) return '';
+  let str = String(rawVal).trim();
+  if (!str) return '';
+
+  if (/^(n\/a|na|none|null|no-email|no email|-|unknown|undefined|\?)$/i.test(str)) {
+    return '';
+  }
+
+  if (str.includes(',') || str.includes(';')) {
+    const parts = str.split(/[,;]/).map(p => p.trim()).filter(Boolean);
+    const validPart = parts.find(p => /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/.test(p));
+    return validPart || parts[0] || '';
+  }
+
+  return str;
+};
+
+// Helper to validate that Primary Email and Alternate Email ID are not identical (metadata-aware)
+const validateDuplicateEmails = (payload, fields = null) => {
   if (!payload || typeof payload !== 'object') return;
 
-  const getEmailVal = (keys) => {
-    for (const k of keys) {
-      const v = payload[k] !== undefined ? payload[k] : (payload.data && typeof payload.data === 'object' ? payload.data[k] : undefined);
-      if (v && typeof v === 'string' && v.trim() !== '') {
-        return v.trim().toLowerCase();
-      }
+  const emailValues = new Set();
+
+  for (const [key, rawVal] of Object.entries(payload)) {
+    if (key === 'data' || !isTrueEmailField(key, fields)) continue;
+    const cleanVal = sanitizeEmailValue(rawVal);
+    if (!cleanVal) continue;
+
+    const lowerVal = cleanVal.toLowerCase();
+    if (emailValues.has(lowerVal)) {
+      throw {
+        statusCode: 400,
+        message: `Validation Error: Duplicate email address '${cleanVal}' specified for multiple email fields in the same record.`
+      };
     }
-    return '';
-  };
-
-  const primaryEmailKeys = ['email', 'work_email', 'primary_email', 'email_address'];
-  const altEmailKeys = ['alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email', 'other_email', 'email_2', 'email2', 'alternate_email_address'];
-
-  const primary = getEmailVal(primaryEmailKeys);
-  const alt = getEmailVal(altEmailKeys);
-
-  if (primary && alt && primary === alt) {
-    throw {
-      statusCode: 400,
-      message: 'Validation Error: Primary Email and Alternate Email ID cannot be the same address.'
-    };
+    emailValues.add(lowerVal);
   }
 };
 
-// Helper to validate email format for all primary and alternate email fields
-const validateEmailFormats = (payload) => {
+// Helper to validate email format using dynamic field definitions metadata
+const validateEmailFormats = (payload, fields = null, options = {}) => {
   if (!payload || typeof payload !== 'object') return;
 
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
-  const emailKeys = [
-    'email', 'work_email', 'primary_email', 'email_address',
-    'alternate_email', 'alternate_email_id', 'secondary_email', 'alt_email', 'other_email', 'email_2', 'email2', 'alternate_email_address'
-  ];
+  const isBulkImport = options.isBulkImport === true;
 
   for (const [key, rawVal] of Object.entries(payload)) {
     if (rawVal === undefined || rawVal === null || key === 'data') continue;
-    const val = String(rawVal).trim();
-    if (!val) continue;
+    if (!isTrueEmailField(key, fields)) continue;
 
-    const lowerKey = key.toLowerCase();
-    const isEmailField = emailKeys.includes(lowerKey) || lowerKey.includes('email');
+    const cleanVal = sanitizeEmailValue(rawVal);
+    if (!cleanVal) {
+      if (typeof rawVal === 'string' && /^(n\/a|na|none|null|no-email|no email|-|unknown)$/i.test(rawVal.trim())) {
+        payload[key] = null;
+      }
+      continue;
+    }
 
-    if (isEmailField && !emailRegex.test(val)) {
-      const fieldLabel = (lowerKey.includes('alternate') || lowerKey.includes('secondary') || lowerKey.includes('alt') || lowerKey.includes('other') || lowerKey.includes('2'))
-        ? 'Alternate Email ID'
-        : 'Email Address';
-      throw {
-        statusCode: 400,
-        message: `Validation Error: Please enter a valid email address for ${fieldLabel} (e.g. user@company.com).`
-      };
+    if (!emailRegex.test(cleanVal)) {
+      if (isBulkImport) {
+        payload[key] = null;
+      } else {
+        const lowerKey = key.toLowerCase();
+        const fieldLabel = (lowerKey.includes('alternate') || lowerKey.includes('secondary') || lowerKey.includes('alt') || lowerKey.includes('other') || lowerKey.includes('2'))
+          ? 'Alternate Email ID'
+          : 'Email Address';
+        throw {
+          statusCode: 400,
+          message: `Validation Error: Please enter a valid email address for ${fieldLabel} (e.g. user@company.com).`
+        };
+      }
+    } else {
+      payload[key] = cleanVal;
     }
   }
 
   if (payload.data && typeof payload.data === 'object') {
-    validateEmailFormats(payload.data);
+    validateEmailFormats(payload.data, fields, options);
   }
 };
 
@@ -148,12 +199,16 @@ const COMPANY_ALIASES = ['company_id', 'Company_id', 'parent_id', 'company', 'Co
 const CONTACT_ALIASES = ['contact_id', 'Contact_id', 'secondary_parent_id', 'contact', 'Contact', 'contact_name'];
 
 /**
- * Normalizes incoming payload to extract the canonical alias value for Company or Contact.
- * Follows ID precedence order. Returns undefined if no relationship alias is present in payload.
+ * Dynamic payload alias extractor driven by field metadata definitions.
+ * Follows ID precedence order and checks candidate field names/labels dynamically.
  */
 const extractPayloadAliasValue = (payload, aliases) => {
-  for (const key of aliases) {
-    if (payload[key] !== undefined) {
+  if (!payload || typeof payload !== 'object') return undefined;
+
+  const candidateKeys = Array.isArray(aliases) ? aliases : [aliases];
+
+  for (const key of candidateKeys) {
+    if (payload[key] !== undefined && payload[key] !== null && String(payload[key]).trim() !== '') {
       return payload[key];
     }
   }
@@ -167,70 +222,106 @@ const resolveRecordRelationships = async (payload, cleanObjKey, organizationId) 
   let contactIdInput = undefined;
   let contactNameInput = undefined;
 
-  // Explicit Company ID candidates
-  const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
-  for (const k of explicitCompanyIdKeys) {
-    if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
-      companyIdInput = String(payload[k]).trim();
-      break;
-    }
-  }
+  const isCompanyObject = cleanObjKey.includes('company') || cleanObjKey.includes('account');
+  const isContactObject = cleanObjKey.includes('contact') || cleanObjKey.includes('person');
 
-  if (companyIdInput === undefined) {
-    const rawComp = payload.company !== undefined ? payload.company : payload.Company;
-    if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
-      const compStr = String(rawComp).trim();
-      if (isUuid(compStr)) {
-        companyIdInput = compStr;
-      } else {
-        companyNameInput = compStr;
+  if (!isCompanyObject) {
+    // Explicit Company ID candidates
+    const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
+    for (const k of explicitCompanyIdKeys) {
+      if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+        companyIdInput = String(payload[k]).trim();
+        break;
       }
     }
-  }
 
-  if (companyNameInput === undefined) {
-    const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
-    for (const k of explicitCompanyNameKeys) {
+    if (companyIdInput === undefined) {
+      const rawComp = payload.company !== undefined ? payload.company : payload.Company;
+      if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
+        const compStr = String(rawComp).trim();
+        if (isUuid(compStr)) {
+          companyIdInput = compStr;
+        } else {
+          companyNameInput = compStr;
+        }
+      }
+    }
+
+    if (companyNameInput === undefined) {
+      const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
+      for (const k of explicitCompanyNameKeys) {
+        if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+          const nameStr = String(payload[k]).trim();
+          if (!isUuid(nameStr)) {
+            companyNameInput = nameStr;
+            break;
+          }
+        }
+      }
+    }
+  } else {
+    // Parent company lookup for Company objects
+    const parentCompanyIdKeys = ['parent_company_id', 'parent_id', 'parent_company_uuid'];
+    for (const k of parentCompanyIdKeys) {
       if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
-        const nameStr = String(payload[k]).trim();
-        if (!isUuid(nameStr)) {
-          companyNameInput = nameStr;
-          break;
+        companyIdInput = String(payload[k]).trim();
+        break;
+      }
+    }
+    if (companyIdInput === undefined) {
+      const rawParent = payload.parent_company !== undefined ? payload.parent_company : payload.ParentCompany;
+      if (rawParent !== undefined && rawParent !== null && String(rawParent).trim() !== '') {
+        const parentStr = String(rawParent).trim();
+        if (isUuid(parentStr)) {
+          companyIdInput = parentStr;
+        } else {
+          companyNameInput = parentStr;
         }
       }
     }
   }
 
-  // Explicit Contact ID candidates
-  const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
-  for (const k of explicitContactIdKeys) {
-    if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
-      contactIdInput = String(payload[k]).trim();
-      break;
-    }
-  }
-
-  if (contactIdInput === undefined) {
-    const rawCont = payload.contact !== undefined ? payload.contact : payload.Contact;
-    if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
-      const contStr = String(rawCont).trim();
-      if (isUuid(contStr)) {
-        contactIdInput = contStr;
-      } else {
-        contactNameInput = contStr;
+  if (!isContactObject) {
+    // Explicit Contact ID candidates
+    const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
+    for (const k of explicitContactIdKeys) {
+      if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+        contactIdInput = String(payload[k]).trim();
+        break;
       }
     }
-  }
 
-  if (contactNameInput === undefined) {
-    const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
-    for (const k of explicitContactNameKeys) {
-      if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
-        const nameStr = String(payload[k]).trim();
-        if (!isUuid(nameStr)) {
-          contactNameInput = nameStr;
-          break;
+    if (contactIdInput === undefined) {
+      const rawCont = payload.contact !== undefined ? payload.contact : payload.Contact;
+      if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
+        const contStr = String(rawCont).trim();
+        if (isUuid(contStr)) {
+          contactIdInput = contStr;
+        } else {
+          contactNameInput = contStr;
         }
+      }
+    }
+
+    if (contactNameInput === undefined) {
+      const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
+      for (const k of explicitContactNameKeys) {
+        if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+          const nameStr = String(payload[k]).trim();
+          if (!isUuid(nameStr)) {
+            contactNameInput = nameStr;
+            break;
+          }
+        }
+      }
+    }
+  } else {
+    // Secondary contact lookup for Contact objects
+    const secondaryContactIdKeys = ['secondary_contact_id', 'secondary_parent_id'];
+    for (const k of secondaryContactIdKeys) {
+      if (payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '') {
+        contactIdInput = String(payload[k]).trim();
+        break;
       }
     }
   }
@@ -404,12 +495,13 @@ const objectService = {
       }
 
       if (options.status && options.status !== 'ALL') {
-        query = query.filter('status', 'ilike', `%${options.status}%`);
+        const cleanStatus = String(options.status).trim();
+        query = query.or(`status.ilike.%${cleanStatus}%,data->>status.ilike.%${cleanStatus}%,data->>stage.ilike.%${cleanStatus}%`);
       }
 
       const sortCol = (options.sortBy === 'name' || options.sortBy === 'title')
         ? 'name'
-        : (options.sortBy === 'status')
+        : (options.sortBy === 'status' || options.sortBy === 'stage')
         ? 'status'
         : 'created_at';
 
@@ -503,6 +595,11 @@ const objectService = {
         if (searchClean) {
           query = query.ilike('name', `%${searchClean}%`);
         }
+      }
+
+      if (options.status && options.status !== 'ALL') {
+        const cleanStatus = String(options.status).trim();
+        query = query.or(`status.ilike.%${cleanStatus}%,data->>status.ilike.%${cleanStatus}%,data->>stage.ilike.%${cleanStatus}%`);
       }
 
       query = query.range(page * pageSize, (page + 1) * pageSize - 1);
@@ -1145,6 +1242,9 @@ const objectService = {
     }
 
     // 2. Extract unique Company IDs/Names and Contact IDs/Names across all rows in recordsArray
+    const isCompanyObject = cleanKey.includes('company') || cleanKey.includes('account');
+    const isContactObject = cleanKey.includes('contact') || cleanKey.includes('person');
+
     const companyIdsSet = new Set();
     const contactIdsSet = new Set();
     const companyNamesSet = new Set();
@@ -1156,64 +1256,95 @@ const objectService = {
       let contactIdInput = undefined;
       let contactNameInput = undefined;
 
-      const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
-      for (const k of explicitCompanyIdKeys) {
-        if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-          companyIdInput = String(rowPayload[k]).trim();
-          break;
-        }
-      }
-      if (companyIdInput === undefined) {
-        const rawComp = rowPayload.company !== undefined ? rowPayload.company : rowPayload.Company;
-        if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
-          const compStr = String(rawComp).trim();
-          if (isUuid(compStr)) {
-            companyIdInput = compStr;
-          } else {
-            companyNameInput = compStr;
+      if (!isCompanyObject) {
+        const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
+        for (const k of explicitCompanyIdKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+            companyIdInput = String(rowPayload[k]).trim();
+            break;
           }
         }
-      }
-      if (companyNameInput === undefined) {
-        const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
-        for (const k of explicitCompanyNameKeys) {
+        if (companyIdInput === undefined) {
+          const rawComp = rowPayload.company !== undefined ? rowPayload.company : rowPayload.Company;
+          if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
+            const compStr = String(rawComp).trim();
+            if (isUuid(compStr)) {
+              companyIdInput = compStr;
+            } else {
+              companyNameInput = compStr;
+            }
+          }
+        }
+        if (companyNameInput === undefined) {
+          const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
+          for (const k of explicitCompanyNameKeys) {
+            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+              const nameStr = String(rowPayload[k]).trim();
+              if (!isUuid(nameStr)) {
+                companyNameInput = nameStr;
+                break;
+              }
+            }
+          }
+        }
+      } else {
+        const parentCompanyIdKeys = ['parent_company_id', 'parent_id', 'parent_company_uuid'];
+        for (const k of parentCompanyIdKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            const nameStr = String(rowPayload[k]).trim();
-            if (!isUuid(nameStr)) {
-              companyNameInput = nameStr;
-              break;
+            companyIdInput = String(rowPayload[k]).trim();
+            break;
+          }
+        }
+        if (companyIdInput === undefined) {
+          const rawParent = rowPayload.parent_company !== undefined ? rowPayload.parent_company : rowPayload.ParentCompany;
+          if (rawParent !== undefined && rawParent !== null && String(rawParent).trim() !== '') {
+            const parentStr = String(rawParent).trim();
+            if (isUuid(parentStr)) {
+              companyIdInput = parentStr;
+            } else {
+              companyNameInput = parentStr;
             }
           }
         }
       }
 
-      const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
-      for (const k of explicitContactIdKeys) {
-        if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-          contactIdInput = String(rowPayload[k]).trim();
-          break;
-        }
-      }
-      if (contactIdInput === undefined) {
-        const rawCont = rowPayload.contact !== undefined ? rowPayload.contact : rowPayload.Contact;
-        if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
-          const contStr = String(rawCont).trim();
-          if (isUuid(contStr)) {
-            contactIdInput = contStr;
-          } else {
-            contactNameInput = contStr;
+      if (!isContactObject) {
+        const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
+        for (const k of explicitContactIdKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+            contactIdInput = String(rowPayload[k]).trim();
+            break;
           }
         }
-      }
-      if (contactNameInput === undefined) {
-        const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
-        for (const k of explicitContactNameKeys) {
-          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            const nameStr = String(rowPayload[k]).trim();
-            if (!isUuid(nameStr)) {
-              contactNameInput = nameStr;
-              break;
+        if (contactIdInput === undefined) {
+          const rawCont = rowPayload.contact !== undefined ? rowPayload.contact : rowPayload.Contact;
+          if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
+            const contStr = String(rawCont).trim();
+            if (isUuid(contStr)) {
+              contactIdInput = contStr;
+            } else {
+              contactNameInput = contStr;
             }
+          }
+        }
+        if (contactNameInput === undefined) {
+          const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
+          for (const k of explicitContactNameKeys) {
+            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+              const nameStr = String(rowPayload[k]).trim();
+              if (!isUuid(nameStr)) {
+                contactNameInput = nameStr;
+                break;
+              }
+            }
+          }
+        }
+      } else {
+        const secondaryContactIdKeys = ['secondary_contact_id', 'secondary_parent_id'];
+        for (const k of secondaryContactIdKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+            contactIdInput = String(rowPayload[k]).trim();
+            break;
           }
         }
       }
@@ -1320,7 +1451,7 @@ const objectService = {
     // 4. Duplicate checks (in-CSV + existing DB)
     // Option C: Fetch existing records ONCE and reuse for all unique fields.
     // Previously each unique field triggered a separate full-table scan.
-    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code');
+    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code' || f.name === 'hubspot_reference_id');
     const seenCsvValuesMap = new Map();
     uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Set()));
 
@@ -1378,8 +1509,8 @@ const objectService = {
         const cleanPayload = { ...payload };
         delete cleanPayload.__rowNum;
 
-        validateDuplicateEmails(cleanPayload);
-        validateEmailFormats(cleanPayload);
+        validateDuplicateEmails(cleanPayload, fields);
+        validateEmailFormats(cleanPayload, fields, { isBulkImport: true });
 
         // Required field validation
         for (const field of fields) {
@@ -1486,7 +1617,12 @@ const objectService = {
             resolvedParent = matches[0].id;
             resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
           } else {
-            throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+            if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+              throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+            } else {
+              resolvedParent = null;
+              resolvedParentName = relInputs.companyNameInput;
+            }
           }
         }
 
@@ -1496,10 +1632,12 @@ const objectService = {
           customData.Company = resolvedParent;
           customData.Company_id = resolvedParent;
           if (resolvedParentName) customData.company_name = resolvedParentName;
-        } else {
+        } else if (!isCompanyObject) {
           customData.company = null; customData.company_id = null; customData.Company = null; customData.Company_id = null;
           if (relInputs.companyIdInput !== undefined) customData.company_name = null;
           else customData.company_name = resolvedParentName || null;
+        } else {
+          customData.company_name = resolvedName;
         }
 
         // Contact Relationship Resolution
@@ -1534,7 +1672,12 @@ const objectService = {
             resolvedSecondary = matches[0].id;
             resolvedSecondaryName = matches[0].name || matches[0].data?.name || matches[0].data?.contact_name || relInputs.contactNameInput;
           } else {
-            throw { statusCode: 400, message: `Validation Error: Contact '${relInputs.contactNameInput}' was not found. Please provide a valid Contact Name or Contact ID.` };
+            if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+              throw { statusCode: 400, message: `Validation Error: Contact '${relInputs.contactNameInput}' was not found. Please provide a valid Contact Name or Contact ID.` };
+            } else {
+              resolvedSecondary = null;
+              resolvedSecondaryName = relInputs.contactNameInput;
+            }
           }
         }
 
@@ -1544,10 +1687,12 @@ const objectService = {
           customData.Contact = resolvedSecondary;
           customData.Contact_id = resolvedSecondary;
           if (resolvedSecondaryName) customData.contact_name = resolvedSecondaryName;
-        } else {
+        } else if (!isContactObject) {
           customData.contact = null; customData.contact_id = null; customData.Contact = null; customData.Contact_id = null;
           if (relInputs.contactIdInput !== undefined) customData.contact_name = null;
           else customData.contact_name = resolvedSecondaryName || null;
+        } else {
+          customData.contact_name = resolvedName;
         }
 
         const newRow = {
