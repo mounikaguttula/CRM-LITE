@@ -4,6 +4,8 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost, apiPut, apiDelete } from '../../api/client';
 import AccessDenied from '../../components/AccessDenied';
+import PageLayoutModal from '../../components/PageLayoutModal';
+import { getVisibleViewFields, getFieldsBySection, fetchPageLayout, normalizeObjectKey } from '../../utils/pageLayoutUtils';
 import {
   Edit3,
   Mail,
@@ -32,6 +34,7 @@ import {
   AlertTriangle,
   MapPin,
   Sparkles,
+  FolderPlus,
 } from 'lucide-react';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
@@ -979,6 +982,33 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [selectedFamilyFilter, setSelectedFamilyFilter] = useState('All');
   const [selectedProdIds, setSelectedProdIds] = useState([]);
   const [editLineItems, setEditLineItems] = useState([]);
+  const [showPageLayoutModal, setShowPageLayoutModal] = useState(false);
+  const [layoutTick, setLayoutTick] = useState(0);
+
+  /* Sync Page Layout from Backend Database (public.page_layouts) */
+  useEffect(() => {
+    let isMounted = true;
+    if (objectTypeId) {
+      fetchPageLayout(objectTypeId).then((remoteLayout) => {
+        if (isMounted && remoteLayout) {
+          setLayoutTick((prev) => prev + 1);
+        }
+      });
+    }
+
+    const handleLayoutChanged = (e) => {
+      const targetObj = normalizeObjectKey(objectTypeId);
+      if (e.detail?.objectTypeId === targetObj) {
+        if (isMounted) setLayoutTick((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener('crm-page-layout-changed', handleLayoutChanged);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('crm-page-layout-changed', handleLayoutChanged);
+    };
+  }, [objectTypeId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1136,7 +1166,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   /* Synchronize line items & update Deal Amount conditionally */
   const syncLineItemsAndAmount = async (newItems) => {
     setLineItems(newItems);
-    
+
     const grandTotal = newItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
     setRecord((prev) => (prev ? { ...prev, amount: grandTotal } : prev));
 
@@ -1144,15 +1174,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     if (currentObjKey.includes('deal') && recordId) {
       try {
         const lineItemObjId = 'deal_line_item';
-        
+
         const currentItemsMap = {};
         lineItems.forEach(item => {
           if (item.id) currentItemsMap[item.id] = item;
         });
-        
+
         const newItemsMap = {};
         const ops = [];
-        
+
         for (const item of newItems) {
           if (item.id) {
             newItemsMap[item.id] = item;
@@ -1179,15 +1209,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             }));
           }
         }
-        
+
         for (const oldItem of lineItems) {
           if (oldItem.id && !newItemsMap[oldItem.id]) {
             ops.push(apiDelete(`/objects/${lineItemObjId}/${oldItem.id}`));
           }
         }
-        
+
         await Promise.all(ops);
-        
+
         // Re-fetch to ensure we have the correct DB IDs assigned
         const freshRes = await apiGet(`/objects/${lineItemObjId}`);
         const allLineItems = Array.isArray(freshRes?.data || freshRes) ? (freshRes?.data || freshRes) : [];
@@ -1209,17 +1239,17 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             description: li.description || data.description || ''
           };
         });
-        
+
         setLineItems(loadedItems);
         const calcTotal = loadedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
         setRecord((prev) => (prev ? { ...prev, amount: calcTotal } : prev));
-        
+
         const payloadToSync = {
           ...(record || {}),
           amount: grandTotal,
         };
         apiPut(`/objects/${objectTypeId}/${recordId}`, payloadToSync).catch(console.warn);
-        
+
         const res = await apiGet(`/objects/${lineItemObjId}`);
         const allLI = Array.isArray(res) ? res : res?.data || [];
         const freshItems = allLI.filter(li => String(li.deal_id) === String(recordId) || String(li.data?.deal_id) === String(recordId)).map((li) => {
@@ -1251,7 +1281,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     try {
       await apiPut(`/objects/form_inquiry/${selectedFormToLink}`, { campaign_id: recordId }).catch(() => apiPut(`/form_inquiry/${selectedFormToLink}`, { campaign_id: recordId }));
       showToast('Form linked successfully.', 'success');
-      
+
       // Update local state
       const formToMove = allForms.find(f => String(f.id) === String(selectedFormToLink));
       if (formToMove) {
@@ -1677,8 +1707,17 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
   const isAlreadyConvertedLead = cleanObjKey.includes('lead') && (currentLeadStatus === 'converted' || Boolean(record?.is_converted) || Boolean(record?.data?.is_converted));
 
-  const userRoleStr = String(currentUser?.role || currentUser?.role_name || '').toLowerCase();
-  const isSystemAdmin = userRoleStr.includes('admin') || userRoleStr.includes('administrator');
+  const roleVal = String(
+    currentUser?.role?.name ||
+    currentUser?.role?.title ||
+    currentUser?.role_name ||
+    currentUser?.roleName ||
+    currentUser?.role_title ||
+    currentUser?.role ||
+    ''
+  ).toLowerCase();
+  const isSystemAdmin = roleVal.includes('admin') || roleVal.includes('administrator') || currentUser?.is_admin === true || currentUser?.isAdmin === true;
+  const isAdmin = isSystemAdmin;
 
   const canDeleteRecord = objPerm
     ? ((objPerm.canDelete === true || objPerm.can_delete === true) && !isAlreadyConvertedLead)
@@ -1691,6 +1730,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(false);
   const [deleteRecordError, setDeleteRecordError] = useState(null);
+
+
 
   const confirmDeleteDetailPageRecord = async () => {
     if (!canDeleteRecord) {
@@ -2054,11 +2095,13 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     return <span style={{ fontWeight: 600, color: displayVal === '—' ? C.dim : C.text }}>{displayVal}</span>;
   };
 
-  const tabs = ['Details', 'Related'];
+  const tabs = ['Details', 'More Details', 'Related'];
   const currentObjKey = String(objectTypeId).toLowerCase();
 
-  /* All fields with Created Date/By, Modified Date/By pushed to VERY END */
-  const mergedFields = getAllMergedFields(meta.fields, record, objectTypeId);
+  /* All fields with Created Date/By, Modified Date/By pushed to VERY END, filtered & ordered by saved Page Layout */
+  const rawMergedFields = getAllMergedFields(meta.fields, record, objectTypeId);
+  const { detailsFields, additionalFields, allVisibleFields } = getFieldsBySection(objectTypeId, rawMergedFields);
+  const mergedFields = allVisibleFields;
 
   const ghostBtn = {
     display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px',
@@ -2277,7 +2320,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ display: 'flex', gap: 8 }}> 
+            <div style={{ display: 'flex', gap: 8 }}>
               {tabs.map((tab) => {
                 const on = activeTab === tab || (activeTab === 'Overview' && tab === 'Details');
                 return (
@@ -2328,6 +2371,24 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     {converting ? 'Converting…' : 'Convert'}
                   </button>
                 )
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setShowPageLayoutModal(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    padding: '10px 18px', borderRadius: 12,
+                    fontSize: 13, fontWeight: 700, color: '#334155',
+                    background: '#ffffff', border: '1.5px solid #cbd5e1',
+                    cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.03)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#94a3b8'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+                  title="Configure Drag and Drop Page Layout"
+                >
+                  <LayoutTemplate size={15} style={{ color: '#6366f1' }} /> Page Layout
+                </button>
               )}
               <button
                 onClick={handleEditClick}
@@ -2389,10 +2450,27 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   <FileText size={16} />
                 </span>
                 <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, letterSpacing: '.1em', color: C.text }}>
-                  RECORD DETAILS
+                  PRIMARY DETAILS
                 </h3>
-                <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: C.dim }}>
-                  {mergedFields.length} fields
+                <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: C.dim, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span>{detailsFields.length} fields</span>
+                  {isAdmin && (
+                    <button
+                      onClick={() => setShowPageLayoutModal(true)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '3px 9px', borderRadius: 7,
+                        fontSize: 11, fontWeight: 700, color: '#4f46e5',
+                        background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.22)',
+                        cursor: 'pointer', transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.1)'; }}
+                      title="Customize field layout and visibility"
+                    >
+                      <LayoutTemplate size={11} /> Page Layout
+                    </button>
+                  )}
                 </span>
               </header>
 
@@ -2404,7 +2482,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   padding: '24px 28px',
                 }}
               >
-                {mergedFields.map((f) => {
+                {detailsFields.map((f) => {
                   const isSystemField = (f.name || '').toLowerCase().includes('created') || (f.name || '').toLowerCase().includes('updated') || (f.name || '').toLowerCase().includes('modified');
                   const renderedVal = renderFieldValue(f);
                   const strVal = typeof renderedVal === 'string' || typeof renderedVal === 'number' ? String(renderedVal) : '';
@@ -2433,6 +2511,100 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                   );
                 })}
               </div>
+            </section>
+          )}
+
+          {activeTab === 'More Details' && (
+            <section
+              style={{
+                borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                boxShadow: '0 18px 40px -30px rgba(20,26,50,.25)', overflow: 'hidden',
+              }}
+            >
+              <header style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(16,185,129,.06),rgba(59,130,246,.03))' }}>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 10, background: 'rgba(16,185,129,.12)', color: '#10b981' }}>
+                  <FolderPlus size={16} />
+                </span>
+                <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, letterSpacing: '.1em', color: C.text }}>
+                  MORE DETAILS & SYSTEM INFO
+                </h3>
+                <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: C.dim, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span>{additionalFields.length} fields</span>
+                  {isAdmin && (
+                    <button
+                      onClick={() => setShowPageLayoutModal(true)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '3px 9px', borderRadius: 7,
+                        fontSize: 11, fontWeight: 700, color: '#059669',
+                        background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.22)',
+                        cursor: 'pointer', transition: 'all 0.15s ease',
+                      }}
+                      title="Customize field layout and visibility"
+                    >
+                      <LayoutTemplate size={11} /> Page Layout
+                    </button>
+                  )}
+                </span>
+              </header>
+
+              {additionalFields.length === 0 ? (
+                <div style={{ padding: '40px 24px', textAlign: 'center', color: '#64748b' }}>
+                  <p style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600 }}>No fields currently assigned to the More Details tab.</p>
+                  {isAdmin && (
+                    <>
+                      <p style={{ margin: '4px 0 16px 0', fontSize: '0.82rem', color: '#94a3b8' }}>Use the Page Layout button to send fields to this tab.</p>
+                      <button
+                        onClick={() => setShowPageLayoutModal(true)}
+                        style={{
+                          padding: '8px 16px', borderRadius: 10, fontSize: '0.82rem', fontWeight: 700,
+                          color: '#ffffff', background: '#6366f1', border: 'none', cursor: 'pointer',
+                        }}
+                      >
+                        Configure Page Layout
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                    gap: '20px 32px',
+                    padding: '24px 28px',
+                  }}
+                >
+                  {additionalFields.map((f) => {
+                    const isSystemField = (f.name || '').toLowerCase().includes('created') || (f.name || '').toLowerCase().includes('updated') || (f.name || '').toLowerCase().includes('modified');
+                    const renderedVal = renderFieldValue(f);
+                    const strVal = typeof renderedVal === 'string' || typeof renderedVal === 'number' ? String(renderedVal) : '';
+                    const isLongVal = strVal.length > 40 || strVal.includes('\n');
+                    return (
+                      <div
+                        key={f.name}
+                        style={{
+                          borderBottom: '1px solid #f1f5f9',
+                          paddingBottom: '14px',
+                          background: isSystemField ? 'rgba(248,250,252,0.6)' : 'transparent',
+                          padding: isSystemField ? '10px 12px 14px 12px' : '0 0 14px 0',
+                          borderRadius: isSystemField ? 10 : 0,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          {fieldIcon(f.name, f.type)}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.08em', color: isSystemField ? '#475569' : '#64748b' }}>
+                            {String(f.label || f.name).toUpperCase()}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: isLongVal ? '0.8rem' : '0.94rem', fontWeight: isLongVal ? 500 : 600, color: '#0f172a', lineHeight: isLongVal ? 1.4 : 1.5, wordBreak: 'break-word' }}>
+                          {renderedVal}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           )}
 
@@ -3470,8 +3642,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             border: '1px solid rgba(226, 232, 240, 0.8)', textAlign: 'center',
             position: 'relative',
           }}>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => { setShowDeleteModal(false); setDeleteRecordError(null); }}
               style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
@@ -3563,8 +3735,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
             border: '1px solid rgba(226, 232, 240, 0.8)', position: 'relative',
             textAlign: 'center',
           }}>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => { if (!converting) { setShowConvertModal(false); setConvertError(null); } }}
               disabled={converting}
               style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', color: '#64748b', cursor: converting ? 'not-allowed' : 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -3734,6 +3906,18 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         </div>,
         document.body
       )}
+
+      <PageLayoutModal
+        isOpen={Boolean(showPageLayoutModal && isAdmin)}
+        onClose={() => setShowPageLayoutModal(false)}
+        objectTypeId={objectTypeId}
+        displayName={meta.displayName}
+        availableFields={getAllMergedFields(meta.fields, record, objectTypeId)}
+        onLayoutSaved={() => {
+          setLayoutTick((prev) => prev + 1);
+          showToast('Page layout updated successfully!', 'success');
+        }}
+      />
     </>
   );
 }
