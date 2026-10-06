@@ -34,6 +34,12 @@ export function AuthProvider({ children }) {
               name: userName,
               avatar: currentUser.avatar || initials || 'U',
             };
+            const userActivityKey = `crm_last_user_activity_${currentUser.id}`;
+            const storedActivity = localStorage.getItem(userActivityKey);
+            const nowTime = Date.now();
+            if (!storedActivity || (nowTime - parseInt(storedActivity, 10)) >= 60 * 60 * 1000) {
+              localStorage.setItem(userActivityKey, String(nowTime));
+            }
             setUser(formattedUser);
             setAuthSession(token, formattedUser);
           } else {
@@ -75,6 +81,9 @@ export function AuthProvider({ children }) {
         name: userName,
         avatar: authUser.avatar || initials || 'U',
       };
+
+      const userActivityKey = `crm_last_user_activity_${formattedUser.id}`;
+      localStorage.setItem(userActivityKey, String(Date.now()));
 
       setUser(formattedUser);
       setAuthSession(token, formattedUser);
@@ -121,9 +130,11 @@ export function AuthProvider({ children }) {
     let lastThrottleTime = 0;
     let isTimingOut = false;
 
-    // Initialize user activity timestamp if missing
-    if (!localStorage.getItem(userActivityKey)) {
-      localStorage.setItem(userActivityKey, String(Date.now()));
+    // Initialize or refresh user activity timestamp if missing or expired (> 1 hour)
+    const storedAct = localStorage.getItem(userActivityKey);
+    const nowMs = Date.now();
+    if (!storedAct || (nowMs - parseInt(storedAct, 10)) >= IDLE_TIMEOUT_MS) {
+      localStorage.setItem(userActivityKey, String(nowMs));
     }
 
     const performIdleTimeout = async () => {

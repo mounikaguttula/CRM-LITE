@@ -5,9 +5,35 @@ const validationRuleService = require('./validationRuleService');
 // Helper to validate UUID format to prevent PostgreSQL syntax errors
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
 
+const cleanImportValue = (val) => {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim();
+  if (str.startsWith('="') && str.endsWith('"')) {
+    str = str.slice(2, -1);
+  } else if (str.startsWith('=')) {
+    str = str.replace(/^="?|"?$/g, '');
+  }
+  str = str.trim();
+  if (/^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/.test(str)) {
+    const num = Number(str);
+    if (!isNaN(num) && Number.isFinite(num)) {
+      try {
+        if (Math.floor(num) === num || Math.abs(num - Math.round(num)) < 1e-5) {
+          str = BigInt(Math.round(num)).toString();
+        } else {
+          str = num.toFixed(0);
+        }
+      } catch (e) {
+        str = num.toFixed(0);
+      }
+    }
+  }
+  return str;
+};
+
 const getNormalizedKeys = (val) => {
   if (val === null || val === undefined) return [];
-  let str = String(val).trim();
+  let str = cleanImportValue(val);
   if (!str) return [];
   const keys = new Set();
   const lower = str.toLowerCase();
@@ -1548,7 +1574,10 @@ const objectService = {
       const relInputs = extractedInputs[i];
 
       try {
-        const cleanPayload = { ...payload };
+        const cleanPayload = {};
+        for (const [pk, pv] of Object.entries(payload)) {
+          cleanPayload[pk] = cleanImportValue(pv);
+        }
         delete cleanPayload.__rowNum;
 
         // Canonical name derivation (run BEFORE required-field validation)
@@ -1696,12 +1725,7 @@ const objectService = {
               resolvedParent = matches[0].id;
               resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
             } else {
-              if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
-                throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
-              } else {
-                resolvedParent = null;
-                resolvedParentName = relInputs.companyNameInput;
-              }
+              throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
             }
           }
         }

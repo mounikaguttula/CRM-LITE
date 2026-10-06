@@ -39,7 +39,35 @@ const PROBE_VALUES = 20;           // values used to suggest a Match By field
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const cellValue = (v) => (v === undefined || v === null ? '' : String(v).trim());
+const cellValue = (v) => {
+  if (v === undefined || v === null) return '';
+  let str = String(v).trim();
+  if (str.startsWith('="') && str.endsWith('"')) {
+    str = str.slice(2, -1);
+  } else if (str.startsWith('=')) {
+    str = str.replace(/^="?|"?$/g, '');
+  }
+  str = str.trim();
+  if (/^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/.test(str)) {
+    const num = Number(str);
+    if (!isNaN(num) && Number.isFinite(num)) {
+      try {
+        if (Math.floor(num) === num || Math.abs(num - Math.round(num)) < 1e-5) {
+          if (typeof window !== 'undefined' && typeof window.BigInt === 'function') {
+            str = window.BigInt(Math.round(num)).toString();
+          } else {
+            str = num.toFixed(0);
+          }
+        } else {
+          str = num.toFixed(0);
+        }
+      } catch (e) {
+        str = num.toFixed(0);
+      }
+    }
+  }
+  return str;
+};
 
 /**
  * RFC-4180 style parser: quoted cells, "" escapes, multiline cells, BOM, CRLF.

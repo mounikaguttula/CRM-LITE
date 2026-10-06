@@ -25,9 +25,35 @@ const fetchAll = async (buildQuery) => {
 const recordName = (row, fallback) =>
   row.name || row.data?.name || row.data?.company_name || row.data?.contact_name || fallback;
 
+const cleanImportValue = (val) => {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim();
+  if (str.startsWith('="') && str.endsWith('"')) {
+    str = str.slice(2, -1);
+  } else if (str.startsWith('=')) {
+    str = str.replace(/^="?|"?$/g, '');
+  }
+  str = str.trim();
+  if (/^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/.test(str)) {
+    const num = Number(str);
+    if (!isNaN(num) && Number.isFinite(num)) {
+      try {
+        if (Math.floor(num) === num || Math.abs(num - Math.round(num)) < 1e-5) {
+          str = BigInt(Math.round(num)).toString();
+        } else {
+          str = num.toFixed(0);
+        }
+      } catch (e) {
+        str = num.toFixed(0);
+      }
+    }
+  }
+  return str;
+};
+
 const getNormalizedKeys = (val) => {
   if (val === null || val === undefined) return [];
-  let str = String(val).trim();
+  let str = cleanImportValue(val);
   if (!str) return [];
   const keys = new Set();
   const lower = str.toLowerCase();
@@ -141,30 +167,37 @@ exports.resolveRelationships = async (req, res) => {
 
     if (matchByInternalId) {
       const validUuids = uniqueValues.filter((v) => isUuid(v));
-      uniqueValues.filter((v) => !isUuid(v)).forEach((v) => {
-        results[v] = { status: 'invalid', resolvedId: null, resolvedName: null, reason: 'Not a valid UUID format.' };
+      const invalidValues = uniqueValues.filter((v) => !isUuid(v));
+
+      invalidValues.forEach((v) => {
+        results[v] = { status: 'invalid', resolvedId: null, resolvedName: null, reason: `Invalid ID '${v}': Not a valid UUID format.` };
       });
 
       if (validUuids.length > 0) {
-        // Chunked so the IN() list stays small. object_type_id keeps a Contact id from resolving as a Company.
+        // Query universal_table for valid Uuids to differentiate between 'not found', 'wrong org', 'wrong object type'
         const rows = [];
         for (let i = 0; i < validUuids.length; i += 200) {
           const { data, error } = await supabase
             .from('universal_table')
-            .select('id, name, data')
-            .in('id', validUuids.slice(i, i + 200))
-            .eq('object_type_id', targetDef.id)
-            .eq('organization_id', organizationId)
-            .eq('is_deleted', false);
+            .select('id, organization_id, object_type_id, name, data, is_deleted')
+            .in('id', validUuids.slice(i, i + 200));
           if (error) return res.status(500).json({ error: 'Failed to fetch target records for relationship resolution.' });
           rows.push(...(data || []));
         }
+
         const byId = new Map(rows.map((r) => [r.id, r]));
+
         validUuids.forEach((v) => {
           const row = byId.get(v);
-          results[v] = row
-            ? { status: 'resolved', resolvedId: row.id, resolvedName: recordName(row, v) }
-            : { status: 'not_found', resolvedId: null, resolvedName: null, reason: 'Record not found.' };
+          if (!row || row.is_deleted) {
+            results[v] = { status: 'not_found', resolvedId: null, resolvedName: null, reason: `ID not found: ${v}` };
+          } else if (row.organization_id !== organizationId) {
+            results[v] = { status: 'forbidden', resolvedId: null, resolvedName: null, reason: `ID '${v}' belongs to another organization.` };
+          } else if (row.object_type_id !== targetDef.id) {
+            results[v] = { status: 'invalid_type', resolvedId: null, resolvedName: null, reason: `ID '${v}' belongs to a different object type.` };
+          } else {
+            results[v] = { status: 'resolved', resolvedId: row.id, resolvedName: recordName(row, v) };
+          }
         });
       }
       return res.json({ results });
