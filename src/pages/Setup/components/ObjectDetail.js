@@ -45,7 +45,8 @@ import {
   EyeOff,
   RotateCcw,
   Check,
-  LayoutTemplate
+  LayoutTemplate,
+  Search
 } from 'lucide-react';
 
 
