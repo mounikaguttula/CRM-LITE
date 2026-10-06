@@ -1816,6 +1816,7 @@ function ObjectListContent({ objectTypeId }) {
   const [serverTotalPages, setServerTotalPages] = useState(1);
   const [isServerPaginated, setIsServerPaginated] = useState(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const reqSeqRef = useRef(0);
 
   // Filter & Sort Popover States
@@ -1950,7 +1951,7 @@ function ObjectListContent({ objectTypeId }) {
     return () => {
       isMounted = false;
     };
-  }, [objectTypeId, currentPage, pageSize, debouncedQuery, resetImportState, sortBy, sortOrder, filterStatus]);
+  }, [objectTypeId, currentPage, pageSize, debouncedQuery, resetImportState, sortBy, sortOrder, filterStatus, refreshTrigger]);
 
 
   const rawMeta = objectTypes ? objectTypes[objectTypeId] : null;
@@ -2043,15 +2044,25 @@ function ObjectListContent({ objectTypeId }) {
     setDeleteError(null);
     try {
       await apiDelete(`/objects/${objectTypeId}/${deleteModalRecord.id}`);
-      setRecords((prev) => prev.filter((r) => r.id !== deleteModalRecord.id));
+      const deletedId = deleteModalRecord.id;
+      setRecords((prev) => prev.filter((r) => r.id !== deletedId));
       setSelectedRecordIds((prev) => {
         const next = new Set(prev);
-        next.delete(deleteModalRecord.id);
+        next.delete(deletedId);
         return next;
       });
       const deletedTitle = deleteModalRecord.title;
       setDeleteModalRecord(null);
       showToast(`"${deletedTitle}" deleted successfully!`, 'success');
+
+      // Refresh pagination state: if current page is now beyond total pages, step back page; otherwise re-fetch page
+      const remainingTotal = Math.max(0, totalServerRecords - 1);
+      const newTotalPages = Math.max(1, Math.ceil(remainingTotal / pageSize));
+      if (currentPage > newTotalPages) {
+        setCurrentPage(newTotalPages);
+      } else {
+        setRefreshTrigger((prev) => prev + 1);
+      }
     } catch (err) {
       console.error('Delete record error:', err);
       const errMsg = err?.response?.data?.message || err?.message || "You don't have permission to delete this record.";
@@ -2082,6 +2093,15 @@ function ObjectListContent({ objectTypeId }) {
           deleted.forEach((id) => next.delete(id));
           return next;
         });
+
+        // Refresh pagination state: if current page is now beyond total pages, step back page; otherwise re-fetch page
+        const remainingTotal = Math.max(0, totalServerRecords - deleted.length);
+        const newTotalPages = Math.max(1, Math.ceil(remainingTotal / pageSize));
+        if (currentPage > newTotalPages) {
+          setCurrentPage(newTotalPages);
+        } else {
+          setRefreshTrigger((prev) => prev + 1);
+        }
       }
 
       setBulkDeleteModalOpen(false);
@@ -2579,28 +2599,196 @@ function ObjectListContent({ objectTypeId }) {
     return str;
   };
 
-  const handleExportCSV = () => {
+  /* Export Field Selection Modal State */
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportSearch, setExportSearch] = useState('');
+  const [selectedExportKeys, setSelectedExportKeys] = useState(new Set());
+
+  const availableExportFields = useMemo(() => {
+    const cleanObjKey = String(objectTypeId || '').toLowerCase();
+    const isCompany = cleanObjKey.includes('company') || cleanObjKey.includes('account');
+    const isContact = cleanObjKey.includes('contact');
+    const isDeal = cleanObjKey.includes('deal');
+
+    const fieldsList = [];
+
+    // Required Fields (ALWAYS checked & locked in Column A and Column B)
+    if (isCompany) {
+      fieldsList.push({ key: 'name', label: 'Company Name', category: 'Required Fields', required: true });
+      fieldsList.push({ key: 'id', label: 'Company ID', category: 'Required Fields', required: true });
+    } else {
+      const primaryTitleKey = meta.fields?.find((f) => f.isTitle)?.name || (isContact ? 'name' : (isDeal ? 'deal_name' : 'name'));
+      const titleLabel = meta.fields?.find((f) => f.isTitle)?.label || (isContact ? 'Contact Name' : (isDeal ? 'Deal Name' : 'Record Title'));
+      fieldsList.push({ key: primaryTitleKey, label: titleLabel, category: 'Required Fields', required: true });
+      fieldsList.push({ key: 'id', label: 'Record ID', category: 'Required Fields', required: true });
+    }
+
+    // Ownership Fields
+    fieldsList.push({ key: 'owner_id', label: 'Owner ID', category: 'Ownership', required: false });
+    fieldsList.push({ key: 'owner_name', label: 'Owner Name', category: 'Ownership', required: false });
+    fieldsList.push({ key: 'owner_email', label: 'Owner Email', category: 'Ownership', required: false });
+
+    // Object Details & Custom Fields from Metadata
+    const metaFields = backendFields && backendFields.length > 0 ? backendFields : (meta.fields || []);
+    metaFields.forEach((f) => {
+      const key = f.name || f.api_name;
+      const label = f.label || f.display_name || humanize(key);
+      if (!key || ['id', 'is_deleted', 'organization_id'].includes(key)) return;
+      if (fieldsList.some((item) => item.key === key)) return;
+
+      fieldsList.push({
+        key,
+        label,
+        category: f.is_custom ? 'Custom Fields' : 'Company Details',
+        required: false,
+      });
+    });
+
+    return fieldsList;
+  }, [objectTypeId, meta, backendFields]);
+
+  const handleOpenExportModal = () => {
     const listToExport = filteredRecords && filteredRecords.length > 0 ? filteredRecords : records;
     if (!listToExport || listToExport.length === 0) {
       showToast(`No ${meta.pluralDisplayName.toLowerCase()} records available to export.`, 'error');
       return;
     }
 
-    const exportKeys = columns.map(c => c.key);
-    if (!exportKeys.includes('email') && listToExport.some(r => r.email || (r.data && r.data.email))) exportKeys.push('email');
-    if (!exportKeys.includes('phone') && listToExport.some(r => r.phone || (r.data && r.data.phone))) exportKeys.push('phone');
+    const defaultKeys = new Set();
+    availableExportFields.filter((f) => f.required).forEach((f) => defaultKeys.add(f.key));
 
-    const headers = exportKeys.map(k => humanize(k));
+    columns.forEach((c) => {
+      if (availableExportFields.some((af) => af.key === c.key)) defaultKeys.add(c.key);
+    });
+    ['owner_name', 'email', 'phone', 'industry', 'company_size__c', 'annual_revenue', 'status', 'created_at'].forEach((k) => {
+      if (availableExportFields.some((af) => af.key === k)) defaultKeys.add(k);
+    });
+
+    setSelectedExportKeys(defaultKeys);
+    setExportSearch('');
+    setExportModalOpen(true);
+  };
+
+  const handleSelectAllExport = () => {
+    const next = new Set(selectedExportKeys);
+    availableExportFields.forEach((f) => next.add(f.key));
+    setSelectedExportKeys(next);
+  };
+
+  const handleClearAllExport = () => {
+    const next = new Set();
+    availableExportFields.filter((f) => f.required).forEach((f) => next.add(f.key));
+    setSelectedExportKeys(next);
+  };
+
+  const handleToggleExportField = (key, required) => {
+    if (required) return;
+    setSelectedExportKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleExecuteExportCSV = () => {
+    const listToExport = filteredRecords && filteredRecords.length > 0 ? filteredRecords : records;
+    if (!listToExport || listToExport.length === 0) {
+      showToast(`No ${meta.pluralDisplayName.toLowerCase()} records available to export.`, 'error');
+      setExportModalOpen(false);
+      return;
+    }
+
+    const cleanObjKey = String(objectTypeId || '').toLowerCase();
+    const isCompany = cleanObjKey.includes('company') || cleanObjKey.includes('account');
+
+    // Build ordered export keys: Required fields FIRST (Column A: Name, Column B: ID), then selected optional keys
+    const requiredKeys = availableExportFields.filter((f) => f.required).map((f) => f.key);
+    const selectedOptionalKeys = availableExportFields
+      .filter((f) => !f.required && selectedExportKeys.has(f.key))
+      .map((f) => f.key);
+
+    const exportKeys = [...requiredKeys, ...selectedOptionalKeys];
+
+    const getHeaderLabel = (k) => {
+      if (k === 'name' && isCompany) return 'Company Name';
+      if (k === 'id' && isCompany) return 'Company ID';
+      if (k === 'owner_id') return 'Owner ID';
+      if (k === 'owner_email') return 'Owner Email';
+      if (k === 'owner_name') return 'Owner Name';
+      if (k === 'id') return 'Record ID';
+      const af = availableExportFields.find((f) => f.key === k);
+      return af ? af.label : humanize(k);
+    };
+
+    const expandScientificNotation = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val).trim();
+      if (!str) return '';
+      if (/^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/.test(str)) {
+        const num = Number(str);
+        if (!isNaN(num) && Number.isFinite(num)) {
+          try {
+            if (Math.floor(num) === num || Math.abs(num - Math.round(num)) < 1e-5) {
+              if (typeof window !== 'undefined' && typeof window.BigInt === 'function') {
+                return window.BigInt(Math.round(num)).toString();
+              }
+            }
+            return num.toFixed(0);
+          } catch (e) {
+            return num.toFixed(0);
+          }
+        }
+      }
+      return str;
+    };
+
+    const isNumericFieldKey = (k, type) => {
+      const lowerKey = String(k || '').toLowerCase();
+      const lowerType = String(type || '').toLowerCase();
+      if (['number', 'integer', 'decimal', 'currency', 'float', 'double'].includes(lowerType)) return true;
+      if (['company_size__c', 'annual_revenue', 'size', 'revenue', 'amount'].includes(lowerKey)) return true;
+      return false;
+    };
+
+    const headers = exportKeys.map(getHeaderLabel);
     const csvRows = [headers.join(',')];
 
     for (const rec of listToExport) {
-      const rowVals = exportKeys.map(k => {
-        let val = rec[k];
-        if (val === undefined || val === null) {
-          val = rec.data ? rec.data[k] : '';
+      const rowVals = exportKeys.map((k) => {
+        let val;
+        if (k === 'id') {
+          val = rec.id;
+        } else if (k === 'owner_id') {
+          val = rec.owner_id || rec.data?.owner_id || '';
+        } else if (k === 'owner_email') {
+          const uId = rec.owner_id || rec.data?.owner_id;
+          val = lookupMap.users?.[uId]?.email || lookupMap.all?.[uId]?.email || '';
+        } else if (k === 'owner_name') {
+          const uId = rec.owner_id || rec.data?.owner_id;
+          const u = lookupMap.users?.[uId] || lookupMap.all?.[uId];
+          val = u ? (u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email) : '';
+        } else {
+          val = rec[k] !== undefined && rec[k] !== null ? rec[k] : (rec.data ? rec.data[k] : '');
         }
-        val = String(val || '').replace(/"/g, '""');
-        return `"${val}"`;
+
+        const rawStr = String(val !== undefined && val !== null ? val : '').trim();
+        const expandedStr = expandScientificNotation(rawStr);
+
+        const fieldDef = availableExportFields.find((f) => f.key === k);
+        const fType = fieldDef?.type || '';
+        const isNum = isNumericFieldKey(k, fType);
+        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(expandedStr);
+        const isDigitsOnly = /^\d+$/.test(expandedStr);
+        const wasScientific = /^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/.test(rawStr);
+
+        // Format metadata TEXT fields containing numeric IDs or scientific notation as Excel formula strings ="345777000000"
+        if (!isNum && !isUuid && (isDigitsOnly || wasScientific) && expandedStr.length > 0) {
+          return `"=""${expandedStr}"""`;
+        }
+
+        const escaped = expandedStr.replace(/"/g, '""');
+        return `"${escaped}"`;
       });
       csvRows.push(rowVals.join(','));
     }
@@ -2614,6 +2802,9 @@ function ObjectListContent({ objectTypeId }) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    setExportModalOpen(false);
+    showToast(`Successfully exported ${listToExport.length} ${meta.pluralDisplayName.toLowerCase()} records to CSV.`, 'success');
   };
 
   if (!loading && permissions && objPerm && objPerm.canRead === false) {
@@ -2637,7 +2828,7 @@ function ObjectListContent({ objectTypeId }) {
         {/* Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
-            onClick={handleExportCSV}
+            onClick={handleOpenExportModal}
             className="glass glass-hover"
             style={{
               display: 'flex',
@@ -3741,6 +3932,264 @@ function ObjectListContent({ objectTypeId }) {
                     <span>Delete Selected</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Export Field Selection Modal ── */}
+      {exportModalOpen && ReactDOM.createPortal(
+        <div
+          className="fade-in"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+        >
+          <div
+            className="fade-in-up"
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '24px',
+              maxWidth: '580px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0,0,0,0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '88vh',
+              overflow: 'hidden',
+              position: 'relative',
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f1f5f9', position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setExportModalOpen(false)}
+                style={{
+                  position: 'absolute',
+                  top: 20,
+                  right: 20,
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: 6,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <X size={18} />
+              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 14px rgba(99,102,241,0.3)',
+                  }}
+                >
+                  <Download size={20} />
+                </div>
+                <div>
+                  <h3 className="font-display" style={{ margin: 0, fontSize: 19, fontWeight: 800, color: '#0f172a' }}>
+                    Export {meta.pluralDisplayName}
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: 13, color: '#64748b', fontWeight: 500 }}>
+                    Select the fields you want to include in the CSV export.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Controls Bar: Search & Quick Select */}
+            <div style={{ padding: '16px 28px 12px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Search Box */}
+              <div style={{ position: 'relative' }}>
+                <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  value={exportSearch}
+                  onChange={(e) => setExportSearch(e.target.value)}
+                  placeholder="Search fields..."
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px 9px 36px',
+                    borderRadius: 10,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: 13,
+                    outline: 'none',
+                    background: '#ffffff',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {/* Action Buttons: Select All / Clear All & Counter */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={handleSelectAllExport}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAllExport}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: '#6366f1' }}>
+                  {selectedExportKeys.size} of {availableExportFields.length} selected
+                </span>
+              </div>
+            </div>
+
+            {/* Field Options Scrollable List */}
+            <div style={{ padding: '16px 28px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {['Required Fields', 'Ownership', 'Company Details', 'Custom Fields', 'Module Details'].map((catName) => {
+                const catFields = availableExportFields.filter((f) => {
+                  if (f.category !== catName && !(catName === 'Company Details' && f.category === 'Module Details')) return false;
+                  if (!exportSearch) return true;
+                  const q = exportSearch.toLowerCase();
+                  return f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q);
+                });
+
+                if (catFields.length === 0) return null;
+
+                return (
+                  <div key={catName}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+                      {catName}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+                      {catFields.map((f) => {
+                        const isChecked = selectedExportKeys.has(f.key) || f.required;
+                        return (
+                          <div
+                            key={f.key}
+                            onClick={() => handleToggleExportField(f.key, f.required)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              borderRadius: 10,
+                              background: isChecked ? 'rgba(99,102,241,0.06)' : '#ffffff',
+                              border: isChecked ? '1.5px solid #a5b4fc' : '1px solid #e2e8f0',
+                              cursor: f.required ? 'not-allowed' : 'pointer',
+                              userSelect: 'none',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={f.required}
+                                onChange={() => {}}
+                                style={{ accentColor: '#6366f1', cursor: f.required ? 'not-allowed' : 'pointer' }}
+                              />
+                              <span style={{ fontSize: 13, fontWeight: isChecked ? 700 : 500, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {f.label}
+                              </span>
+                            </div>
+                            {f.required && (
+                              <span style={{ fontSize: 10, fontWeight: 800, color: '#6366f1', background: '#eef2ff', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase' }}>
+                                Required
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '16px 28px', borderTop: '1px solid #f1f5f9', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setExportModalOpen(false)}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: 12,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteExportCSV}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 22px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  color: '#ffffff',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+                }}
+              >
+                <Download size={15} /> Export CSV
               </button>
             </div>
           </div>

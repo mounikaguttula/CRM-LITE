@@ -14,6 +14,17 @@ const startSession = async ({ organization_id, user_id, user_email, name }) => {
         const client = getClient();
         const nowIso = new Date().toISOString();
 
+        // Close/expire any lingering LOGIN rows for this user before creating a new login session
+        await client
+            .from('audit_logs')
+            .update({
+                event_type: 'SESSION_EXPIRED',
+                details: { logout_reason: 'REPLACED_BY_NEW_LOGIN', logged_out_at: nowIso }
+            })
+            .eq('organization_id', organization_id)
+            .eq('user_id', user_id)
+            .eq('event_type', 'LOGIN');
+
         const { data, error } = await client
             .from('audit_logs')
             .insert([{
@@ -52,12 +63,13 @@ const updateLastActivity = async ({ organization_id, user_id, user_email, name }
         const client = getClient();
         const nowIso = new Date().toISOString();
 
-        // Fetch latest session row (LOGIN or SESSION_EXPIRED)
+        // Fetch latest LOGIN session row
         const { data: sessionRow, error: fetchErr } = await client
             .from('audit_logs')
             .select('*')
             .eq('organization_id', organization_id)
             .eq('user_id', user_id)
+            .eq('event_type', 'LOGIN')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
