@@ -26,6 +26,8 @@ router.delete('/metadata/objects/:objectType/fields/:fieldId', metadataControlle
 router.get('/metadata/objects/:objectType/views', metadataController.getObjectViews);
 router.get('/metadata/navigation', metadataController.getNavigation);
 router.get('/metadata/permissions', metadataController.getPermissions);
+router.get('/metadata/page-layout/:objectType', metadataController.getPageLayout);
+router.post('/metadata/page-layout/:objectType', metadataController.savePageLayout);
 
 // Backwards compatibility & organization-based aliases
 router.get('/workspace/metadata', metadataController.getPlatformMetadata);
@@ -36,6 +38,8 @@ router.post('/objects/:objectTypeId/fields', metadataController.createObjectFiel
 router.delete('/objects/:objectTypeId/fields/:fieldId', metadataController.deleteObjectField);
 router.get('/objects/:objectTypeId/views', metadataController.getObjectViews);
 router.get('/objects/:objectTypeId/layouts', metadataController.getObjectViews);
+router.get('/objects/:objectTypeId/layout', metadataController.getPageLayout);
+router.post('/objects/:objectTypeId/layout', metadataController.savePageLayout);
 
 // Organization tenant routes
 router.get('/organizations/:organizationId/objects', metadataController.getObjectDefinitions);

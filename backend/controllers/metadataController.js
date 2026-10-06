@@ -418,6 +418,44 @@ const getCurrentUserSetupProfile = async (req, res, next) => {
     next(err);
   }
 };
+const getPageLayout = async (req, res, next) => {
+  try {
+    const objectType = req.params.objectType || req.params.objectTypeId;
+    const organizationId = req.user?.organization_id;
+    const layout = await metadataService.getPageLayout(objectType, organizationId);
+    return res.status(200).json({ success: true, layout });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const savePageLayout = async (req, res, next) => {
+  try {
+    const roleName = String(req.user?.role?.name || req.user?.role_name || req.user?.role || '').toLowerCase();
+    const isAdmin = roleName.includes('admin') || roleName.includes('administrator') || req.user?.is_admin === true;
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: 'Only administrators can edit page layouts.' });
+    }
+
+    const objectType = req.params.objectType || req.params.objectTypeId;
+    const organizationId = req.user?.organization_id;
+    const layoutConfig = req.body;
+    const saved = await metadataService.savePageLayout(objectType, layoutConfig, organizationId);
+
+    auditService.logSetupActivity({
+      organization_id: organizationId,
+      user_id: req.user?.id,
+      action: 'UPDATE',
+      entity_type: 'page_layout',
+      entity_name: objectType,
+      module_name: objectType,
+    }).catch((err) => console.error('❌ Audit log error:', err.message));
+
+    return res.status(200).json({ success: true, layout: saved });
+  } catch (err) {
+    next(err);
+  }
+};
 
 module.exports = {
   getPlatformMetadata,
@@ -434,4 +472,6 @@ module.exports = {
   getRecentActivity,
   getConfigurationOverview,
   getCurrentUserSetupProfile,
+  getPageLayout,
+  savePageLayout,
 };

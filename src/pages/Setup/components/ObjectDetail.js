@@ -2,6 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { apiGet, apiPost, apiDelete } from '../../../api/client';
 import { useWorkspace } from '../../../context/WorkspaceContext';
+import PageLayoutModal from '../../../components/PageLayoutModal';
+import {
+  buildLayoutFieldList,
+  saveStoredLayout,
+  resetStoredLayout,
+} from '../../../utils/pageLayoutUtils';
 import {
   ArrowLeft,
   Plus,
@@ -34,7 +40,12 @@ import {
   Megaphone,
   UserCheck,
   Pencil,
-  AlertTriangle
+  AlertTriangle,
+  Eye,
+  EyeOff,
+  RotateCcw,
+  Check,
+  LayoutTemplate
 } from 'lucide-react';
 
 
@@ -545,7 +556,7 @@ function ObjectDetail({ objectKey, onBack }) {
 
 
       {activeTab === 'layouts' && (
-        <PageLayoutsTab displayName={displayName} fields={fields} />
+        <PageLayoutsTab objectKey={objectKey} displayName={displayName} fields={fields} showToast={showToast} />
       )}
 
 
@@ -966,66 +977,122 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, can
 /* ══════════════════════════════════════════════
    Tab 3: Page Layouts
    ══════════════════════════════════════════════ */
-function PageLayoutsTab({ displayName, fields }) {
-  const [fieldOrder, setFieldOrder] = useState(fields.map((_, i) => i));
+function PageLayoutsTab({ objectKey, displayName, fields, showToast }) {
+  const [layoutFields, setLayoutFields] = useState([]);
   const [dragIdx, setDragIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
 
-
-  // Sync field order if fields change
-  React.useEffect(() => {
-    setFieldOrder(fields.map((_, i) => i));
-  }, [fields]);
-
+  // Sync field layout when objectKey or fields change
+  useEffect(() => {
+    if (objectKey) {
+      const list = buildLayoutFieldList(objectKey, fields);
+      setLayoutFields(list);
+    }
+  }, [objectKey, fields]);
 
   const handleDragStart = (idx) => setDragIdx(idx);
   const handleDragOver = (e, idx) => { e.preventDefault(); setDragOverIdx(idx); };
   const handleDragEnd = () => {
     if (dragIdx !== null && dragOverIdx !== null && dragIdx !== dragOverIdx) {
-      const newOrder = [...fieldOrder];
-      const [moved] = newOrder.splice(dragIdx, 1);
-      newOrder.splice(dragOverIdx, 0, moved);
-      setFieldOrder(newOrder);
+      setLayoutFields((prev) => {
+        const next = [...prev];
+        const [moved] = next.splice(dragIdx, 1);
+        next.splice(dragOverIdx, 0, moved);
+        return next;
+      });
     }
     setDragIdx(null);
     setDragOverIdx(null);
   };
 
+  const toggleVisibility = (idx) => {
+    setLayoutFields((prev) => {
+      const next = [...prev];
+      const item = next[idx];
+      if (item.required && item.visible) return next;
+      next[idx] = { ...item, visible: !item.visible };
+      return next;
+    });
+  };
 
-  const orderedFields = fieldOrder.map((i) => fields[i]).filter(Boolean);
+  const handleSave = () => {
+    const layoutConfig = {
+      objectTypeId: objectKey,
+      fields: layoutFields.map((f) => ({
+        name: f.name,
+        label: f.label,
+        visible: f.visible,
+        section: f.section || 'details',
+      })),
+    };
 
+    saveStoredLayout(objectKey, layoutConfig);
+    setSavedSuccess(true);
+    if (showToast) showToast('success', `Page layout for ${displayName} saved successfully!`);
+    setTimeout(() => setSavedSuccess(false), 2000);
+  };
+
+  const handleReset = () => {
+    resetStoredLayout(objectKey);
+    const defaultList = buildLayoutFieldList(objectKey, fields).map((f) => ({ ...f, visible: true }));
+    setLayoutFields(defaultList);
+    if (showToast) showToast('success', `Reset ${displayName} page layout to default.`);
+  };
+
+  const visibleCount = layoutFields.filter((f) => f.visible).length;
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div className="glass" style={{ padding: '24px 28px', borderRadius: '16px 16px 0 0', borderBottom: 'none', background: '#ffffff', border: '1px solid #f1f5f9', boxShadow: '0 4px 18px rgba(15, 23, 42, 0.03), 0 1px 3px rgba(15, 23, 42, 0.02)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="glass" style={{ padding: '24px 28px', borderRadius: '16px 16px 0 0', borderBottom: 'none', background: '#ffffff', border: '1px solid #f1f5f9', boxShadow: '0 4px 18px rgba(15, 23, 42, 0.03)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <h3 className="font-display" style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#1c2033' }}>
-              {displayName} Layout
+              {displayName} Page Layout
             </h3>
             <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-              Drag and drop fields to switch positions.
+              Drag & drop fields to arrange view order. Toggle visibility to choose which fields display on the record View page.
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={{
               padding: '5px 14px', borderRadius: 20, fontSize: '0.74rem',
-              fontWeight: 600, background: 'rgba(16,185,129,0.1)', color: '#10b981',
+              fontWeight: 700, background: 'rgba(16,185,129,0.1)', color: '#10b981',
               border: '1px solid rgba(16,185,129,0.2)',
             }}>
-              ● Active
+              ● {visibleCount} of {layoutFields.length} Visible
             </span>
-            <span style={{
-              padding: '5px 14px', borderRadius: 20, fontSize: '0.74rem',
-              fontWeight: 600, background: 'rgba(99,102,241,0.08)', color: '#6366f1',
-            }}>
-              {orderedFields.length} Fields
-            </span>
+            <button
+              type="button"
+              onClick={handleReset}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 10, fontSize: '0.8rem',
+                fontWeight: 600, background: '#ffffff', border: '1px solid #fca5a5',
+                color: '#dc2626', cursor: 'pointer',
+              }}
+            >
+              <RotateCcw size={13} /> Reset Default
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 18px', borderRadius: 10, fontSize: '0.82rem',
+                fontWeight: 700, color: '#ffffff',
+                background: savedSuccess ? '#16a34a' : 'linear-gradient(135deg, #6366f1, #3b82f6)',
+                border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.3)',
+              }}
+            >
+              <Check size={14} /> {savedSuccess ? 'Saved!' : 'Save Layout'}
+            </button>
           </div>
         </div>
       </div>
-
 
       {/* Field list — draggable layout editor */}
       <div
@@ -1033,61 +1100,48 @@ function PageLayoutsTab({ displayName, fields }) {
         style={{
           borderRadius: '0 0 16px 16px', padding: '16px 28px 24px',
           border: '1px solid #f1f5f9', borderTop: 'none', background: '#ffffff',
-          boxShadow: '0 4px 18px rgba(15, 23, 42, 0.03), 0 1px 3px rgba(15, 23, 42, 0.02)',
+          boxShadow: '0 4px 18px rgba(15, 23, 42, 0.03)',
         }}
       >
-        {orderedFields.length === 0 ? (
+        {layoutFields.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
             No fields in this layout.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-            {orderedFields.map((field, idx) => {
-              const fieldLabel = field.label || field.display_name || field.name || '—';
-              const dataType = field.type || field.field_type || 'text';
-              const isRequired = field.required || false;
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+            {layoutFields.map((field, idx) => {
               const isDragging = dragIdx === idx;
               const isDragOver = dragOverIdx === idx;
 
-
               return (
                 <div
-                  key={field.id || field.name || idx}
+                  key={field.name || idx}
                   draggable
                   onDragStart={() => handleDragStart(idx)}
                   onDragOver={(e) => handleDragOver(e, idx)}
                   onDragEnd={handleDragEnd}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 14,
-                    padding: '14px 18px', borderRadius: 10,
+                    padding: '12px 18px', borderRadius: 12,
                     border: isDragOver
                       ? '2px solid #6366f1'
-                      : '1px solid #e2e8f0',
+                      : field.visible
+                      ? '1px solid #e2e8f0'
+                      : '1px dashed #cbd5e1',
                     background: isDragging
                       ? 'rgba(99,102,241,0.06)'
                       : isDragOver
-                        ? 'rgba(99,102,241,0.03)'
-                        : '#ffffff',
+                      ? 'rgba(99,102,241,0.03)'
+                      : field.visible
+                      ? '#ffffff'
+                      : '#f8fafc',
                     cursor: 'grab',
-                    opacity: isDragging ? 0.6 : 1,
+                    opacity: isDragging ? 0.6 : field.visible ? 1 : 0.6,
                     transition: 'all 0.15s ease',
-                    boxShadow: isDragOver ? '0 0 0 1px rgba(99,102,241,0.3)' : 'none',
-                  }}
-                  onMouseOver={(e) => {
-                    if (!isDragging) e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)';
-                  }}
-                  onMouseOut={(e) => {
-                    if (!isDragging) e.currentTarget.style.boxShadow = 'none';
                   }}
                 >
                   {/* Grip handle */}
-                  <div
-                    style={{
-                      display: 'flex', flexDirection: 'column', gap: 2,
-                      color: '#94a3b8', flexShrink: 0, cursor: 'grab',
-                      padding: '2px 0',
-                    }}
-                  >
+                  <div style={{ color: '#94a3b8', flexShrink: 0, cursor: 'grab' }}>
                     <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
                       <circle cx="3" cy="2" r="1.5" />
                       <circle cx="9" cy="2" r="1.5" />
@@ -1098,12 +1152,19 @@ function PageLayoutsTab({ displayName, fields }) {
                     </svg>
                   </div>
 
+                  {/* Visibility Checkbox */}
+                  <input
+                    type="checkbox"
+                    checked={field.visible}
+                    disabled={field.required && field.visible}
+                    onChange={() => toggleVisibility(idx)}
+                    style={{ width: 16, height: 16, accentColor: '#6366f1', cursor: 'pointer' }}
+                  />
 
                   {/* Field name */}
-                  <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#1c2033', flex: 1 }}>
-                    {fieldLabel}
+                  <span style={{ fontWeight: 600, fontSize: '0.88rem', color: field.visible ? '#1c2033' : '#64748b', flex: 1 }}>
+                    {field.label}
                   </span>
-
 
                   {/* Data type badge */}
                   <span style={{
@@ -1112,12 +1173,11 @@ function PageLayoutsTab({ displayName, fields }) {
                     background: 'rgba(99,102,241,0.06)', fontSize: '0.72rem',
                     color: '#64748b', fontWeight: 500,
                   }}>
-                    <DataTypeIcon type={dataType} />
+                    <DataTypeIcon type={field.type} />
                   </span>
 
-
                   {/* Required badge */}
-                  {isRequired && (
+                  {field.required && (
                     <span style={{
                       padding: '2px 8px', borderRadius: 12, fontSize: '0.68rem',
                       fontWeight: 700, background: 'rgba(99,102,241,0.1)',
@@ -1133,6 +1193,19 @@ function PageLayoutsTab({ displayName, fields }) {
           </div>
         )}
       </div>
+
+      <PageLayoutModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        objectTypeId={objectKey}
+        displayName={displayName}
+        availableFields={fields}
+        onLayoutSaved={() => {
+          const list = buildLayoutFieldList(objectKey, fields);
+          setLayoutFields(list);
+          if (showToast) showToast('success', `Page layout for ${displayName} saved!`);
+        }}
+      />
     </div>
   );
 }

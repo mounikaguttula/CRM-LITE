@@ -983,7 +983,7 @@ const metadataService = {
    * Build complete platform metadata configuration.
    * Uses Cache-Aside pattern with Redis caching for getPlatformMetadata().
    */
-   getPlatformMetadata: async (user, forceRefresh = false) => {
+  getPlatformMetadata: async (user, forceRefresh = false) => {
     const reqStart = Date.now();
     const orgId = user?.organization_id;
     const cacheKey = `crm:org:${orgId || 'global'}:user:${user?.id || 'guest'}:metadata`;
@@ -1088,7 +1088,7 @@ const metadataService = {
 
     // Measure Permissions query execution time (Object + Field Permissions)
     const tPermStart = Date.now();
-    
+
     // Resolve Role ID without secondary DB query
     let roleId = user?.role_id || userRes?.data?.role_id;
     let tRoleResolve = 0;
@@ -1707,10 +1707,87 @@ const metadataService = {
     }
     return allFields;
   },
+
+  /**
+   * Get custom Page Layout configuration for object from page_layouts table
+   */
+  getPageLayout: async (objectType, organizationId) => {
+    const objDef = await metadataService.getObjectTypeByApiName(objectType, organizationId);
+    if (!objDef) return null;
+
+    let query = supabase
+      .from('page_layouts')
+      .select('layout_data')
+      .eq('object_type_id', objDef.id)
+      .eq('layout_type', 'view');
+
+    if (isUuid(organizationId)) {
+      query = query.or(`organization_id.eq.${organizationId},organization_id.is.null`);
+    }
+
+    const { data, error } = await query
+      .order('organization_id', { ascending: false, nullsFirst: false })
+      .limit(1);
+
+    if (error) {
+      console.warn('Error reading from page_layouts table:', error.message);
+      return null;
+    }
+
+    return (data && data.length > 0) ? data[0].layout_data : null;
+  },
+
+  /**
+   * Persist custom Page Layout configuration into page_layouts table
+   */
+  savePageLayout: async (objectType, layoutConfig, organizationId) => {
+    const objDef = await metadataService.getObjectTypeByApiName(objectType, organizationId);
+    if (!objDef) throw new Error('Object type definition not found');
+
+    const orgId = isUuid(organizationId) ? organizationId : null;
+    const now = new Date().toISOString();
+
+    const payload = {
+      organization_id: orgId,
+      object_type_id: objDef.id,
+      layout_name: 'Default Layout',
+      layout_type: 'view',
+      is_default: true,
+      layout_data: layoutConfig,
+      updated_at: now,
+    };
+
+    const { data, error } = await supabase
+      .from('page_layouts')
+      .upsert(payload, { onConflict: 'organization_id,object_type_id,layout_type' })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error('PostgreSQL page_layouts upsert error:', error.message);
+      const { data: existing } = await supabase
+        .from('page_layouts')
+        .select('id')
+        .eq('object_type_id', objDef.id)
+        .eq('layout_type', 'view')
+        .maybeSingle();
+
+      if (existing?.id) {
+        await supabase
+          .from('page_layouts')
+          .update({ layout_data: layoutConfig, updated_at: now })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('page_layouts')
+          .insert(payload);
+      }
+    }
+
+    await invalidateMetadataCache(organizationId);
+    return layoutConfig;
+  },
 };
 
 
 module.exports = metadataService;
-
-
-
