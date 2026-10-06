@@ -1,8 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
-backend/node_modules
+node_modules/
+**/node_modules/
 /.pnp
 .pnp.js
 
@@ -26,3 +26,9 @@ yarn-error.log*
 .env
 .env.*
 **/.env
+
+# Temporary and Scratch files
+scratch.js
+scratch.*
+report.json
+report.md

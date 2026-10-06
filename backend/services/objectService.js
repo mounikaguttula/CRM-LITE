@@ -5,6 +5,34 @@ const validationRuleService = require('./validationRuleService');
 // Helper to validate UUID format to prevent PostgreSQL syntax errors
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
 
+const getNormalizedKeys = (val) => {
+  if (val === null || val === undefined) return [];
+  let str = String(val).trim();
+  if (!str) return [];
+  const keys = new Set();
+  const lower = str.toLowerCase();
+  keys.add(lower);
+  keys.add(str.toUpperCase());
+
+  const num = Number(str);
+  if (!Number.isNaN(num) && num > 0) {
+    try {
+      const exp5 = num.toExponential(5).toUpperCase();
+      keys.add(exp5);
+      keys.add(exp5.toLowerCase());
+    } catch (e) {}
+    try {
+      if (Number.isInteger(num)) {
+        const intStr = BigInt(Math.round(num)).toString().toLowerCase();
+        keys.add(intStr);
+      }
+    } catch (e) {}
+  }
+  return Array.from(keys);
+};
+
+const normalizeIdentifier = (val) => getNormalizedKeys(val)[0] || '';
+
 // Non-email field suffix list (fields whose names contain 'email' but are NOT email address fields)
 const NON_EMAIL_SUFFIXES = ['domain', 'status', 'opt_out', 'optout', 'count', 'score', 'reason', 'type', 'id', 'link', 'date', 'time', 'timestamp'];
 
@@ -657,7 +685,10 @@ const objectService = {
     const { definition: objDef, fields } = await metadataService.getObjectDefinition(objectKey, organizationId);
 
     // Map name aliases if first_name / last_name / name are present
-    const rawName = (payload.name || payload.first_name || payload.title || '').trim();
+    const fnInput = (payload.first_name || '').trim();
+    const lnInput = (payload.last_name || '').trim();
+    const combinedFNLN = `${fnInput} ${lnInput}`.trim();
+    const rawName = (payload.name || combinedFNLN || payload.first_name || payload.title || '').trim();
     if (rawName) {
       if (!payload.name) payload.name = rawName;
       if (!payload.first_name) payload.first_name = rawName.split(' ')[0] || rawName;
@@ -1366,6 +1397,7 @@ const objectService = {
     const companyByIdMap = new Map();
     const contactByIdMap = new Map();
     const companyByNameMap = new Map();
+    const companyByExternalIdMap = new Map();
     const contactByNameMap = new Map();
 
     // Build all relationship lookup promises upfront, then execute in parallel
@@ -1403,8 +1435,8 @@ const objectService = {
       }
     }
 
-    // Company Name lookup
-    if (companyNamesSet.size > 0 && companyObjectType) {
+    // Company Name and External ID lookup
+    if ((companyNamesSet.size > 0 || companyIdsSet.size > 0) && companyObjectType) {
       relationshipPromises.push(
         supabase
           .from('universal_table')
@@ -1414,11 +1446,21 @@ const objectService = {
           .eq('is_deleted', false)
           .then(({ data: rows }) => {
             (rows || []).forEach(r => {
-              const rName = String(r.name || r.data?.name || r.data?.company_name || '').trim().toLowerCase();
-              if (companyNamesSet.has(rName)) {
-                if (!companyByNameMap.has(rName)) companyByNameMap.set(rName, []);
-                companyByNameMap.get(rName).push(r);
-              }
+              companyByIdMap.set(r.id, r);
+
+              const nameVal = r.name || r.data?.name || r.data?.company_name || '';
+              getNormalizedKeys(nameVal).forEach(k => {
+                if (!companyByNameMap.has(k)) companyByNameMap.set(k, []);
+                const list = companyByNameMap.get(k);
+                if (!list.some(e => e.id === r.id)) list.push(r);
+              });
+
+              const extIdVal = r.data?.record_id__c ?? r.data?.external_id ?? '';
+              getNormalizedKeys(extIdVal).forEach(k => {
+                if (!companyByExternalIdMap.has(k)) companyByExternalIdMap.set(k, []);
+                const list = companyByExternalIdMap.get(k);
+                if (!list.some(e => e.id === r.id)) list.push(r);
+              });
             });
           })
       );
@@ -1451,7 +1493,7 @@ const objectService = {
     // 4. Duplicate checks (in-CSV + existing DB)
     // Option C: Fetch existing records ONCE and reuse for all unique fields.
     // Previously each unique field triggered a separate full-table scan.
-    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code' || f.name === 'hubspot_reference_id');
+    const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code');
     const seenCsvValuesMap = new Map();
     uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Set()));
 
@@ -1509,6 +1551,17 @@ const objectService = {
         const cleanPayload = { ...payload };
         delete cleanPayload.__rowNum;
 
+        // Canonical name derivation (run BEFORE required-field validation)
+        const fnInput = (cleanPayload.first_name || '').trim();
+        const lnInput = (cleanPayload.last_name || '').trim();
+        const combinedFNLN = `${fnInput} ${lnInput}`.trim();
+        const rawName = (cleanPayload.name || combinedFNLN || cleanPayload.first_name || cleanPayload.title || '').trim();
+        if (rawName) {
+          if (!cleanPayload.name) cleanPayload.name = rawName;
+          if (!cleanPayload.first_name) cleanPayload.first_name = rawName.split(' ')[0] || rawName;
+          if (!cleanPayload.last_name) cleanPayload.last_name = rawName.split(' ').slice(1).join(' ') || cleanPayload.first_name;
+        }
+
         validateDuplicateEmails(cleanPayload, fields);
         validateEmailFormats(cleanPayload, fields, { isBulkImport: true });
 
@@ -1549,14 +1602,6 @@ const objectService = {
           throw { statusCode: 400, message: vErrors.join(' | ') };
         }
 
-        // Canonical name resolution
-        const rawName = (cleanPayload.name || cleanPayload.first_name || cleanPayload.title || '').trim();
-        if (rawName) {
-          if (!cleanPayload.name) cleanPayload.name = rawName;
-          if (!cleanPayload.first_name) cleanPayload.first_name = rawName.split(' ')[0] || rawName;
-          if (!cleanPayload.last_name) cleanPayload.last_name = rawName.split(' ').slice(1).join(' ') || cleanPayload.first_name;
-        }
-
         const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = cleanPayload;
         let resolvedName = '';
         if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
@@ -1589,39 +1634,74 @@ const objectService = {
         let resolvedParent = null;
         let resolvedParentName = null;
 
-        if (relInputs.companyIdInput !== undefined) {
-          if (relInputs.companyIdInput && relInputs.companyIdInput !== 'null') {
-            if (!isUuid(relInputs.companyIdInput)) {
-              throw { statusCode: 400, message: `Validation Error: Company ID '${relInputs.companyIdInput}' is not a valid UUID format.` };
-            }
-            const parentRow = companyByIdMap.get(relInputs.companyIdInput);
+        if (relInputs.companyIdInput !== undefined && relInputs.companyIdInput && relInputs.companyIdInput !== 'null') {
+          const inputVal = relInputs.companyIdInput;
+          if (isUuid(inputVal)) {
+            const parentRow = companyByIdMap.get(inputVal);
             if (!parentRow || parentRow.is_deleted) {
-              throw { statusCode: 400, message: `Validation Error: Company ID '${relInputs.companyIdInput}' was not found.` };
+              throw { statusCode: 400, message: `Validation Error: Company ID '${inputVal}' was not found.` };
             }
             if (parentRow.organization_id !== organizationId) {
-              throw { statusCode: 403, message: `Validation Error: Company ID '${relInputs.companyIdInput}' does not belong to the current organization.` };
+              throw { statusCode: 403, message: `Validation Error: Company ID '${inputVal}' does not belong to the current organization.` };
             }
             if (companyObjectType && parentRow.object_type_id !== companyObjectType.id) {
-              throw { statusCode: 400, message: `Validation Error: The referenced record '${relInputs.companyIdInput}' is not a Company object type.` };
+              throw { statusCode: 400, message: `Validation Error: The referenced record '${inputVal}' is not a Company object type.` };
             }
             resolvedParent = parentRow.id;
             resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || 'Company';
+          } else {
+            // Non-UUID input passed in companyIdInput (e.g. external numeric ID like '345663697623')
+            let extMatches = [];
+            for (const k of getNormalizedKeys(inputVal)) {
+              if (companyByExternalIdMap.has(k)) {
+                extMatches = companyByExternalIdMap.get(k);
+                break;
+              }
+            }
+            if (extMatches.length > 1) {
+              throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${inputVal}'.` };
+            }
+            if (extMatches.length === 1) {
+              resolvedParent = extMatches[0].id;
+              resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || inputVal;
+            } else {
+              throw { statusCode: 400, message: `Validation Error: Company ID '${inputVal}' was not found.` };
+            }
           }
         } else if (relInputs.companyNameInput) {
-          const cleanName = relInputs.companyNameInput.trim().toLowerCase();
-          const matches = companyByNameMap.get(cleanName) || [];
-          if (matches.length > 1) {
-            throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
+          let extMatches = [];
+          for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
+            if (companyByExternalIdMap.has(k)) {
+              extMatches = companyByExternalIdMap.get(k);
+              break;
+            }
           }
-          if (matches.length === 1) {
-            resolvedParent = matches[0].id;
-            resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
+          if (extMatches.length === 1) {
+            resolvedParent = extMatches[0].id;
+            resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || relInputs.companyNameInput;
+          } else if (extMatches.length > 1) {
+            throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${relInputs.companyNameInput}'.` };
           } else {
-            if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
-              throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+            let matches = [];
+            for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
+              if (companyByNameMap.has(k)) {
+                matches = companyByNameMap.get(k);
+                break;
+              }
+            }
+            if (matches.length > 1) {
+              throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
+            }
+            if (matches.length === 1) {
+              resolvedParent = matches[0].id;
+              resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
             } else {
-              resolvedParent = null;
-              resolvedParentName = relInputs.companyNameInput;
+              if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+                throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+              } else {
+                resolvedParent = null;
+                resolvedParentName = relInputs.companyNameInput;
+              }
             }
           }
         }
