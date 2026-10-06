@@ -1372,6 +1372,7 @@ export function buildMcpServer(req) {
 // ════════════════════════════════════════════════════════════════════════════
 
 const app = express();
+app.set("trust proxy", 1); // Required for Render (and any reverse-proxy host): trust the X-Forwarded-For header from one upstream proxy hop.
 app.use(cors({ origin: "*", exposedHeaders: ["mcp-session-id"] }));
 app.use(express.json());
 
@@ -1387,6 +1388,19 @@ app.use(mcpAuthRouter({
     resourceName: "CRM MCP Server",
     scopesSupported: ["crm:read", "crm:write"],
 }));
+
+// ── OAuth 2.0 Protected Resource Metadata (RFC 8707) ─────────────────────────
+// Claude's Remote MCP connector fetches this endpoint during discovery to find
+// which authorization server protects /mcp. Without it, "Register automatically"
+// fails before Claude even reaches /register or /authorize.
+// PUBLIC_BASE_URL is already normalized (no trailing slash) at line 58.
+app.get("/.well-known/oauth-protected-resource", (req, res) => {
+    res.json({
+        resource: `${PUBLIC_BASE_URL}/mcp`,
+        authorization_servers: [PUBLIC_BASE_URL],
+        scopes_supported: ["crm:read", "crm:write"],
+    });
+});
 
 // ── /login — OTP step 1: enter email ─────────────────────────────────────────
 app.get("/login", (req, res) => {

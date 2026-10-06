@@ -1890,6 +1890,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return statusBadge(val);
     }
 
+    /* Direct Numeric Field Handling */
+    if (f.type === 'number') {
+      if (val !== undefined && val !== null && val !== '') {
+        const numVal = Number(val);
+        return <span style={{ fontWeight: 600, color: C.text }}>{!isNaN(numVal) ? numVal.toLocaleString() : String(val)}</span>;
+      }
+      return <span style={{ fontWeight: 600, color: C.dim }}>—</span>;
+    }
+
     if (fNameLower.includes('amount') || f.type === 'currency' || fNameLower.includes('revenue') || fNameLower.includes('value')) {
       const targetVal = val !== undefined && val !== null && val !== '' ? val : (record?.amount ?? (grandTotalAmount > 0 ? grandTotalAmount : undefined));
       const numVal = Number(targetVal);
@@ -1899,7 +1908,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     }
 
     /* Owner / Created By / User Lookups */
-    if (fNameLower.includes('owner') || fNameLower.includes('created_by') || fNameLower.includes('updated_by')) {
+    if (f.type === 'user' || fNameLower.includes('owner') || fNameLower.includes('created_by') || fNameLower.includes('updated_by')) {
       const ownerVal = formatLookupValue(f.name, val, record, currentUser, organization, company, lookupMap);
       const hasVal = ownerVal && ownerVal !== '—';
       if (hasVal) {
@@ -1913,8 +1922,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return <span style={{ color: C.dim }}>—</span>;
     }
 
-    /* Company / Account Lookup Field */
-    if (fNameLower.includes('company') || fNameLower.includes('account')) {
+    /* Company / Account Lookup Field (Strict Metadata Checks) */
+    const isCompanyLookup = f.type === 'lookup' && (
+      f.target === 'company' ||
+      f.target === 'Company' ||
+      fNameLower === 'company' ||
+      fNameLower === 'company_id' ||
+      fNameLower === 'parent_id' ||
+      (f.lookup_target_object_type_id && (
+        f.lookup_target_object_type_id === '801c5da3-eac8-4df8-bb2c-eed278e48095' ||
+        lookupMap.companies?.[f.lookup_target_object_type_id]
+      ))
+    );
+
+    if (isCompanyLookup || ((fNameLower === 'company' || fNameLower === 'company_id') && f.type !== 'text' && f.type !== 'number')) {
       const compId = isUuid(val) ? val : (record.company_id || record.Company_id || record.company || record.Company || record.parent_id || record.data?.company || record.data?.Company);
       const companyVal = formatLookupValue(f.name, compId || val, record, currentUser, organization, company, lookupMap);
       const targetId = isUuid(compId) ? compId : (parentCompany ? parentCompany.id : null);
@@ -1950,8 +1971,16 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return <span style={{ fontWeight: 600, color: C.text }}>{displayCompanyText}</span>;
     }
 
-    /* Contact Lookup Field */
-    if (fNameLower.includes('contact')) {
+    /* Contact Lookup Field (Strict Metadata Checks) */
+    const isContactLookup = f.type === 'lookup' && (
+      f.target === 'contact' ||
+      f.target === 'Contact' ||
+      fNameLower === 'contact' ||
+      fNameLower === 'contact_id' ||
+      fNameLower === 'secondary_parent_id'
+    );
+
+    if (isContactLookup || ((fNameLower === 'contact' || fNameLower === 'contact_id') && f.type !== 'text' && f.type !== 'number')) {
       const contactIdVal = isUuid(val) ? val : (record.contact_id || record.Contact_id || record.contact || record.Contact || record.secondary_parent_id || record.data?.contact || record.data?.Contact);
       const contactVal = formatLookupValue(f.name, contactIdVal || val, record, currentUser, organization, company, lookupMap);
       const targetId = isUuid(contactIdVal) ? contactIdVal : (primaryContact ? primaryContact.id : null);

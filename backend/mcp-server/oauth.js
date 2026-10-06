@@ -97,11 +97,14 @@ export function createOAuthProvider({ store, loginBaseUrl }) {
 
             await store.consumeAuthCode(authorizationCode);
 
+            // NOTE: auth_code_id is set to null because consumeAuthCode already
+            // deleted the row, and the FK constraint fk_token_authcode would fail
+            // if we referenced the now-deleted auth code.
             return store.issueTokens({
                 clientId: client.client_id,
                 userId: entry.user_id,
                 organizationId: entry.organization_id,
-                authCodeId: entry.id,
+                authCodeId: null,
                 scopes: entry.scopes,
                 resource: resource?.toString() || entry.resource,
             });

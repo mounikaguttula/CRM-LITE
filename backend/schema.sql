@@ -361,26 +361,26 @@ ON CONFLICT DO NOTHING;
 
 
 -- Seed Field Definitions for Leads, Deals, Contacts, Companies
-INSERT INTO public.field_definitions (organization_id, object_type_id, api_name, display_name, field_type, required)
+INSERT INTO public.field_definitions (organization_id, object_type_id, api_name, display_name, field_type, required, lookup_target_object_type_id)
 VALUES
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'name', 'Lead Name', 'text', true),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'email', 'Email Address', 'email', true),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'alternate_email', 'Alternate Email ID', 'email', false),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'company', 'Company Name', 'text', false),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'status', 'Lead Status', 'dropdown', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'name', 'Lead Name', 'text', true, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'email', 'Email Address', 'email', true, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'alternate_email', 'Alternate Email ID', 'email', false, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'company', 'Company Name', 'text', false, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'status', 'Lead Status', 'dropdown', true, NULL),
 
 
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'name', 'Deal Name', 'text', true),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'company_id', 'Company / Account', 'lookup', false),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'contact_id', 'Primary Contact', 'lookup', false),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'amount', 'Amount', 'number', false),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'stage', 'Stage', 'dropdown', true),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'name', 'Deal Name', 'text', true, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'company_id', 'Company / Account', 'lookup', false, 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44'),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'contact_id', 'Primary Contact', 'lookup', false, 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43'),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'amount', 'Amount', 'number', false, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'stage', 'Stage', 'dropdown', true, NULL),
 
 
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'name', 'Contact Name', 'text', true),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'email', 'Email', 'email', true),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'phone', 'Phone', 'phone', false),
-  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'company_id', 'Company / Account', 'lookup', false),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'name', 'Contact Name', 'text', true, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'email', 'Email', 'email', true, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'phone', 'Phone', 'phone', false, NULL),
+  ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a43', 'company_id', 'Company / Account', 'lookup', false, 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44'),
 
 
   ('e897ac9f-41c3-49f4-9ae2-7a87f745714f', 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'name', 'Company Name', 'text', true),

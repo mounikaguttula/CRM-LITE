@@ -5,12 +5,7 @@ import { useWorkspace } from '../../context/WorkspaceContext';
 import { useAuth } from '../../context/AuthContext';
 import { apiGet, apiPost, apiDelete } from '../../api/client';
 import AccessDenied from '../../components/AccessDenied';
-import {
-  getObjectAllowedFields,
-  mapHeaderToField,
-  getMeaningfulFieldKeys,
-  buildFieldMetadataList,
-} from '../../utils/csvImportMapping';
+import CSVFieldMappingModal from '../../components/CSVFieldMappingModal';
 import {
   Users,
   Columns3,
@@ -1803,36 +1798,15 @@ function ObjectListContent({ objectTypeId }) {
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
-  // CSV Import States
+  // CSV Import Modal State
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [parsedRecords, setParsedRecords] = useState([]);
-  const [matchedFields, setMatchedFields] = useState([]);
-  const [unmatchedHeaders, setUnmatchedHeaders] = useState([]);
-  const [csvValidationError, setCsvValidationError] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState('');
-  const [importReport, setImportReport] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef(null);
 
   const resetImportState = useCallback(() => {
-    setSelectedFile(null);
-    setParsedRecords([]);
-    setMatchedFields([]);
-    setUnmatchedHeaders([]);
-    setCsvValidationError(null);
-    setImportReport(null);
-    setImporting(false);
-    setImportProgress('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    // No-op: CSVFieldMappingModal manages its own state internally.
   }, []);
 
   const handleCloseImportModal = () => {
     setImportModalOpen(false);
-    resetImportState();
   };
 
   // Pagination & Search States
@@ -2227,20 +2201,8 @@ function ObjectListContent({ objectTypeId }) {
     return cols;
   }, [rawMeta, allColumns, records, isDealObjList]);
 
-  const previewColumns = useMemo(() => {
-    if (matchedFields && matchedFields.length > 0) {
-      return matchedFields.slice(0, 6);
-    }
-    if (columns && columns.length > 0) {
-      return columns.slice(0, 5);
-    }
-    return [
-      { key: 'name', label: 'NAME' },
-      { key: 'email', label: 'EMAIL' },
-      { key: 'company', label: 'COMPANY' },
-      { key: 'status', label: 'STATUS' },
-    ];
-  }, [matchedFields, columns]);
+
+
 
   const filteredRecords = useMemo(() => {
     if (isServerPaginated) return records;
@@ -2654,314 +2616,10 @@ function ObjectListContent({ objectTypeId }) {
     document.body.removeChild(link);
   };
 
-  const handleFileProcess = async (file) => {
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      showToast('Please select a valid .csv file.', 'error');
-      return;
-    }
-
-    resetImportState();
-    setSelectedFile(file);
-
-    let latestFields = backendFields;
-    try {
-      const fieldRes = await apiGet(`/metadata/objects/${objectTypeId}/fields`)
-        .catch(() => apiGet(`/objects/${objectTypeId}/fields`))
-        .catch(() => null);
-
-      const fetchedList = Array.isArray(fieldRes) ? fieldRes : fieldRes?.data || fieldRes?.fields || [];
-      if (fetchedList && fetchedList.length > 0) {
-        latestFields = fetchedList;
-        setBackendFields(fetchedList);
-      }
-    } catch (err) {
-      console.warn('[CSV Import] Could not refresh latest field metadata:', err?.message);
-    }
-
-    const fieldsList = (latestFields && latestFields.length > 0) ? latestFields : (rawMeta?.fields || meta?.fields || []);
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      const lines = text.split(/\r\n|\n/).filter(line => line.trim());
-      if (lines.length < 2) {
-        setCsvValidationError(`The uploaded file '${file.name}' is empty or contains no data rows.`);
-        setParsedRecords([]);
-        return;
-      }
-
-      const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-      
-      const cleanObjKey = String(objectTypeId || '').toLowerCase();
-
-      const fieldMetadataList = getObjectAllowedFields(cleanObjKey, fieldsList);
-      const meaningfulKeys = getMeaningfulFieldKeys(cleanObjKey, fieldsList);
-
-      const matchedList = [];
-      const unmatchedList = [];
-      const headerMap = [];
-
-      rawHeaders.forEach((h) => {
-        const fieldMatch = mapHeaderToField(h, fieldMetadataList);
-        if (fieldMatch) {
-          if (!matchedList.some(m => m.key === fieldMatch.key)) {
-            matchedList.push(fieldMatch);
-          }
-          headerMap.push(fieldMatch);
-        } else {
-          unmatchedList.push(h);
-          headerMap.push(null);
-        }
-      });
-
-      setMatchedFields(matchedList);
-      setUnmatchedHeaders(unmatchedList);
-
-      const meaningfulMatched = matchedList.filter(f => meaningfulKeys.has(String(f.key).toLowerCase()));
-
-      if (meaningfulMatched.length === 0) {
-        const sampleLabels = fieldMetadataList
-          .filter(f => meaningfulKeys.has(String(f.key).toLowerCase()))
-          .slice(0, 5)
-          .map(f => f.label);
-
-        const sampleText = sampleLabels.length > 0
-          ? sampleLabels.join(', ')
-          : 'First Name, Last Name, Email, Phone or Company';
-
-        setCsvValidationError(`This CSV does not contain enough valid ${meta.displayName} information to create ${meta.displayName} records. Please upload a CSV containing fields such as ${sampleText}.`);
-        setParsedRecords([]);
-        return;
-      }
-
-      setCsvValidationError(null);
-
-      const parsedList = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const currentLine = lines[i];
-        if (!currentLine.trim()) continue;
-
-        const rowValues = [];
-        let inQuotes = false;
-        let val = '';
-        for (let c = 0; c < currentLine.length; c++) {
-          const char = currentLine[c];
-          if (char === '"') {
-            inQuotes = !inQuotes;
-          } else if (char === ',' && !inQuotes) {
-            rowValues.push(val.trim().replace(/^["']|["']$/g, ''));
-            val = '';
-          } else {
-            val += char;
-          }
-        }
-        rowValues.push(val.trim().replace(/^["']|["']$/g, ''));
-
-        const rowObj = {};
-        headerMap.forEach((fieldMeta, idx) => {
-          if (fieldMeta && rowValues[idx] !== undefined && rowValues[idx] !== '') {
-            rowObj[fieldMeta.key] = rowValues[idx];
-          }
-        });
-
-        // Check if row contains at least ONE non-empty value for a meaningful field
-        const hasMeaningfulValue = Array.from(meaningfulKeys).some(mKey => {
-          const v = rowObj[mKey];
-          return v !== undefined && v !== null && String(v).trim() !== '';
-        });
-
-        if (!hasMeaningfulValue) continue;
-
-        const csvRowNumber = i + 1; // 1-based CSV line number (line 1 is header, data rows start at line 2)
-        const payload = { ...rowObj, __rowNum: csvRowNumber };
-
-        // Name resolution derived ONLY from mapped fields
-        if (cleanObjKey.includes('company') || cleanObjKey.includes('account')) {
-          const compName = rowObj.company_name || rowObj.company || rowObj.name || rowObj.account_name || rowObj.organization;
-          if (compName) {
-            payload.name = compName;
-            payload.company_name = compName;
-          }
-        } else if (cleanObjKey.includes('deal') || cleanObjKey.includes('opportunity')) {
-          const dealName = rowObj.deal_name || rowObj.name || rowObj.title;
-          if (dealName) {
-            payload.name = dealName;
-            payload.deal_name = dealName;
-          }
-        } else if (cleanObjKey.includes('contact') || cleanObjKey.includes('person') || cleanObjKey.includes('lead')) {
-          const fn = rowObj.first_name || '';
-          const ln = rowObj.last_name || '';
-          const combinedName = (fn || ln) ? `${fn} ${ln}`.trim() : (rowObj.name || rowObj.contact_name || (rowObj.email ? rowObj.email.split('@')[0] : ''));
-          if (combinedName) {
-            payload.name = combinedName;
-            payload.first_name = fn;
-            payload.last_name = ln;
-          }
-          if (cleanObjKey.includes('lead')) {
-            payload.lead_source = rowObj.lead_source || 'CSV Import';
-            payload.status = rowObj.status || 'New';
-          }
-        } else {
-          const genName = rowObj.name || rowObj.title || rowObj.subject;
-          if (genName) {
-            payload.name = genName;
-          }
-        }
-
-        parsedList.push(payload);
-      }
-
-      if (parsedList.length === 0) {
-        const sampleLabels = fieldMetadataList
-          .filter(f => meaningfulKeys.has(String(f.key).toLowerCase()))
-          .slice(0, 5)
-          .map(f => f.label);
-
-        const sampleText = sampleLabels.length > 0
-          ? sampleLabels.join(', ')
-          : 'First Name, Last Name, Email, Phone or Company';
-
-        setCsvValidationError(`This CSV does not contain any records with valid ${meta.displayName} information. Please upload a CSV containing fields such as ${sampleText}.`);
-        setParsedRecords([]);
-        return;
-      }
-
-      setParsedRecords(parsedList);
-    };
-
-    reader.readAsText(file);
-  };
-
-  const handleImportSubmit = async () => {
-    if (!parsedRecords || parsedRecords.length === 0 || csvValidationError) return;
-
-    setImporting(true);
-    let successCount = 0;
-    const newAdded = [];
-    const backendErrors = [];
-    const successRowNums = new Set();
-    const BATCH_SIZE = 50;
-    const totalDataRows = parsedRecords.length;
-    const totalBatches = Math.ceil(totalDataRows / BATCH_SIZE);
-
-    for (let i = 0; i < parsedRecords.length; i += BATCH_SIZE) {
-      const batchIndex = Math.floor(i / BATCH_SIZE);
-      const batch = parsedRecords.slice(i, i + BATCH_SIZE);
-      const currentProgressStr = `Processing batch ${batchIndex + 1} of ${totalBatches} (${Math.min(i + batch.length, totalDataRows)} / ${totalDataRows} records processed)...`;
-      setImportProgress(currentProgressStr);
-
-      try {
-        const res = await apiPost(`/objects/${objectTypeId}`, batch, { isUserActivity: true });
-        const bulkData = Array.isArray(res) ? res : res?.data || [];
-
-        if (Array.isArray(bulkData) && bulkData.length > 0) {
-          newAdded.push(...bulkData);
-          successCount += bulkData.length;
-          bulkData.forEach(item => {
-            if (item.__rowNum) successRowNums.add(item.__rowNum);
-          });
-        }
-
-        if (res?.errors && Array.isArray(res.errors)) {
-          backendErrors.push(...res.errors);
-        }
-        if (res?.results && Array.isArray(res.results)) {
-          res.results.forEach(r => {
-            if (r.status === 'imported' && r.rowNumber) successRowNums.add(r.rowNumber);
-            if (r.status === 'failed' && r.error) {
-              backendErrors.push({ rowNum: r.rowNumber, identifier: r.identifier, reason: r.error });
-            }
-          });
-        }
-      } catch (bulkErr) {
-        console.warn(`Batch ${batchIndex + 1} post for ${objectTypeId} returned error:`, bulkErr);
-
-        if (bulkErr?.status === 401) {
-          showToast && showToast('Session expired during import. Processing stopped.', 'error');
-          break;
-        }
-
-        const errData = bulkErr.data;
-
-        if (errData?.errors && Array.isArray(errData.errors)) {
-          backendErrors.push(...errData.errors);
-        }
-
-        if (errData?.data && Array.isArray(errData.data) && errData.data.length > 0) {
-          newAdded.push(...errData.data);
-          successCount += errData.data.length;
-          errData.data.forEach(item => {
-            if (item.__rowNum) successRowNums.add(item.__rowNum);
-          });
-        }
-
-        const errMsg = bulkErr.message || bulkErr.data?.message || 'Batch request failed';
-        batch.forEach(row => {
-          if (!successRowNums.has(row.__rowNum) && !backendErrors.some(e => e.rowNum === row.__rowNum)) {
-            const rowId = row.name || row.deal_name || row.company_name || row.contact_name || row.email || `Row ${row.__rowNum}`;
-            backendErrors.push({
-              rowNum: row.__rowNum,
-              identifier: String(rowId).trim(),
-              reason: errMsg,
-            });
-          }
-        });
-      }
-    }
-
-    setImporting(false);
-    setImportProgress('');
-
-    const reportRows = parsedRecords.map(rec => {
-      const isSuccess = successRowNums.has(rec.__rowNum);
-      const errObj = backendErrors.find(e => e.rowNum === rec.__rowNum);
-      const identifier = rec.name || rec.deal_name || rec.company_name || rec.contact_name || rec.email || `Row ${rec.__rowNum}`;
-      return {
-        rowNum: rec.__rowNum,
-        identifier: String(identifier).trim(),
-        status: isSuccess ? 'imported' : 'failed',
-        reason: isSuccess ? '—' : (errObj?.reason || 'Validation error'),
-      };
-    });
-
-    const report = {
-      createdCount: successCount,
-      failedCount: totalDataRows - successCount,
-      totalProcessed: totalDataRows,
-      rows: reportRows,
-    };
-
-    setImportReport(report);
-
-    if (successCount > 0) {
-      setLoading(true);
-      apiGet(`/objects/${objectTypeId}`)
-        .then((recRes) => {
-          const dataList = Array.isArray(recRes) ? recRes : recRes?.data || [];
-          setRecords(dataList);
-        })
-        .catch(() => {
-          setRecords((prev) => [...newAdded, ...prev]);
-        })
-        .finally(() => {
-          setLoading(false);
-        });
-    }
-
-    if (report.failedCount === 0) {
-      showToast(`🎉 Successfully imported all ${successCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
-    } else if (successCount > 0) {
-      showToast(`⚠️ Imported ${successCount} records, but ${report.failedCount} failed. Review details below.`, 'warning');
-    } else {
-      showToast(`❌ Failed to import. All ${report.failedCount} rows failed validation.`, 'error');
-    }
-  };
-
   if (!loading && permissions && objPerm && objPerm.canRead === false) {
     return <AccessDenied moduleName={rawMeta?.pluralDisplayName || rawMeta?.displayName || objectTypeId} />;
   }
+
 
   return (
     <div className="fade-in" style={{ padding: '0 32px 32px' }}>
@@ -3869,382 +3527,41 @@ function ObjectListContent({ objectTypeId }) {
         )}
       </div>
 
-      {/* CSV Import Modal (Portal with Banner & Unified Design Tokens) */}
-      {importModalOpen && ReactDOM.createPortal(
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999,
-          background: 'rgba(11, 18, 32, 0.65)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '24px 16px',
-        }}>
-          <div style={{
-            background: '#ffffff',
-            borderRadius: 24,
-            width: '100%',
-            maxWidth: 720,
-            boxShadow: '0 30px 70px -15px rgba(8, 12, 28, 0.45)',
-            overflow: 'hidden',
-            border: '1px solid rgba(226, 232, 240, 0.8)',
-            animation: 'ep-rise .3s cubic-bezier(.2,.7,.3,1) both',
-          }}>
-            {/* Header Banner */}
-            <div style={{
-              position: 'relative',
-              overflow: 'hidden',
-              background: 'linear-gradient(115deg,#0b1220 0%,#0f1c2e 45%,#0a2a2a 100%)',
-              padding: '24px 28px',
-              borderBottom: '1px solid rgba(255,255,255,.08)',
-            }}>
-              <div style={{ position: 'absolute', top: -70, right: -40, width: 180, height: 180, borderRadius: '50%', background: 'rgba(34,211,238,.2)', filter: 'blur(50px)', pointerEvents: 'none' }} />
-              <div style={{ position: 'absolute', bottom: -80, left: 70, width: 160, height: 160, borderRadius: '50%', background: 'rgba(99,102,241,.25)', filter: 'blur(50px)', pointerEvents: 'none' }} />
+      {/* CSV Import Modal — Generic Metadata-Driven Field Mapping */}
+      <CSVFieldMappingModal
+        open={importModalOpen}
+        onClose={handleCloseImportModal}
+        objectTypeId={objectTypeId}
+        objectDisplayName={meta.displayName}
+        orgId={currentUser?.organization_id || currentUser?.organizationId}
+        onImportComplete={(report) => {
+          if (report.createdCount > 0) {
+            showToast(`🎉 Imported ${report.createdCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
+            // Refresh the record list
+            setLoading(true);
+            apiGet(`/objects/${objectTypeId}?page=1&pageSize=${pageSize}&sortBy=${sortBy}&sortOrder=${sortOrder}`)
+              .then((recRes) => {
+                const isPaginatedRes = Boolean(recRes && recRes.meta && typeof recRes.meta.total === 'number');
+                if (isPaginatedRes) {
+                  setIsServerPaginated(true);
+                  setRecords(Array.isArray(recRes.data) ? recRes.data : []);
+                  setTotalServerRecords(recRes.meta.total);
+                  setServerTotalPages(recRes.meta.totalPages || 1);
+                } else {
+                  setRecords(Array.isArray(recRes) ? recRes : recRes?.data || []);
+                }
+              })
+              .catch(() => {})
+              .finally(() => setLoading(false));
+          } else if (report.failedCount > 0 && report.createdCount === 0) {
+            showToast(`❌ Import failed — all ${report.failedCount} rows encountered errors.`, 'error');
+          } else if (report.createdCount > 0 && report.failedCount > 0) {
+            showToast(`⚠️ Imported ${report.createdCount}, but ${report.failedCount} rows failed.`, 'warning');
+          }
+        }}
+      />
 
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <div style={{
-                    width: 48, height: 48, borderRadius: 16,
-                    background: 'linear-gradient(135deg,#6366f1,#22d3ee)',
-                    color: '#ffffff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 0 0 2px rgba(255,255,255,.12), 0 12px 24px -10px rgba(34,211,238,.6)',
-                    flexShrink: 0,
-                  }}>
-                    <UploadCloud size={24} />
-                  </div>
-                  <div>
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '3px 9px', borderRadius: 999,
-                      background: 'rgba(34,211,238,.14)', border: '1px solid rgba(34,211,238,.32)',
-                      color: '#a5f3fc', fontSize: '.6rem', fontWeight: 800, letterSpacing: '.12em',
-                      marginBottom: 4,
-                    }}>
-                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee' }} />
-                      IMPORT ENGINE
-                    </span>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.02em' }}>
-                      Import {meta.pluralDisplayName} from CSV
-                    </h2>
-                  </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => { setImportModalOpen(false); setSelectedFile(null); setParsedRecords([]); }}
-                  style={{
-                    background: 'rgba(255,255,255,.08)',
-                    border: '1px solid rgba(255,255,255,.16)',
-                    borderRadius: 10,
-                    width: 32,
-                    height: 32,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#cbd5e1',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseOver={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,.16)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.color = '#cbd5e1'; e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body Content */}
-            <div style={{ padding: '24px 28px 20px' }}>
-              {importReport ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {/* Summary Stats Cards */}
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <div style={{ flex: 1, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
-                      <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Total Processed</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>{importReport.totalProcessed}</div>
-                    </div>
-                    <div style={{ flex: 1, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 14 }}>
-                      <div style={{ fontSize: '0.74rem', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>✓ Imported</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#15803d' }}>{importReport.createdCount}</div>
-                    </div>
-                    <div style={{ flex: 1, padding: '12px 16px', background: importReport.failedCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${importReport.failedCount > 0 ? '#fecdd3' : '#e2e8f0'}`, borderRadius: 14 }}>
-                      <div style={{ fontSize: '0.74rem', color: importReport.failedCount > 0 ? '#9f1239' : '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>✕ Failed</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: importReport.failedCount > 0 ? '#e11d48' : '#0f172a' }}>{importReport.failedCount}</div>
-                    </div>
-                  </div>
-
-                  {/* Row-Level Errors / Status Table */}
-                  <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', maxHeight: 260, overflowY: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
-                      <thead>
-                        <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1 }}>
-                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 90 }}>CSV Row</th>
-                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 170 }}>Record Identifier</th>
-                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 110 }}>Status</th>
-                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Reason / Validation Message</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {importReport.rows.map((r, idx) => (
-                          <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', background: r.status === 'failed' ? '#fff1f215' : '#ffffff' }}>
-                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#64748b' }}>Row {r.rowNum}</td>
-                            <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0f172a' }}>{r.identifier}</td>
-                            <td style={{ padding: '10px 14px' }}>
-                              {r.status === 'imported' ? (
-                                <span style={{ color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 10px', borderRadius: 999, fontSize: '0.74rem', fontWeight: 700 }}>
-                                  ✓ Imported
-                                </span>
-                              ) : (
-                                <span style={{ color: '#e11d48', background: '#fff1f2', border: '1px solid #fecdd3', padding: '3px 10px', borderRadius: 999, fontSize: '0.74rem', fontWeight: 700 }}>
-                                  ✕ Failed
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ padding: '10px 14px', color: r.status === 'failed' ? '#e11d48' : '#64748b', fontSize: '0.8rem', fontWeight: r.status === 'failed' ? 600 : 400 }}>
-                              {r.reason}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : !selectedFile ? (
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragging(false);
-                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                      handleFileProcess(e.dataTransfer.files[0]);
-                    }
-                  }}
-                  style={{
-                    border: isDragging ? '2.5px dashed #6366f1' : '2px dashed #cbd5e1',
-                    borderRadius: 18,
-                    padding: '38px 24px',
-                    textAlign: 'center',
-                    background: isDragging ? 'rgba(99,102,241,0.04)' : '#f8fafc',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    onChange={(e) => e.target.files?.[0] && handleFileProcess(e.target.files[0])}
-                    style={{ display: 'none' }}
-                  />
-                  <div style={{
-                    width: 52, height: 52, borderRadius: 16,
-                    background: 'rgba(99,102,241,0.1)', color: '#6366f1',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    marginBottom: 12,
-                  }}>
-                    <UploadCloud size={26} />
-                  </div>
-                  <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
-                    Click or Drag &amp; Drop CSV file here
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 500 }}>
-                    Upload comma-separated value spreadsheet (.csv)
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {/* File Info Bar */}
-                  <div style={{
-                    background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14,
-                    padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(99,102,241,0.12)', color: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <FileSpreadsheet size={18} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>{selectedFile.name}</div>
-                        <div style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 500 }}>{parsedRecords.length} records detected and mapped for {meta.displayName}</div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={resetImportState}
-                      style={{
-                        padding: '5px 12px', borderRadius: 999, fontSize: '0.76rem', fontWeight: 700,
-                        color: '#fb7185', background: '#fef2f2', border: '1px solid #fecaca', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 4,
-                      }}
-                    >
-                      <X size={13} /> Change File
-                    </button>
-                  </div>
-
-                  {/* CSV Validation Error Banner */}
-                  {csvValidationError && (
-                    <div style={{
-                      background: '#fff1f2',
-                      border: '1px solid #fecdd3',
-                      borderRadius: 14,
-                      padding: '14px 18px',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 12,
-                      color: '#9f1239',
-                      fontSize: '0.84rem',
-                      fontWeight: 500,
-                      lineHeight: 1.45,
-                    }}>
-                      <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1, color: '#e11d48' }} />
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 2 }}>Invalid CSV Format</div>
-                        {csvValidationError}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Partially Matched Headers Info Banner */}
-                  {!csvValidationError && unmatchedHeaders.length > 0 && matchedFields.length > 0 && (
-                    <div style={{
-                      background: '#eff6ff',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: 14,
-                      padding: '12px 16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      color: '#1e40af',
-                      fontSize: '0.81rem',
-                      fontWeight: 500,
-                    }}>
-                      <Info size={16} style={{ flexShrink: 0, color: '#3b82f6' }} />
-                      <div>
-                        Mapped <strong>{matchedFields.length}</strong> field(s). Ignored <strong>{unmatchedHeaders.length}</strong> column(s) ({unmatchedHeaders.join(', ')}) because they are not valid {meta.displayName} fields.
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Dynamic Object Preview Table */}
-                  {!csvValidationError && parsedRecords.length > 0 && (
-                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', maxHeight: 220, overflowY: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
-                        <thead>
-                          <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1 }}>
-                            <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: 50 }}>#</th>
-                            {previewColumns.map(col => (
-                              <th key={col.key} style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>{col.label}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {parsedRecords.slice(0, 5).map((r, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>{r.__rowNum || idx + 1}</td>
-                              {previewColumns.map(col => {
-                                let rawVal = r[col.key] !== undefined ? r[col.key] : (r.data && r.data[col.key]);
-                                if (rawVal === undefined || rawVal === null || rawVal === '') {
-                                  if (col.key === 'name') rawVal = r.name || r.deal_name || r.company_name;
-                                }
-                                return (
-                                  <td key={col.key} style={{ padding: '10px 14px', color: '#0f172a', fontWeight: col.isTitle ? 700 : 400 }}>
-                                    {rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '' ? String(rawVal) : '—'}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Footer Action Bar */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12,
-              padding: '16px 28px', background: '#f8fafc', borderTop: '1px solid #e2e8f0',
-            }}>
-              {importReport ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedFile(null); setParsedRecords([]); setImportReport(null); }}
-                    style={{
-                      padding: '10px 18px', borderRadius: 12, border: '1px solid #cbd5e1',
-                      background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
-                    }}
-                  >
-                    Import Another File
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCloseImportModal}
-                    style={{
-                      padding: '10px 22px', borderRadius: 12, border: 'none',
-                      background: 'linear-gradient(135deg, #6366f1 0%, #22d3ee 100%)',
-                      color: '#ffffff', fontWeight: 700, fontSize: '0.84rem', cursor: 'pointer',
-                      boxShadow: '0 8px 20px -6px rgba(99,102,241,0.5)',
-                    }}
-                  >
-                    Done
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleCloseImportModal}
-                    style={{
-                      padding: '10px 18px', borderRadius: 12, border: '1px solid #cbd5e1',
-                      background: '#ffffff', color: '#475569', fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  {importing && importProgress && (
-                    <div style={{ fontSize: '0.81rem', color: '#6366f1', fontWeight: 600, marginRight: 'auto' }}>
-                      {importProgress}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleImportSubmit}
-                    disabled={!selectedFile || parsedRecords.length === 0 || importing}
-                    style={{
-                      padding: '10px 22px', borderRadius: 12, border: 'none',
-                      background: (!selectedFile || parsedRecords.length === 0 || importing)
-                        ? '#94a3b8'
-                        : 'linear-gradient(135deg, #6366f1 0%, #22d3ee 100%)',
-                      color: '#ffffff', fontWeight: 700, fontSize: '0.84rem',
-                      cursor: (!selectedFile || parsedRecords.length === 0 || importing) ? 'not-allowed' : 'pointer',
-                      boxShadow: (!selectedFile || parsedRecords.length === 0 || importing) ? 'none' : '0 8px 20px -6px rgba(99,102,241,0.5)',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                  >
-                    {importing ? (
-                      <>
-                        <RefreshCw size={15} style={{ animation: 'ep-spin .8s linear infinite' }} />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <UploadCloud size={15} />
-                        {`Import ${parsedRecords.length > 0 ? parsedRecords.length : ''} ${meta.pluralDisplayName}`}
-                      </>
-                    )}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
 
       {/* Delete Record Confirmation Custom Modal */}
       {deleteModalRecord && ReactDOM.createPortal(
