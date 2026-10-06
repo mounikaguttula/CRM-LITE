@@ -61,6 +61,7 @@ const FIELD_TYPES = [
   { value: 'picklist', label: 'Picklist', icon: List, color: '#a855f7' },
   { value: 'checkbox', label: 'Checkbox', icon: CheckSquare, color: '#f43f5e' },
   { value: 'url', label: 'URL', icon: Link2, color: '#64748b' },
+  { value: 'lookup', label: 'Lookup Relationship', icon: Search, color: '#ec4899' },
 ];
 
 
@@ -1295,6 +1296,28 @@ function AddFieldWizard({ objectKey, displayName, onClose, onSuccess, onError })
   const [fieldHelpText, setFieldHelpText] = useState('');
   const [fieldRequired, setFieldRequired] = useState(false);
   const [fieldUnique, setFieldUnique] = useState(false);
+  const [lookupTargetObject, setLookupTargetObject] = useState('');
+  const [availableObjects, setAvailableObjects] = useState([]);
+  const [loadingObjects, setLoadingObjects] = useState(false);
+
+  useEffect(() => {
+    if (fieldType !== 'lookup') return;
+    if (availableObjects.length > 0) return;
+    let mounted = true;
+    setLoadingObjects(true);
+    apiGet('/metadata/objects')
+      .then((res) => {
+        if (!mounted) return;
+        const list = Array.isArray(res) ? res : (res?.data || []);
+        setAvailableObjects(list);
+        if (list.length > 0 && !lookupTargetObject) {
+          setLookupTargetObject(list[0].id || list[0].api_name);
+        }
+      })
+      .catch((err) => console.error('Failed to load object definitions:', err))
+      .finally(() => { if (mounted) setLoadingObjects(false); });
+    return () => { mounted = false; };
+  }, [fieldType]);
 
 
   /* Step 3 state */
@@ -1384,6 +1407,10 @@ function AddFieldWizard({ objectKey, displayName, onClose, onSuccess, onError })
       setLocalError('Field Label is required.');
       return;
     }
+    if (fieldType === 'lookup' && !lookupTargetObject) {
+      setLocalError('Target Object is required for Lookup Relationship fields.');
+      return;
+    }
     setSaving(true);
     setLocalError(null);
     try {
@@ -1400,6 +1427,9 @@ function AddFieldWizard({ objectKey, displayName, onClose, onSuccess, onError })
         unique: fieldUnique,
         label: fieldLabel.trim(),
         security_profiles: securityProfiles,
+        lookup_target_object_type_id: fieldType === 'lookup' ? lookupTargetObject : undefined,
+        target: fieldType === 'lookup' ? lookupTargetObject : undefined,
+        lookup_target: fieldType === 'lookup' ? lookupTargetObject : undefined,
       });
       onSuccess();
     } catch (err) {
@@ -1589,6 +1619,32 @@ function AddFieldWizard({ objectKey, displayName, onClose, onSuccess, onError })
               </div>
             </div>
 
+
+            {/* Target Object for Lookup fields */}
+            {fieldType === 'lookup' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                  Target Object <span style={{ color: '#f43f5e' }}>*</span>
+                </label>
+                {loadingObjects ? (
+                  <div style={{ fontSize: '0.84rem', color: '#64748b' }}>Loading available object types...</div>
+                ) : (
+                  <select
+                    className="orbit-input"
+                    value={lookupTargetObject}
+                    onChange={(e) => setLookupTargetObject(e.target.value)}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: '0.88rem' }}
+                  >
+                    <option value="" disabled>Select Target Object</option>
+                    {availableObjects.map((obj) => (
+                      <option key={obj.id || obj.api_name} value={obj.id || obj.api_name}>
+                        {obj.display_name || obj.api_name} ({obj.api_name})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
 
             {/* Length */}
             {(fieldType === 'text' || fieldType === 'url') && (

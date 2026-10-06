@@ -13,7 +13,15 @@
  *   - Lead "company" (type: 'text') → does NOT trigger /objects/companies
  *   - Contact "company_id" (type: 'lookup') → DOES trigger /objects/companies
  *   - Any custom object with a lookup field is handled automatically
+ *
+ * The second half of this file contains the CSV-import relationship helpers.
  */
+
+import { apiPost } from '../api/client';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Form lookup requirements (existing code, unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Platform owner/user field names always present via PLATFORM_FIELDS in metadataService.
 // These are type:'lookup' in the backend but we guard by name as an extra safety net.
@@ -37,16 +45,16 @@ export function deriveLookupRequirements(fields) {
 
   for (const f of (fields || [])) {
     const fType = (f.type || f.field_type || '').toLowerCase();
-    const name  = (f.name || f.api_name || '').toLowerCase();
+    const name = (f.name || f.api_name || '').toLowerCase();
 
     // Primary signal: explicit lookup type from metadata
     const isLookup = fType === 'lookup';
 
     // Fallback signal: field-name heuristics (same logic as renderField in Create/EditPage)
-    const isOwnerName   = name.includes('owner') || OWNER_FIELD_NAMES.has(name);
+    const isOwnerName = name.includes('owner') || OWNER_FIELD_NAMES.has(name);
     const isCompanyName = name.includes('company') || name.includes('account') || name.includes('organization');
     const isContactName = name.includes('contact');
-    const isDealName    = name.includes('deal');
+    const isDealName = name.includes('deal');
     const isProductName = name.includes('product');
 
     // Users: needed when a lookup field is an owner/user field (primary + fallback both trigger this)
@@ -60,10 +68,76 @@ export function deriveLookupRequirements(fields) {
     // This prevents plain text fields (e.g. Lead's "company" text field) from
     // triggering an unnecessary fetch.
     if (isLookup && isCompanyName) needs.companies = true;
-    if (isLookup && isContactName) needs.contacts  = true;
-    if (isLookup && isDealName)    needs.deals     = true;
-    if (isLookup && isProductName) needs.products  = true;
+    if (isLookup && isContactName) needs.contacts = true;
+    if (isLookup && isDealName) needs.deals = true;
+    if (isLookup && isProductName) needs.products = true;
   }
 
   return needs;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CSV import: relationship helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The backend's key for the platform user table. It is NOT in /metadata/objects,
+// and users have no field-metadata endpoint, so these are declared once here.
+// Follow-up: have the metadata API return the target key + match fields, then delete these.
+export const USER_TARGET = 'user';
+export const USER_TARGET_LABEL = 'User / Team Member';
+export const USER_MATCH_OPTIONS = [
+  { key: 'id', label: 'CRM Record ID (Internal UUID)' },
+  { key: 'name', label: 'Name' },
+  { key: 'email', label: 'Email' },
+];
+
+// Every record has an id, so this is the one constant. All other Match By
+// options come from the target object's own metadata.
+export const RECORD_ID_OPTION = { key: 'id', label: 'CRM Record ID (Internal UUID)' };
+
+/**
+ * Match By candidates = CRM Record ID (Internal UUID) + title field + unique/searchable fields + approved external ID fields.
+ * Relationship fields are excluded to prevent recursive relationship matching.
+ * @param {Array} targetFields normalized fields (output of buildFieldMetadataList)
+ */
+export function getMatchCandidates(targetFields = []) {
+  return [
+    RECORD_ID_OPTION,
+    ...targetFields.filter((f) =>
+      !f.isRelationship && (
+        f.isTitle ||
+        f.isUnique ||
+        f.isSearchable ||
+        f.key === 'record_id__c' ||
+        f.key?.endsWith('_id__c') ||
+        f.key?.includes('external_id') ||
+        f.label?.toLowerCase() === 'record id'
+      )
+    ),
+  ];
+}
+
+/**
+ * Probes each Match By candidate with real CSV values.
+ * The candidate that resolves the most values wins; returns null if none resolve.
+ */
+export async function suggestMatchField(targetObject, candidates, values) {
+  if (!targetObject || !candidates?.length || !values?.length) return null;
+  const scored = await Promise.all(
+    candidates.map(async (c) => {
+      try {
+        const res = await apiPost('/import/resolve-relationships', {
+          targetObjectType: targetObject,
+          matchField: c.key,
+          values,
+        });
+        const hits = Object.values(res?.results || {}).filter((r) => r.status === 'resolved').length;
+        return { key: c.key, hits };
+      } catch {
+        return { key: c.key, hits: 0 };
+      }
+    })
+  );
+  const best = scored.sort((a, b) => b.hits - a.hits)[0];
+  return best && best.hits > 0 ? best.key : null;
 }

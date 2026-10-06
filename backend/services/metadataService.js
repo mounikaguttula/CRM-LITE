@@ -16,6 +16,15 @@ const PLATFORM_FIELDS = [
   { id: 'pf_updated_by', name: 'updated_by', label: 'Modified By', type: 'lookup', required: false, is_system: true, isTitle: false },
 ];
 
+// Extra field flags stored in field_definitions (new property names only, nothing renamed)
+const extraFieldFlags = (f) => ({
+  is_unique: !!f.is_unique,
+  is_searchable: !!f.searchable,
+  is_readonly: !!f.readonly,
+  is_hidden: !!f.hidden,
+  is_active: f.is_active !== false,
+  lookup_target_object_type_id: f.lookup_target_object_type_id || null,
+});
 
 const inMemoryCache = {
   permissions: new Map(),
@@ -324,7 +333,7 @@ const metadataService = {
     if (objDef.id) {
       let fQuery = supabase
         .from('field_definitions')
-        .select('id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values')
+        .select('id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values, is_unique, searchable, readonly, hidden, is_active, lookup_target_object_type_id')
         .eq('object_type_id', objDef.id)
         .order('display_order', { ascending: true });
 
@@ -358,6 +367,7 @@ const metadataService = {
             picklist_values: f.picklist_values || null,
             options: f.picklist_values || null,
             isTitle: fieldName === 'name' || fieldName === 'title' || fieldName === 'deal_name' || fieldName === 'first_name',
+            ...extraFieldFlags(f),
           };
         });
       }
@@ -1052,7 +1062,7 @@ const metadataService = {
     // Prepare Relational Metadata Query Promise (object_type_definitions + field_definitions)
     let metaQuery = supabase
       .from('object_type_definitions')
-      .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at, field_definitions!object_type_id(id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values)');
+      .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at, field_definitions!object_type_id(id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values, is_unique, searchable, readonly, hidden, is_active, lookup_target_object_type_id)');
 
 
     if (isUuid(user?.organization_id)) {
@@ -1248,6 +1258,7 @@ const metadataService = {
             picklist_values: f.picklist_values || null,
             options: f.picklist_values || null,
             isTitle: fieldName === 'name' || fieldName === 'title' || fieldName === 'deal_name' || fieldName === 'first_name',
+            ...extraFieldFlags(f),
           };
         });
       } else {
@@ -1489,6 +1500,20 @@ const metadataService = {
 
     const displayName = fieldData.display_name || fieldData.label || fieldData.name || apiName;
 
+    let lookupTargetId = null;
+    if ((fieldData.field_type || fieldData.type) === 'lookup') {
+      const targetKey = fieldData.lookup_target_object_type_id || fieldData.lookup_target || fieldData.target || fieldData.target_object_type;
+      if (targetKey) {
+        if (isUuid(targetKey)) {
+          lookupTargetId = targetKey;
+        } else {
+          const t = await metadataService.getObjectTypeByApiName(targetKey, organizationId);
+          if (t) lookupTargetId = t.id;
+          else console.warn(`createField: lookup target '${targetKey}' not found; saved without a target.`);
+        }
+      }
+    }
+
 
     const payload = {
       object_type_id: objDef.id,
@@ -1503,6 +1528,7 @@ const metadataService = {
       help_text: fieldData.help_text || fieldData.helpText || null,
       is_system: false,
       display_order: 100,
+      ...(lookupTargetId ? { lookup_target_object_type_id: lookupTargetId } : {}),
     };
 
 
@@ -1580,6 +1606,7 @@ const metadataService = {
       readonly: inserted.readonly || false,
       hidden: inserted.hidden || false,
       is_system: false,
+      ...extraFieldFlags(inserted),
     };
   },
 
