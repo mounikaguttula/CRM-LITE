@@ -2603,6 +2603,7 @@ function ObjectListContent({ objectTypeId }) {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportSearch, setExportSearch] = useState('');
   const [selectedExportKeys, setSelectedExportKeys] = useState(new Set());
+  const [isExporting, setIsExporting] = useState(false);
 
   const availableExportFields = useMemo(() => {
     const cleanObjKey = String(objectTypeId || '').toLowerCase();
@@ -2691,8 +2692,41 @@ function ObjectListContent({ objectTypeId }) {
     });
   };
 
-  const handleExecuteExportCSV = () => {
-    const listToExport = filteredRecords && filteredRecords.length > 0 ? filteredRecords : records;
+  const handleExecuteExportCSV = async () => {
+    setIsExporting(true);
+    let listToExport = [];
+
+    try {
+      const sortParam = sortBy ? `&sortBy=${encodeURIComponent(sortBy)}&sortOrder=${encodeURIComponent(sortOrder)}` : '';
+      const statusParam = filterStatus && filterStatus !== 'ALL' ? `&status=${encodeURIComponent(filterStatus)}` : '';
+      const searchParam = debouncedQuery ? `&search=${encodeURIComponent(debouncedQuery)}` : '';
+
+      const res = await apiGet(`/objects/${objectTypeId}?export=true${sortParam}${statusParam}${searchParam}`);
+      listToExport = Array.isArray(res) ? res : (res?.data || []);
+
+      if (query || (filterStatus && filterStatus !== 'ALL')) {
+        const q = (query || '').toLowerCase();
+        listToExport = listToExport.filter((r) => {
+          if (filterStatus && filterStatus !== 'ALL') {
+            const s = String(r.status || r.stage || (r.data && (r.data.status || r.data.stage)) || '').toLowerCase();
+            if (s !== filterStatus.toLowerCase()) return false;
+          }
+          if (!q) return true;
+          return Object.values(r).some((val) => {
+            if (typeof val === 'object' && val !== null) {
+              return JSON.stringify(val).toLowerCase().includes(q);
+            }
+            return String(val || '').toLowerCase().includes(q);
+          });
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch full record list for export:', err);
+      listToExport = filteredRecords && filteredRecords.length > 0 ? filteredRecords : records;
+    } finally {
+      setIsExporting(false);
+    }
+
     if (!listToExport || listToExport.length === 0) {
       showToast(`No ${meta.pluralDisplayName.toLowerCase()} records available to export.`, 'error');
       setExportModalOpen(false);
@@ -4173,6 +4207,7 @@ function ObjectListContent({ objectTypeId }) {
               </button>
               <button
                 type="button"
+                disabled={isExporting}
                 onClick={handleExecuteExportCSV}
                 style={{
                   display: 'inline-flex',
@@ -4181,15 +4216,15 @@ function ObjectListContent({ objectTypeId }) {
                   padding: '10px 22px',
                   borderRadius: 12,
                   border: 'none',
-                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  background: isExporting ? '#94a3b8' : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
                   color: '#ffffff',
                   fontSize: 13.5,
                   fontWeight: 700,
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+                  cursor: isExporting ? 'wait' : 'pointer',
+                  boxShadow: isExporting ? 'none' : '0 4px 14px rgba(99, 102, 241, 0.4)',
                 }}
               >
-                <Download size={15} /> Export CSV
+                <Download size={15} /> {isExporting ? 'Exporting...' : 'Export CSV'}
               </button>
             </div>
           </div>

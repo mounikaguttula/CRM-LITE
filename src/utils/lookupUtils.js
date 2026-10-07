@@ -101,20 +101,30 @@ export const RECORD_ID_OPTION = { key: 'id', label: 'CRM Record ID (Internal UUI
  * @param {Array} targetFields normalized fields (output of buildFieldMetadataList)
  */
 export function getMatchCandidates(targetFields = []) {
-  return [
-    RECORD_ID_OPTION,
-    ...targetFields.filter((f) =>
-      !f.isRelationship && (
-        f.isTitle ||
-        f.isUnique ||
-        f.isSearchable ||
-        f.key === 'record_id__c' ||
-        f.key?.endsWith('_id__c') ||
-        f.key?.includes('external_id') ||
-        f.label?.toLowerCase() === 'record id'
-      )
-    ),
-  ];
+  const seen = new Set([RECORD_ID_OPTION.key]);
+  const candidates = [RECORD_ID_OPTION];
+
+  for (const f of (Array.isArray(targetFields) ? targetFields : [])) {
+    if (!f || f.isRelationship || !f.key || seen.has(f.key)) continue;
+
+    const isCandidate =
+      f.isTitle ||
+      f.isUnique ||
+      f.isSearchable ||
+      f.key === 'record_id__c' ||
+      f.key === 'record_id' ||
+      f.key === 'recordid' ||
+      f.key?.endsWith('_id__c') ||
+      f.key?.includes('external_id') ||
+      f.label?.toLowerCase().includes('record id');
+
+    if (isCandidate) {
+      seen.add(f.key);
+      candidates.push(f);
+    }
+  }
+
+  return candidates;
 }
 
 /**

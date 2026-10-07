@@ -15,7 +15,26 @@ const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
  * @param {Array} objectList  raw /metadata/objects response (turns a target object id into its api_name)
  */
 export function buildFieldMetadataList(fieldsList = [], objectList = []) {
-  const objById = new Map((Array.isArray(objectList) ? objectList : []).map((o) => [o.id, o]));
+  const objMap = new Map();
+  (Array.isArray(objectList) ? objectList : []).forEach((o) => {
+    if (!o) return;
+    if (o.id) objMap.set(o.id, o);
+    if (o.api_name) {
+      const api = String(o.api_name).toLowerCase();
+      objMap.set(api, o);
+      objMap.set(o.api_name, o);
+      // Add plural form: "company" → "companies", "lead" → "leads", any → append s
+      if (api.endsWith('y')) objMap.set(`${api.slice(0, -1)}ies`, o);
+      else if (!api.endsWith('s')) objMap.set(`${api}s`, o);
+      // Add singular form: "companies" → "company", "leads" → "lead"
+      if (api.endsWith('ies')) objMap.set(`${api.slice(0, -3)}y`, o);
+      else if (api.endsWith('s')) objMap.set(api.slice(0, -1), o);
+    }
+    if (o.display_name) {
+      const disp = String(o.display_name).toLowerCase();
+      objMap.set(disp, o);
+    }
+  });
 
   return (Array.isArray(fieldsList) ? fieldsList : [])
     .map((f) => ({ f, key: f?.api_name || f?.name }))
@@ -34,11 +53,16 @@ export function buildFieldMetadataList(fieldsList = [], objectList = []) {
       // user picks the target in the mapping UI. We never guess from the field name.
       let targetObject = null;
       if (isRelationship) {
-        const targetId = f.lookup_target_object_type_id || f.lookupTargetObjectTypeId;
-        targetObject =
-          (targetId && objById.get(targetId)?.api_name) ||
-          f.target_object_type || f.lookup_target || f.lookupTarget || f.targetObject ||
+        const rawTarget =
+          f.lookup_target_object_type_id ||
+          f.lookupTargetObjectTypeId ||
+          f.target_object_type ||
+          f.lookup_target ||
+          f.lookupTarget ||
+          f.targetObject ||
           null;
+        const matched = rawTarget ? (objMap.get(rawTarget) || objMap.get(String(rawTarget).toLowerCase())) : null;
+        targetObject = matched ? matched.api_name : (typeof rawTarget === 'string' ? rawTarget : null);
       }
 
       return {
@@ -48,7 +72,7 @@ export function buildFieldMetadataList(fieldsList = [], objectList = []) {
         isSystem: !!f.is_system,
         isRequired: !!(f.required ?? f.is_required),
         isUnique: !!f.is_unique,
-        isSearchable: !!f.searchable,
+        isSearchable: !!(f.searchable ?? f.is_searchable),
         isTitle: !!(f.isTitle ?? f.is_title), // the record's display-name field
         isRelationship,
         targetObject,

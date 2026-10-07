@@ -45,7 +45,9 @@ const getRecords = async (req, res, next) => {
       options.owner_id = req.user?.id;
     }
 
-    if (req.query.page || req.query.pageSize || req.query.limit) {
+    if (req.query.export === 'true' || req.query.all === 'true') {
+      options.paginated = false;
+    } else if (req.query.page || req.query.pageSize || req.query.limit) {
       options.page = parseInt(req.query.page, 10) || 1;
       options.pageSize = parseInt(req.query.pageSize || req.query.limit, 10) || 25;
       options.paginated = true;

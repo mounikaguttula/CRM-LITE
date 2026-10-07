@@ -1314,7 +1314,12 @@ const objectService = {
       let contactNameInput = undefined;
 
       if (!isCompanyObject) {
-        const explicitCompanyIdKeys = ['company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id'];
+        const explicitCompanyIdKeys = [
+          'company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id',
+          'primary_company_id', 'Primary Company ID', 'Primary Company IDs', 'Associated Company IDs (Primary)',
+          'associated_company_id', 'Associated Company ID', 'associated_company_ids', 'Associated Company IDs',
+          'assoc_company_id', 'assoc_company_ids'
+        ];
         for (const k of explicitCompanyIdKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
             companyIdInput = String(rowPayload[k]).trim();
@@ -1345,7 +1350,7 @@ const objectService = {
           }
         }
       } else {
-        const parentCompanyIdKeys = ['parent_company_id', 'parent_id', 'parent_company_uuid'];
+        const parentCompanyIdKeys = ['parent_company_id', 'parent_id', 'parent_company_uuid', 'associated_company_id', 'Associated Company ID', 'Associated Company IDs'];
         for (const k of parentCompanyIdKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
             companyIdInput = String(rowPayload[k]).trim();
@@ -1366,7 +1371,11 @@ const objectService = {
       }
 
       if (!isContactObject) {
-        const explicitContactIdKeys = ['contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id'];
+        const explicitContactIdKeys = [
+          'contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id',
+          'primary_contact_id', 'Primary Contact ID', 'associated_contact_id', 'Associated Contact ID',
+          'associated_contact_ids', 'Associated Contact IDs', 'assoc_contact_id', 'assoc_contact_ids'
+        ];
         for (const k of explicitContactIdKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
             contactIdInput = String(rowPayload[k]).trim();

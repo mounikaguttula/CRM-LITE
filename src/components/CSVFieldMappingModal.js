@@ -18,7 +18,7 @@ import ReactDOM from 'react-dom';
 import {
   X, UploadCloud, AlertTriangle, Check, RefreshCw,
   ChevronDown, Link2, Save, Trash2, Sparkles, ArrowRight,
-  CheckCircle2, XCircle, HelpCircle, ChevronUp
+  CheckCircle2, XCircle, HelpCircle, ChevronUp, Search
 } from 'lucide-react';
 import { apiGet, apiPost } from '../api/client';
 import { mapHeaderToField, buildFieldMetadataList } from '../utils/csvImportMapping';
@@ -135,6 +135,203 @@ function StatusIcon({ status, size = 14 }) {
   return <HelpCircle size={size} style={{ color: '#94a3b8' }} />;
 }
 
+// ─── Sub-component: SearchableSelect ─────────────────────────────────────────
+// A custom dropdown with an inline search input for filtering options.
+
+function SearchableSelect({ value, onChange, options, placeholder = '— Unmapped —', disabled = false, style = {} }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  // Find selected label
+  const selectedOption = options.find((o) => o.value === value);
+  const displayLabel = selectedOption ? selectedOption.label : placeholder;
+
+  // Filter options
+  const query = search.toLowerCase().trim();
+  const filtered = query
+    ? options.filter((o) => o.label.toLowerCase().includes(query) || (o.value || '').toLowerCase().includes(query))
+    : options;
+
+  // Close on click outside
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClick = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+        setSearch('');
+        setHighlightIdx(-1);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen]);
+
+  // Focus input when opened
+  useEffect(() => {
+    if (isOpen && inputRef.current) inputRef.current.focus();
+  }, [isOpen]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightIdx >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightIdx + 1]; // +1 for the unmapped option
+      if (item) item.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightIdx]);
+
+  const handleOpen = () => {
+    if (disabled) return;
+    setIsOpen(!isOpen);
+    setSearch('');
+    setHighlightIdx(-1);
+  };
+
+  const handleSelect = (val) => {
+    onChange({ target: { value: val } });
+    setIsOpen(false);
+    setSearch('');
+    setHighlightIdx(-1);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      setIsOpen(false);
+      setSearch('');
+      setHighlightIdx(-1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIdx((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIdx((i) => Math.max(i - 1, -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightIdx === -1) {
+        handleSelect('');
+      } else if (filtered[highlightIdx]) {
+        handleSelect(filtered[highlightIdx].value);
+      }
+    }
+  };
+
+  const baseStyle = {
+    padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0',
+    background: '#fff', fontSize: '0.8rem', color: '#0f172a', width: '100%',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    outline: 'none', position: 'relative',
+    userSelect: 'none',
+    ...style,
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+      {/* Trigger */}
+      <div
+        onClick={handleOpen}
+        style={{
+          ...baseStyle,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          border: isOpen ? '1px solid #8b5cf6' : baseStyle.border,
+          boxShadow: isOpen ? '0 0 0 2px rgba(139,92,246,0.15)' : 'none',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        <span style={{
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          color: value ? '#0f172a' : '#94a3b8', fontWeight: value ? 500 : 400,
+        }}>
+          {displayLabel}
+        </span>
+        <ChevronDown size={13} style={{ color: '#94a3b8', flexShrink: 0, marginLeft: 4,
+          transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </div>
+
+      {/* Dropdown */}
+      {isOpen && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0,
+          marginTop: 4, background: '#fff',
+          border: '1px solid #e2e8f0', borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+          zIndex: 9999, maxHeight: 300, display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
+          {/* Search input */}
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setHighlightIdx(-1); }}
+              onKeyDown={handleKeyDown}
+              placeholder="Search fields…"
+              style={{
+                width: '100%', padding: '6px 10px', borderRadius: 6,
+                border: '1px solid #e2e8f0', fontSize: '0.78rem',
+                outline: 'none', background: '#f8fafc', color: '#0f172a',
+                transition: 'border 0.15s',
+              }}
+              onFocus={(e) => { e.target.style.borderColor = '#8b5cf6'; }}
+              onBlur={(e) => { e.target.style.borderColor = '#e2e8f0'; }}
+            />
+          </div>
+
+          {/* Options list */}
+          <div ref={listRef} style={{ overflowY: 'auto', maxHeight: 240 }}>
+            {/* Unmapped option */}
+            <div
+              onClick={() => handleSelect('')}
+              style={{
+                padding: '7px 12px', fontSize: '0.78rem', cursor: 'pointer',
+                color: '#94a3b8', fontStyle: 'italic',
+                background: highlightIdx === -1 && !value ? '#f5f3ff' : 'transparent',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f3ff'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = highlightIdx === -1 && !value ? '#f5f3ff' : 'transparent'; }}
+            >
+              {placeholder}
+            </div>
+
+            {filtered.length === 0 && (
+              <div style={{ padding: '12px', fontSize: '0.76rem', color: '#94a3b8', textAlign: 'center' }}>
+                No fields match "{search}"
+              </div>
+            )}
+
+            {filtered.map((o, idx) => {
+              const isHighlighted = idx === highlightIdx;
+              const isSelected = o.value === value;
+              return (
+                <div
+                  key={o.value}
+                  onClick={() => handleSelect(o.value)}
+                  style={{
+                    padding: '7px 12px', fontSize: '0.78rem', cursor: 'pointer',
+                    background: isHighlighted ? '#ede9fe' : isSelected ? '#f5f3ff' : 'transparent',
+                    color: isSelected ? '#6d28d9' : '#0f172a',
+                    fontWeight: isSelected ? 600 : 400,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    transition: 'background 0.08s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#ede9fe'; setHighlightIdx(idx); }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? '#f5f3ff' : 'transparent'; }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
+                  {isSelected && <Check size={13} style={{ color: '#6d28d9', flexShrink: 0, marginLeft: 'auto' }} />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Sub-component: FieldMappingRow ──────────────────────────────────────────
 
 function FieldMappingRow({
@@ -166,9 +363,27 @@ function FieldMappingRow({
   const handlePriorityChange = (e) =>
     onMappingChange(header, { ...currentMapping, priority: parseInt(e.target.value, 10) || 1 });
 
-  const currentLookupOpts = currentMapping.targetObjectType
-    ? (lookupFieldOptions[currentMapping.targetObjectType] || [])
-    : [];
+  // Resolve lookup opts by trying the raw targetObjectType, then its canonical api_name.
+  // This handles cases where targetObject is stored as 'company' but cache was keyed as 'companies' or vice-versa.
+  const currentLookupOpts = (() => {
+    if (!currentMapping.targetObjectType) return [];
+    const direct = lookupFieldOptions[currentMapping.targetObjectType];
+    if (direct && direct.length > 0) return direct;
+    // Try canonical api_name match from objectTypes
+    const matched = objectTypes.find((o) =>
+      o.api_name === currentMapping.targetObjectType ||
+      o.id === currentMapping.targetObjectType ||
+      o.api_name?.toLowerCase() === currentMapping.targetObjectType?.toLowerCase()
+    );
+    if (matched) {
+      return (
+        lookupFieldOptions[matched.api_name] ||
+        lookupFieldOptions[matched.id] ||
+        []
+      );
+    }
+    return [];
+  })();
 
   const selectStyle = {
     padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0',
@@ -199,18 +414,16 @@ function FieldMappingRow({
           <ArrowRight size={14} style={{ color: '#cbd5e1' }} />
         </div>
 
-        {/* CRM Field Dropdown (comes entirely from metadata) */}
-        <select
+        {/* CRM Field Dropdown — searchable (comes entirely from metadata) */}
+        <SearchableSelect
           value={currentMapping.targetField || ''}
           onChange={handleFieldChange}
           disabled={isDisabled}
-          style={selectStyle}
-        >
-          <option value="">— Unmapped —</option>
-          {fieldMetadataList.map((f) => (
-            <option key={f.key} value={f.key}>{`${f.label || f.key}${f.isRelationship ? ' 🔗' : ''}`}</option>
-          ))}
-        </select>
+          options={fieldMetadataList.map((f) => ({
+            value: f.key,
+            label: `${f.label || f.key}${f.isRelationship ? ' 🔗' : ''}`,
+          }))}
+        />
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
           {currentMapping.targetField
@@ -334,6 +547,7 @@ export default function CSVFieldMappingModal({
   // ── Mapping state ──────────────────────────────────────────────────────────
   // mappings: { [csvHeader]: { targetField, isRelationship, targetObjectType, matchField, priority } }
   const [mappings, setMappings] = useState({});
+  const [rowSearchTerm, setRowSearchTerm] = useState('');
 
   // ── Saved mappings ─────────────────────────────────────────────────────────
   const [savedMappings, setSavedMappings] = useState([]);
@@ -360,6 +574,7 @@ export default function CSVFieldMappingModal({
     setSampleRows([]);
     setAllRows([]);
     setMappings({});
+    setRowSearchTerm('');
     setRelationshipPreviews({});
     setValidating(false);
     setImportProgress('');
@@ -431,6 +646,8 @@ export default function CSVFieldMappingModal({
   }, [open, objectTypeId]);
 
   // Match By options for a target object, loaded on demand and cached.
+  // Normalizes the targetObj to its canonical api_name and caches under all alias keys
+  // so lookupFieldOptions[currentMapping.targetObjectType] always resolves.
   const loadLookupOptions = useCallback(async (targetObj) => {
     if (!targetObj) return [];
     if (matchOptionsCache.current[targetObj]) return matchOptionsCache.current[targetObj];
@@ -438,16 +655,74 @@ export default function CSVFieldMappingModal({
     let opts;
     if (targetObj === USER_TARGET) {
       opts = USER_MATCH_OPTIONS;
-    } else {
-      opts = [RECORD_ID_OPTION];
-      try {
-        const res = await apiGet(`/metadata/objects/${targetObj}/fields`).catch(() => apiGet(`/objects/${targetObj}/fields`)).catch(() => []);
-        const rawFields = Array.isArray(res) ? res : (res?.data || res?.fields || res?.data?.fields || []);
-        opts = getMatchCandidates(buildFieldMetadataList(rawFields, objectTypesRef.current));
-      } catch { /* keep Record ID only */ }
+      matchOptionsCache.current[targetObj] = opts;
+      setLookupFieldOptions((prev) => ({ ...prev, [targetObj]: opts }));
+      return opts;
     }
-    matchOptionsCache.current[targetObj] = opts;
-    setLookupFieldOptions((prev) => ({ ...prev, [targetObj]: opts }));
+
+    // Resolve to canonical api_name + id from the known object list.
+    // Match is: UUID id, exact api_name, case-insensitive api_name, or stripped singular/plural.
+    const objList = objectTypesRef.current || [];
+    const tLower = String(targetObj).toLowerCase();
+    const matched = objList.find((o) => {
+      if (!o) return false;
+      if (o.id === targetObj) return true;
+      const api = (o.api_name || '').toLowerCase();
+      if (api === tLower) return true;
+      // plural → singular: 'companies' matches 'company', 'leads' matches 'lead'
+      if (api.endsWith('y') && `${api.slice(0, -1)}ies` === tLower) return true;
+      if (!api.endsWith('s') && `${api}s` === tLower) return true;
+      // singular → plural: 'company' matches 'companies', 'lead' matches 'leads'
+      if (tLower.endsWith('ies') && api === `${tLower.slice(0, -3)}y`) return true;
+      if (tLower.endsWith('s') && api === tLower.slice(0, -1)) return true;
+      return false;
+    });
+    const canonicalKey = matched?.api_name || targetObj;
+    const objId = matched?.id;
+
+    // If canonical result already cached, alias and return it
+    if (matchOptionsCache.current[canonicalKey]) {
+      const cachedOpts = matchOptionsCache.current[canonicalKey];
+      matchOptionsCache.current[targetObj] = cachedOpts;
+      const extras = [targetObj, canonicalKey, objId].filter(Boolean);
+      setLookupFieldOptions((prev) => {
+        const patch = {};
+        extras.forEach((k) => { patch[k] = cachedOpts; });
+        return { ...prev, ...patch };
+      });
+      return cachedOpts;
+    }
+
+    // Fetch from the API, trying canonical then original key
+    opts = [RECORD_ID_OPTION];
+    try {
+      const keysToTry = [...new Set([canonicalKey, targetObj, objId].filter(Boolean))];
+      let rawFields = [];
+      for (const k of keysToTry) {
+        const res = await apiGet(`/metadata/objects/${k}/fields`).catch(() => null);
+        const arr = Array.isArray(res) ? res : (res?.data || res?.fields || res?.data?.fields || []);
+        if (arr.length > 0) { rawFields = arr; break; }
+      }
+      if (rawFields.length === 0) {
+        for (const k of keysToTry) {
+          const res = await apiGet(`/objects/${k}/fields`).catch(() => null);
+          const arr = Array.isArray(res) ? res : (res?.data || res?.fields || res?.data?.fields || []);
+          if (arr.length > 0) { rawFields = arr; break; }
+        }
+      }
+      if (rawFields.length > 0) {
+        opts = getMatchCandidates(buildFieldMetadataList(rawFields, objectTypesRef.current));
+      }
+    } catch { /* keep Record ID only */ }
+
+    // Cache under all aliases so any variant of the key resolves
+    const allKeys = [...new Set([targetObj, canonicalKey, objId].filter(Boolean))];
+    allKeys.forEach((k) => { matchOptionsCache.current[k] = opts; });
+    setLookupFieldOptions((prev) => {
+      const patch = {};
+      allKeys.forEach((k) => { patch[k] = opts; });
+      return { ...prev, ...patch };
+    });
     return opts;
   }, []);
 
@@ -555,46 +830,50 @@ export default function CSVFieldMappingModal({
   );
 
   // ── Validate: resolve unique values from ALL rows, in chunks ───────────────
+  //
+  // Only EXPLICITLY MAPPED lookup columns are validated.
+  // Unmapped lookup/relationship columns (e.g. "Associated Contact IDs") are
+  // completely ignored — no Match By, no validation, no resolve-relationships call.
   const handleValidate = useCallback(async () => {
     setValidating(true);
     const previews = {};
 
-    // Empty columns are ignored: no Match By needed, nothing to resolve, no error
+    // Only relationship columns that are explicitly mapped, configured, and have values
     const lookupHeaders = headers.filter((h) => {
       const cfg = mappings[h];
-      return cfg?.isRelationship && cfg.targetObjectType && cfg.matchField && columnHasValues(h);
+      return cfg?.isRelationship && cfg.targetField && cfg.targetObjectType && cfg.matchField && columnHasValues(h);
     });
 
-    // One resolve job per (targetObject, matchField), shared by every column that uses it
+    // Group by (targetObjectType, matchField) so we batch the resolver calls
     const groupMap = {};
     lookupHeaders.forEach((h) => {
       const cfg = mappings[h];
       const gKey = `${cfg.targetObjectType}::${cfg.matchField}`;
-      if (!groupMap[gKey]) groupMap[gKey] = { headers: [], cfg };
-      groupMap[gKey].headers.push(h);
-    });
-
-    // Unique values per job, collected from ALL rows
-    const valuesByGroup = {};
-    lookupHeaders.forEach((h) => {
-      const cfg = mappings[h];
-      const gKey = `${cfg.targetObjectType}::${cfg.matchField}`;
-      valuesByGroup[gKey] = valuesByGroup[gKey] || new Set();
+      if (!groupMap[gKey]) {
+        groupMap[gKey] = {
+          targetObjectType: cfg.targetObjectType,
+          matchField: cfg.matchField,
+          valueSet: new Set(),
+          headers: new Set(),
+        };
+      }
+      groupMap[gKey].headers.add(h);
       allRows.forEach((row) => {
-        const v = cellValue(row[h]);
-        if (v) valuesByGroup[gKey].add(v);
+        const val = cellValue(row[h]);
+        if (val) groupMap[gKey].valueSet.add(val);
       });
     });
 
-    await Promise.all(Object.entries(groupMap).map(async ([gKey, group]) => {
-      const values = [...(valuesByGroup[gKey] || [])];
+    // Resolve each (targetObjectType, matchField) group
+    await Promise.all(Object.entries(groupMap).map(async ([, group]) => {
+      const values = [...group.valueSet];
       const results = {};
       for (let i = 0; i < values.length; i += RESOLVE_CHUNK) {
         const slice = values.slice(i, i + RESOLVE_CHUNK);
         try {
           const res = await apiPost('/import/resolve-relationships', {
-            targetObjectType: group.cfg.targetObjectType,
-            matchField: group.cfg.matchField,
+            targetObjectType: group.targetObjectType,
+            matchField: group.matchField,
             values: slice,
           });
           slice.forEach((v) => { results[v] = res?.results?.[v] || { status: 'not_found' }; });
@@ -602,13 +881,19 @@ export default function CSVFieldMappingModal({
           slice.forEach((v) => { results[v] = { status: 'error', reason: err?.message || 'Lookup failed' }; });
         }
       }
-      group.headers.forEach((h) => { previews[h] = results; });
+
+      // Store results under each header that feeds into this group
+      group.headers.forEach((h) => {
+        previews[h] = previews[h] || {};
+        values.forEach((v) => { previews[h][v] = results[v]; });
+      });
     }));
 
     setRelationshipPreviews(previews);
     setValidating(false);
     setStep(2);
   }, [headers, mappings, allRows, columnHasValues]);
+
 
   // ── Import ─────────────────────────────────────────────────────────────────
   const handleImport = useCallback(async () => {
@@ -635,8 +920,8 @@ export default function CSVFieldMappingModal({
         }
       });
 
-      // Relationship: the first NON-EMPTY value by priority decides; no fallthrough after a bad value.
-      // Priority ties: Record ID beats name-style matching.
+      // Relationship: the first NON-EMPTY explicitly mapped value by priority decides.
+      // Only columns that were mapped + validated are considered.
       Object.entries(lookupGroups).forEach(([targetField, entries]) => {
         const sorted = [...entries].sort((a, b) =>
           ((a.cfg.priority || 1) - (b.cfg.priority || 1)) ||
@@ -647,14 +932,19 @@ export default function CSVFieldMappingModal({
           if (!val) continue; // blank → try the next priority
           if (!cfg.targetObjectType || !cfg.matchField) {
             relErrors.set(record.__rowNum, `${targetField}: "${val}" has no Match By configured`);
+            break;
+          }
+          // Look up the validation result directly from previews for this mapped column
+          const r = relationshipPreviews[header]?.[val];
+          if (r?.status === 'resolved' && r.resolvedId) {
+            record[targetField] = r.resolvedId;
           } else {
-            const r = relationshipPreviews[header]?.[val];
-            if (r?.status === 'resolved' && r.resolvedId) record[targetField] = r.resolvedId;
-            else relErrors.set(record.__rowNum, `${targetField}: "${val}" → ${r?.reason || r?.status || 'not validated'}`);
+            relErrors.set(record.__rowNum, `${targetField}: "${val}" → ${r?.reason || r?.status || 'not validated'}`);
           }
           break;
         }
       });
+
 
       return record;
     });
@@ -738,6 +1028,22 @@ export default function CSVFieldMappingModal({
     });
     return { mappedCount: mc, unmappedCount: uc, lookupCount: lc };
   }, [headers, mappings]);
+
+  // ── Filter headers by rowSearchTerm ─────────────────────────────────────────
+  const filteredHeaders = useMemo(() => {
+    if (!rowSearchTerm.trim()) return headers;
+    const term = rowSearchTerm.toLowerCase();
+    return headers.filter((h) => {
+      const targetKey = mappings[h]?.targetField || '';
+      const meta = fieldMetadataList.find((f) => f.key === targetKey);
+      const targetLabel = meta?.label || targetKey;
+      return (
+        h.toLowerCase().includes(term) ||
+        targetKey.toLowerCase().includes(term) ||
+        targetLabel.toLowerCase().includes(term)
+      );
+    });
+  }, [headers, rowSearchTerm, mappings, fieldMetadataList]);
 
   // ── Validation issues ──────────────────────────────────────────────────────
   const validationIssues = useMemo(() => {
@@ -971,7 +1277,7 @@ export default function CSVFieldMappingModal({
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                 <div style={{ padding: '6px 12px', borderRadius: 20, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.74rem', fontWeight: 700, color: '#16a34a' }}>
                   ✓ {mappedCount} mapped
                 </div>
@@ -986,6 +1292,43 @@ export default function CSVFieldMappingModal({
                     {lookupCount} relationship{lookupCount > 1 ? 's' : ''}
                   </div>
                 )}
+
+                {/* Search Bar for filtering CSV Column Rows */}
+                <div style={{ position: 'relative', flex: 1, minWidth: 180, maxWidth: 280, display: 'flex', alignItems: 'center' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, color: '#94a3b8', pointerEvents: 'none' }} />
+                  <input
+                    type="text"
+                    placeholder="Search columns or fields…"
+                    value={rowSearchTerm}
+                    onChange={(e) => setRowSearchTerm(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 28px 6px 30px',
+                      fontSize: '0.78rem',
+                      borderRadius: 20,
+                      border: '1px solid #cbd5e1',
+                      background: '#f8fafc',
+                      color: '#1e293b',
+                      outline: 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onFocus={(e) => { e.target.style.borderColor = '#6366f1'; e.target.style.background = '#fff'; e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.1)'; }}
+                    onBlur={(e) => { e.target.style.borderColor = '#cbd5e1'; e.target.style.background = '#f8fafc'; e.target.style.boxShadow = 'none'; }}
+                  />
+                  {rowSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setRowSearchTerm('')}
+                      style={{
+                        position: 'absolute', right: 8, background: 'none', border: 'none',
+                        color: '#94a3b8', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center'
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
                 <div style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 20, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: '0.74rem', fontWeight: 700, color: '#2563eb' }}>
                   {allRows.length} records
                 </div>
@@ -999,19 +1342,25 @@ export default function CSVFieldMappingModal({
               </div>
 
               <div style={{ border: '1px solid #e2e8f0', borderRadius: '0 0 12px 12px', overflow: 'hidden', maxHeight: 380, overflowY: 'auto' }}>
-                {headers.map((header) => (
-                  <FieldMappingRow
-                    key={header}
-                    header={header}
-                    sampleValues={sampleRows.map((r) => r[header]).filter(Boolean)}
-                    mapping={mappings[header]}
-                    fieldMetadataList={fieldMetadataList}
-                    lookupFieldOptions={lookupFieldOptions}
-                    onMappingChange={handleMappingChange}
-                    isDisabled={validating}
-                    allMappings={mappings}
-                  />
-                ))}
+                {filteredHeaders.length === 0 ? (
+                  <div style={{ padding: '36px 16px', textAlign: 'center', color: '#64748b', fontSize: '0.84rem' }}>
+                    No CSV columns or mapped fields match "<strong>{rowSearchTerm}</strong>"
+                  </div>
+                ) : (
+                  filteredHeaders.map((header) => (
+                    <FieldMappingRow
+                      key={header}
+                      header={header}
+                      sampleValues={sampleRows.map((r) => r[header]).filter(Boolean)}
+                      mapping={mappings[header]}
+                      fieldMetadataList={fieldMetadataList}
+                      lookupFieldOptions={lookupFieldOptions}
+                      onMappingChange={handleMappingChange}
+                      isDisabled={validating}
+                      allMappings={mappings}
+                    />
+                  ))
+                )}
               </div>
 
               <div style={{ marginTop: 14 }}>
