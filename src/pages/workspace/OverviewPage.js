@@ -3995,7 +3995,7 @@ function ObjectListContent({ objectTypeId }) {
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '24px',
-              maxWidth: '580px',
+              maxWidth: '840px',
               width: '100%',
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0,0,0,0.05)',
               display: 'flex',
@@ -4141,12 +4141,13 @@ function ObjectListContent({ objectTypeId }) {
                     <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
                       {catName}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '8px 12px' }}>
                       {catFields.map((f) => {
                         const isChecked = selectedExportKeys.has(f.key) || f.required;
                         return (
                           <div
                             key={f.key}
+                            title={f.label}
                             onClick={() => handleToggleExportField(f.key, f.required)}
                             style={{
                               display: 'flex',
