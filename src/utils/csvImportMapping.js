@@ -36,7 +36,7 @@ export function buildFieldMetadataList(fieldsList = [], objectList = []) {
     }
   });
 
-  return (Array.isArray(fieldsList) ? fieldsList : [])
+  const result = (Array.isArray(fieldsList) ? fieldsList : [])
     .map((f) => ({ f, key: f?.api_name || f?.name }))
     .filter(({ f, key }) =>
       key &&
@@ -78,6 +78,24 @@ export function buildFieldMetadataList(fieldsList = [], objectList = []) {
         targetObject,
       };
     });
+
+  // Ensure 'id' (Record ID) is available at the top for upsert and update matching
+  if (!result.some((f) => f.key === 'id')) {
+    result.unshift({
+      key: 'id',
+      label: 'Record ID',
+      type: 'text',
+      isSystem: true,
+      isRequired: false,
+      isUnique: true,
+      isSearchable: true,
+      isTitle: false,
+      isRelationship: false,
+      targetObject: null,
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -88,6 +106,73 @@ export function mapHeaderToField(rawHeader, fields = []) {
   const raw = String(rawHeader ?? '').trim().toLowerCase();
   const n = norm(rawHeader);
   if (!n) return null;
+
+  const isSegmentOrHubSpot = fields.some((f) => f.key === 'hubspot_segment_id' || f.key === 'hubspot_list_id');
+
+  // Specialized HubSpot Segment field mappings
+  if (isSegmentOrHubSpot) {
+    const findField = (k) => fields.find((f) => f.key === k);
+
+    if (raw === 'ils segment id' || raw === 'segment id' || raw === 'hubspot segment id') return findField('hubspot_segment_id');
+    if (raw === 'list id' || raw === 'hubspot list id') return findField('hubspot_list_id');
+    if (raw === 'record id' || raw === 'record_id' || raw === 'hubspot record id') return findField('hubspot_record_id');
+    if (raw === 'folder id' || raw === 'folder_id') return findField('folder_id');
+    if (raw === 'list size' || raw === 'list_size') return findField('source_record_count');
+    if (raw === 'processing type' || raw === 'processing_type') return findField('hubspot_processing_type');
+    if (raw === 'segment name' || raw === 'segment_name') return findField('name');
+    if (raw === 'object type' || raw === 'object_type') return findField('target_object_type');
+    if (raw === 'description') return findField('description');
+
+    if (raw === 'average lookalike similarity score' || raw === 'lookalike similarity score') return findField('lookalike_similarity_score');
+    if (raw === 'email click through rate') return findField('email_click_through_rate');
+    if (raw === 'cluster segment description') return findField('cluster_segment_description');
+    if (raw === 'created at') return findField('hubspot_created_at');
+    if (raw === 'created by user id') return findField('hubspot_created_by_user_id');
+    if (raw === 'object create date/time' || raw === 'object create date time') return findField('hubspot_object_created_at');
+    if (raw === 'email open rate') return findField('email_open_rate');
+    if (raw === 'generated with ai') return findField('generated_with_ai');
+    if (raw === 'type: active' || raw === 'type active') return findField('hubspot_type_active');
+    if (raw === 'read only' || raw === 'read_only') return findField('is_read_only');
+    if (raw === 'last record added at') return findField('last_record_added_at');
+    if (raw === 'last record removed at') return findField('last_record_removed_at');
+    if (raw === 'object last modified date/time' || raw === 'object last modified date time') return findField('hubspot_object_last_modified_at');
+    if (raw === 'segment access level') return findField('segment_access_level');
+    if (raw === 'notifications') return findField('hubspot_notifications');
+    if (raw === 'used in') return findField('hubspot_used_in');
+    if (raw === 'used in (count)' || raw === 'used in count') return findField('hubspot_used_in_count');
+    if (raw === '7-day change' || raw === '7 day change') return findField('seven_day_change');
+    if (raw === 'segment version') return findField('hubspot_segment_version');
+    if (raw === 'lookalikes ai summary') return findField('lookalikes_ai_summary');
+    if (raw === 'merged record ids') return findField('hubspot_merged_record_ids');
+    if (raw === 'record source detail 1') return findField('record_source_detail_1');
+    if (raw === 'record source detail 2') return findField('record_source_detail_2');
+    if (raw === 'record source detail 3') return findField('record_source_detail_3');
+    if (raw === 'record source') return findField('record_source');
+    if (raw === 'teams with edit access') return findField('teams_with_edit_access');
+    if (raw === 'updated at') return findField('hubspot_updated_at');
+    if (raw === 'updated by user id') return findField('hubspot_updated_by_user_id');
+    if (raw === 'users with edit access') return findField('users_with_edit_access');
+    if (raw === 'owner assigned date') return findField('owner_assigned_date');
+    if (raw === 'owner') return findField('hubspot_owner_name');
+
+    // Strictly block HubSpot Record ID, List ID, ILS Segment ID, Folder ID from ever mapping to internal id
+    if (
+      raw === 'record id' || raw === 'record_id' ||
+      raw === 'list id' || raw === 'list_id' ||
+      raw === 'ils segment id' || raw === 'ils_segment_id' ||
+      raw === 'folder id' || raw === 'folder_id'
+    ) {
+      return null;
+    }
+  }
+
+  // Explicit check for CRMNow internal Record ID / ID headers
+  // Only exact CRM internal ID aliases map to internal id; never generic "... id"
+  if (raw === 'id' || raw === 'crm record id' || raw === 'crm_record_id' || raw === 'record_uuid' || (!isSegmentOrHubSpot && (raw === 'record id' || raw === 'record_id'))) {
+    const idField = fields.find((f) => f.key === 'id');
+    if (idField) return idField;
+  }
+
   return (
     fields.find((f) => f.key.toLowerCase() === raw) ||
     fields.find((f) => f.label.toLowerCase() === raw) ||

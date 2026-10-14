@@ -124,6 +124,62 @@ const createObjectField = async (req, res, next) => {
   }
 };
 
+const updateObjectField = async (req, res, next) => {
+  try {
+    await metadataService.checkPermission(req.user, 'object_field', 'update');
+    const objectType = req.params.objectType || req.params.objectTypeId || req.body.objectType;
+    const fieldId = req.params.fieldId || req.body.id;
+    const organizationId = req.params.organizationId || req.user?.organization_id;
+
+    const updatedField = await metadataService.updateField(objectType, fieldId, req.body, organizationId, req.user);
+
+    auditService.logSetupActivity({
+      organization_id: organizationId,
+      user_id: req.user?.id,
+      action: 'UPDATE',
+      entity_type: 'field',
+      entity_id: updatedField?.id || fieldId,
+      entity_name: updatedField?.label || updatedField?.display_name || req.body?.display_name || req.body?.label || fieldId,
+      module_name: objectType,
+    }).catch(err => console.error('❌ Audit log error:', err.message));
+
+    return res.status(200).json(updatedField);
+  } catch (err) {
+    if (err?.statusCode === 403) return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message });
+    if (err?.statusCode === 404) return res.status(404).json({ statusCode: 404, error: 'Not Found', message: err.message });
+    if (err?.statusCode === 400) return res.status(400).json({ statusCode: 400, error: 'Bad Request', message: err.message });
+    return res.status(err?.statusCode || 400).json({ error: err.message || 'Failed to update field in database.' });
+  }
+};
+
+const resetObjectFieldOverride = async (req, res, next) => {
+  try {
+    await metadataService.checkPermission(req.user, 'object_field', 'update');
+    const objectType = req.params.objectType || req.params.objectTypeId || req.body.objectType;
+    const fieldId = req.params.fieldId || req.body.id;
+    const organizationId = req.params.organizationId || req.user?.organization_id;
+
+    const restoredField = await metadataService.resetFieldOverride(objectType, fieldId, organizationId, req.user);
+
+    auditService.logSetupActivity({
+      organization_id: organizationId,
+      user_id: req.user?.id,
+      action: 'RESET_OVERRIDE',
+      entity_type: 'field',
+      entity_id: restoredField?.id || fieldId,
+      entity_name: restoredField?.label || restoredField?.display_name || fieldId,
+      module_name: objectType,
+    }).catch(err => console.error('❌ Audit log error:', err.message));
+
+    return res.status(200).json(restoredField);
+  } catch (err) {
+    if (err?.statusCode === 403) return res.status(403).json({ statusCode: 403, error: 'Forbidden', message: err.message });
+    if (err?.statusCode === 404) return res.status(404).json({ statusCode: 404, error: 'Not Found', message: err.message });
+    if (err?.statusCode === 400) return res.status(400).json({ statusCode: 400, error: 'Bad Request', message: err.message });
+    return res.status(err?.statusCode || 400).json({ error: err.message || 'Failed to reset field override.' });
+  }
+};
+
 const deleteObjectField = async (req, res, next) => {
   try {
     await metadataService.checkPermission(req.user, 'object_field', 'delete');
@@ -467,6 +523,8 @@ module.exports = {
   getNavigation,
   getPermissions,
   createObjectField,
+  updateObjectField,
+  resetObjectFieldOverride,
   deleteObjectField,
   getSetupFields,
   getRecentActivity,

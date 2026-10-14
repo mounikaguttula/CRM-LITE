@@ -2368,7 +2368,7 @@ function ObjectListContent({ objectTypeId }) {
     return selectableRecordsOnPage.every((r) => selectedRecordIds.has(r.id));
   }, [selectableRecordsOnPage, selectedRecordIds]);
 
-  // Dynamic picklist status/stage options based strictly on object field metadata
+  // Dynamic picklist status/stage options based strictly on object field metadata for the active module
   const availableStatusOptions = useMemo(() => {
     if (hasStageField) {
       const stageField = (backendFields || []).find((f) => {
@@ -3760,8 +3760,23 @@ function ObjectListContent({ objectTypeId }) {
         objectDisplayName={meta.displayName}
         orgId={currentUser?.organization_id || currentUser?.organizationId}
         onImportComplete={(report) => {
-          if (report.createdCount > 0) {
-            showToast(`🎉 Imported ${report.createdCount} ${meta.pluralDisplayName.toLowerCase()}!`, 'success');
+          const created = report.createdCount || 0;
+          const updated = report.updatedCount || 0;
+          const failed = report.failedCount || 0;
+          const totalSuccess = created + updated;
+
+          if (totalSuccess > 0) {
+            const parts = [];
+            if (created > 0) parts.push(`${created} created`);
+            if (updated > 0) parts.push(`${updated} updated`);
+            const summaryStr = parts.join(', ');
+
+            if (failed > 0) {
+              showToast(`⚠️ Processed ${meta.pluralDisplayName.toLowerCase()}: ${summaryStr}, ${failed} failed.`, 'warning');
+            } else {
+              showToast(`🎉 Processed ${meta.pluralDisplayName.toLowerCase()} (${summaryStr})!`, 'success');
+            }
+
             // Refresh the record list
             setLoading(true);
             apiGet(`/objects/${objectTypeId}?page=1&pageSize=${pageSize}&sortBy=${sortBy}&sortOrder=${sortOrder}`)
@@ -3778,10 +3793,8 @@ function ObjectListContent({ objectTypeId }) {
               })
               .catch(() => {})
               .finally(() => setLoading(false));
-          } else if (report.failedCount > 0 && report.createdCount === 0) {
-            showToast(`❌ Import failed — all ${report.failedCount} rows encountered errors.`, 'error');
-          } else if (report.createdCount > 0 && report.failedCount > 0) {
-            showToast(`⚠️ Imported ${report.createdCount}, but ${report.failedCount} rows failed.`, 'warning');
+          } else if (failed > 0) {
+            showToast(`❌ Import failed — all ${failed} rows encountered errors.`, 'error');
           }
         }}
       />

@@ -55,6 +55,7 @@ function App() {
             <Route path="object/campaign" element={<CampaignsPage />} />
             <Route path="forms" element={<FormsPage />} />
             <Route path="object/form" element={<FormsPage />} />
+            <Route path="segments" element={<Navigate to="/workspace/object/segment" replace />} />
             <Route path="forms/new" element={<FormBuilderPage />} />
             <Route path="forms/:formId/edit" element={<FormBuilderPage />} />
             <Route path="forms/:formId/submissions" element={<FormSubmissionsPage />} />

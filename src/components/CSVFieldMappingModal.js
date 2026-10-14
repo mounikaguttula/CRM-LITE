@@ -521,10 +521,16 @@ function FieldMappingRow({
 
 export default function CSVFieldMappingModal({
   open, onClose, objectTypeId, objectDisplayName, orgId,
-  onImportComplete
+  onImportComplete, segmentContext
 }) {
   // 0 = Upload, 1 = Map, 2 = Validate, 3 = Importing, 4 = Result
   const [step, setStep] = useState(0);
+
+  // ── Import Mode: 'upsert' (Create & Update) | 'create_only' | 'update_only' ───
+  const [importMode, setImportMode] = useState('upsert');
+
+  // ── Segment Mode: 'associate_only' | 'create_and_associate' ────────────────
+  const [segmentImportMode, setSegmentImportMode] = useState('associate_only');
 
   // ── Upload state ───────────────────────────────────────────────────────────
   const [isDragging, setIsDragging] = useState(false);
@@ -566,6 +572,8 @@ export default function CSVFieldMappingModal({
   // ── Reset ──────────────────────────────────────────────────────────────────
   const reset = useCallback(() => {
     setStep(0);
+    setImportMode('upsert');
+    setSegmentImportMode('associate_only');
     setIsDragging(false);
     setSelectedFile(null);
     setFileParsing(false);
@@ -956,7 +964,85 @@ export default function CSVFieldMappingModal({
     });
     const sendRows = validRows.filter((r) => !relErrors.has(r.__rowNum));
 
-    const successRowNums = new Set();
+    // ── Segments Integration: Route to Segment Association Endpoints ──────────
+    if (segmentContext?.segmentId) {
+      if (segmentImportMode === 'associate_only') {
+        setImportProgress('Associating existing CRM records with segment…');
+        try {
+          const res = await apiPost(`/api/segments/${segmentContext.segmentId}/members/associate`, {
+            records: sendRows,
+          }, { isUserActivity: true });
+
+          const results = Array.isArray(res?.results) ? res.results : [];
+          const rows = results.map((r) => ({
+            rowNum: r.rowNumber,
+            identifier: r.identifier || `Row ${r.rowNumber}`,
+            status: r.status,
+            reason: r.error || (r.status === 'added' ? 'Added to segment' : (r.status === 'already_in_segment' ? 'Already in segment' : r.status)),
+          }));
+
+          const report = {
+            isSegmentAssociateOnly: true,
+            totalProcessed: res?.totalProcessed || rows.length,
+            matchedCount: res?.matchedCount || 0,
+            addedCount: res?.addedCount || 0,
+            alreadyInSegmentCount: res?.alreadyInSegmentCount || 0,
+            unmatchedCount: res?.unmatchedCount || 0,
+            rows,
+          };
+
+          setImportReport(report);
+          setImportProgress('');
+          setStep(4);
+          if (onImportComplete) onImportComplete(report);
+          return;
+        } catch (err) {
+          setImportProgress('');
+          alert(err?.message || 'Association failed.');
+          return;
+        }
+      } else {
+        // create_and_associate
+        setImportProgress('Creating/updating CRM records and associating with segment…');
+        try {
+          const res = await apiPost(`/api/segments/${segmentContext.segmentId}/members/create-and-associate`, {
+            records: sendRows,
+          }, { isUserActivity: true });
+
+          const results = Array.isArray(res?.results) ? res.results : [];
+          const rows = results.map((r) => ({
+            rowNum: r.rowNumber,
+            identifier: r.identifier || `Row ${r.rowNumber}`,
+            status: r.status,
+            reason: r.error || (r.status === 'imported' ? 'Created & added' : (r.status === 'updated' ? 'Updated & added' : r.status)),
+          }));
+
+          const report = {
+            isSegmentCreateAndAssociate: true,
+            totalProcessed: res?.totalProcessed || rows.length,
+            createdCount: res?.createdCount || 0,
+            updatedCount: res?.updatedCount || 0,
+            failedCount: res?.failedCount || 0,
+            addedToSegmentCount: res?.addedToSegmentCount || 0,
+            alreadyInSegmentCount: res?.alreadyInSegmentCount || 0,
+            rows,
+          };
+
+          setImportReport(report);
+          setImportProgress('');
+          setStep(4);
+          if (onImportComplete) onImportComplete(report);
+          return;
+        } catch (err) {
+          setImportProgress('');
+          alert(err?.message || 'Import failed.');
+          return;
+        }
+      }
+    }
+
+    const createdRowNums = new Set();
+    const updatedRowNums = new Set();
     const backendErrors = [];
     const totalBatches = Math.ceil(sendRows.length / BATCH_SIZE);
 
@@ -966,27 +1052,45 @@ export default function CSVFieldMappingModal({
       setImportProgress(`Processing batch ${batchIndex + 1} of ${totalBatches} (${Math.min(i + batch.length, sendRows.length)} / ${sendRows.length} records)…`);
 
       try {
-        const res = await apiPost(`/objects/${objectTypeId}`, batch, { isUserActivity: true });
+        const res = await apiPost(`/objects/${objectTypeId}?importMode=${importMode}`, batch, { isUserActivity: true });
         const bulkData = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
-        bulkData.forEach((item) => { if (item?.__rowNum) successRowNums.add(item.__rowNum); });
         if (Array.isArray(res?.results)) {
           res.results.forEach((r) => {
-            if (r.status === 'imported' && r.rowNumber) successRowNums.add(r.rowNumber);
+            if (r.status === 'imported' && r.rowNumber) createdRowNums.add(r.rowNumber);
+            if (r.status === 'updated' && r.rowNumber) updatedRowNums.add(r.rowNumber);
             if (r.status === 'failed') backendErrors.push({ rowNum: r.rowNumber, reason: r.error });
+          });
+        } else {
+          bulkData.forEach((item) => {
+            if (item?.__rowNum) {
+              if (importMode === 'update_only') updatedRowNums.add(item.__rowNum);
+              else createdRowNums.add(item.__rowNum);
+            }
           });
         }
         if (Array.isArray(res?.errors)) backendErrors.push(...res.errors);
 
-        // Request succeeded but the response carries no per-row detail → the whole batch succeeded
+        // Request succeeded but the response carries no per-row detail → batch succeeded
         const hasRowInfo = Array.isArray(res?.results) || Array.isArray(res?.errors) || bulkData.some((x) => x?.__rowNum);
-        if (!hasRowInfo) batch.forEach((r) => successRowNums.add(r.__rowNum));
+        if (!hasRowInfo) {
+          batch.forEach((r) => {
+            if (importMode === 'update_only') updatedRowNums.add(r.__rowNum);
+            else createdRowNums.add(r.__rowNum);
+          });
+        }
       } catch (err) {
         if (err?.status === 401) break;
         const errData = err?.data || {};
-        if (errData?.data?.length) errData.data.forEach((item) => { if (item.__rowNum) successRowNums.add(item.__rowNum); });
+        if (Array.isArray(errData?.results)) {
+          errData.results.forEach((r) => {
+            if (r.status === 'imported' && r.rowNumber) createdRowNums.add(r.rowNumber);
+            if (r.status === 'updated' && r.rowNumber) updatedRowNums.add(r.rowNumber);
+            if (r.status === 'failed') backendErrors.push({ rowNum: r.rowNumber, reason: r.error });
+          });
+        }
         if (errData?.errors) backendErrors.push(...errData.errors);
         batch.forEach((r) => {
-          if (!successRowNums.has(r.__rowNum) && !backendErrors.some((e) => e.rowNum === r.__rowNum)) {
+          if (!createdRowNums.has(r.__rowNum) && !updatedRowNums.has(r.__rowNum) && !backendErrors.some((e) => e.rowNum === r.__rowNum)) {
             backendErrors.push({ rowNum: r.__rowNum, reason: err?.message || 'Import failed' });
           }
         });
@@ -994,18 +1098,21 @@ export default function CSVFieldMappingModal({
     }
 
     const rows = validRows.map((r) => {
-      const isSuccess = successRowNums.has(r.__rowNum);
+      const isCreated = createdRowNums.has(r.__rowNum);
+      const isUpdated = updatedRowNums.has(r.__rowNum);
       const errObj = backendErrors.find((e) => e.rowNum === r.__rowNum);
+      const status = isCreated ? 'imported' : (isUpdated ? 'updated' : 'failed');
       return {
         rowNum: r.__rowNum,
         identifier: (identifierField && r[identifierField]) || `Row ${r.__rowNum}`,
-        status: isSuccess ? 'imported' : 'failed',
-        reason: isSuccess ? '—' : (relErrors.get(r.__rowNum) || errObj?.reason || 'Validation error'),
+        status,
+        reason: (status === 'imported' || status === 'updated') ? '—' : (relErrors.get(r.__rowNum) || errObj?.reason || 'Validation error'),
       };
     });
     const report = {
       totalProcessed: rows.length,
       createdCount: rows.filter((r) => r.status === 'imported').length,
+      updatedCount: rows.filter((r) => r.status === 'updated').length,
       failedCount: rows.filter((r) => r.status === 'failed').length,
       rows,
     };
@@ -1014,7 +1121,7 @@ export default function CSVFieldMappingModal({
     setImportProgress('');
     setStep(4);
     if (onImportComplete) onImportComplete(report);
-  }, [allRows, headers, mappings, objectTypeId, relationshipPreviews, onImportComplete]);
+  }, [allRows, headers, mappings, objectTypeId, relationshipPreviews, onImportComplete, importMode, segmentContext, segmentImportMode]);
 
   // ── Counts ─────────────────────────────────────────────────────────────────
   const { mappedCount, unmappedCount, lookupCount } = useMemo(() => {
@@ -1236,6 +1343,122 @@ export default function CSVFieldMappingModal({
                 )}
               </div>
 
+              {/* Import Mode Selection Card */}
+              <div style={{ marginTop: 18, padding: '14px 16px', background: '#f8fafc', borderRadius: 16, border: '1px solid #e2e8f0' }}>
+                <div style={{ ...sectionTitle, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{segmentContext ? 'Segment Import Action' : 'Import Operation'}</span>
+                  <span style={{ fontSize: '0.7rem', color: '#8b5cf6', textTransform: 'none', fontWeight: 600 }}>
+                    {segmentContext?.segmentName ? `Segment: ${segmentContext.segmentName}` : 'Matched by Record ID'}
+                  </span>
+                </div>
+                {segmentContext ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                    {[
+                      {
+                        id: 'associate_only',
+                        title: 'Associate Existing Records Only',
+                        badge: 'Recommended',
+                        desc: 'Matches CRM records by ID, Email, or Name and adds them to this segment. Never creates or updates CRM records.',
+                      },
+                      {
+                        id: 'create_and_associate',
+                        title: 'Create & Associate',
+                        desc: 'Creates new records or updates existing CRM records via upsert, and automatically adds them to this segment.',
+                      },
+                    ].map((mode) => {
+                      const isSelected = segmentImportMode === mode.id;
+                      return (
+                        <div
+                          key={mode.id}
+                          onClick={() => setSegmentImportMode(mode.id)}
+                          style={{
+                            padding: '12px 14px',
+                            borderRadius: 12,
+                            cursor: 'pointer',
+                            background: isSelected ? '#ffffff' : 'transparent',
+                            border: isSelected ? '1.5px solid #8b5cf6' : '1px solid #e2e8f0',
+                            boxShadow: isSelected ? '0 4px 12px -2px rgba(139,92,246,0.18)' : 'none',
+                            transition: 'all 0.15s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isSelected ? '#6d28d9' : '#1e293b' }}>
+                              {mode.title}
+                            </span>
+                            {mode.badge && (
+                              <span style={{ fontSize: '0.62rem', fontWeight: 700, background: '#ede9fe', color: '#6d28d9', padding: '1px 5px', borderRadius: 999 }}>
+                                {mode.badge}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3 }}>
+                            {mode.desc}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                    {[
+                      {
+                        id: 'upsert',
+                        title: 'Create & Update',
+                        badge: 'Recommended',
+                        desc: 'Updates matching records by ID; creates new records if not matched.',
+                      },
+                      {
+                        id: 'create_only',
+                        title: 'Create Only',
+                        desc: 'Only inserts new records. Rejects existing record IDs to prevent duplicates.',
+                      },
+                      {
+                        id: 'update_only',
+                        title: 'Update Only',
+                        desc: 'Only updates existing records matching by ID. Rows without an ID fail.',
+                      },
+                    ].map((mode) => {
+                      const isSelected = importMode === mode.id;
+                      return (
+                        <div
+                          key={mode.id}
+                          onClick={() => setImportMode(mode.id)}
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: 12,
+                            cursor: 'pointer',
+                            background: isSelected ? '#ffffff' : 'transparent',
+                            border: isSelected ? '1.5px solid #8b5cf6' : '1px solid #e2e8f0',
+                            boxShadow: isSelected ? '0 4px 12px -2px rgba(139,92,246,0.18)' : 'none',
+                            transition: 'all 0.15s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isSelected ? '#6d28d9' : '#1e293b' }}>
+                              {mode.title}
+                            </span>
+                            {mode.badge && (
+                              <span style={{ fontSize: '0.62rem', fontWeight: 700, background: '#ede9fe', color: '#6d28d9', padding: '1px 5px', borderRadius: 999 }}>
+                                {mode.badge}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3 }}>
+                            {mode.desc}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {savedMappings.length > 0 && (
                 <div style={{ marginTop: 16 }}>
                   <div style={sectionTitle}>Saved Mappings</div>
@@ -1278,6 +1501,9 @@ export default function CSVFieldMappingModal({
               )}
 
               <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ padding: '6px 12px', borderRadius: 20, background: '#ede9fe', border: '1px solid #c4b5fd', fontSize: '0.74rem', fontWeight: 700, color: '#6d28d9' }}>
+                  Mode: {importMode === 'upsert' ? 'Create & Update' : (importMode === 'update_only' ? 'Update Only' : 'Create Only')}
+                </div>
                 <div style={{ padding: '6px 12px', borderRadius: 20, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.74rem', fontWeight: 700, color: '#16a34a' }}>
                   ✓ {mappedCount} mapped
                 </div>
@@ -1472,20 +1698,68 @@ export default function CSVFieldMappingModal({
           {/* STEP 4: Result */}
           {step === 4 && importReport && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <div style={{ flex: 1, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Total</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>{importReport.totalProcessed}</div>
+              {importReport.isSegmentAssociateOnly ? (
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Total Checked</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>{importReport.totalProcessed}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700, textTransform: 'uppercase' }}>✓ Added to Segment</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a' }}>{importReport.addedCount}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#6b21a8', fontWeight: 700, textTransform: 'uppercase' }}>⟳ In Segment</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#9333ea' }}>{importReport.alreadyInSegmentCount || 0}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: importReport.unmatchedCount > 0 ? '#fffbeb' : '#f8fafc', border: `1px solid ${importReport.unmatchedCount > 0 ? '#fde68a' : '#e2e8f0'}`, borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: importReport.unmatchedCount > 0 ? '#92400e' : '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>✕ Unmatched</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: importReport.unmatchedCount > 0 ? '#d97706' : '#0f172a' }}>{importReport.unmatchedCount}</div>
+                  </div>
                 </div>
-                <div style={{ flex: 1, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 14 }}>
-                  <div style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700, textTransform: 'uppercase' }}>✓ Imported</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a' }}>{importReport.createdCount}</div>
+              ) : importReport.isSegmentCreateAndAssociate ? (
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Total</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>{importReport.totalProcessed}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700, textTransform: 'uppercase' }}>✓ Created</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a' }}>{importReport.createdCount}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>⟳ Updated</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#2563eb' }}>{importReport.updatedCount || 0}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#6b21a8', fontWeight: 700, textTransform: 'uppercase' }}>🎯 Added to Segment</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#9333ea' }}>{importReport.addedToSegmentCount || 0}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: importReport.failedCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${importReport.failedCount > 0 ? '#fecdd3' : '#e2e8f0'}`, borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: importReport.failedCount > 0 ? '#9f1239' : '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>✕ Failed</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: importReport.failedCount > 0 ? '#e11d48' : '#0f172a' }}>{importReport.failedCount}</div>
+                  </div>
                 </div>
-                <div style={{ flex: 1, padding: '12px 16px', background: importReport.failedCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${importReport.failedCount > 0 ? '#fecdd3' : '#e2e8f0'}`, borderRadius: 14 }}>
-                  <div style={{ fontSize: '0.72rem', color: importReport.failedCount > 0 ? '#9f1239' : '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>✕ Failed</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: importReport.failedCount > 0 ? '#e11d48' : '#0f172a' }}>{importReport.failedCount}</div>
+              ) : (
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Total</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>{importReport.totalProcessed}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700, textTransform: 'uppercase' }}>✓ Created</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a' }}>{importReport.createdCount}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>⟳ Updated</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#2563eb' }}>{importReport.updatedCount || 0}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '12px 16px', background: importReport.failedCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${importReport.failedCount > 0 ? '#fecdd3' : '#e2e8f0'}`, borderRadius: 14 }}>
+                    <div style={{ fontSize: '0.72rem', color: importReport.failedCount > 0 ? '#9f1239' : '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>✕ Failed</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: importReport.failedCount > 0 ? '#e11d48' : '#0f172a' }}>{importReport.failedCount}</div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', maxHeight: 300, overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -1493,22 +1767,39 @@ export default function CSVFieldMappingModal({
                     <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0 }}>
                       <th style={{ padding: '8px 12px', fontWeight: 700, color: '#475569', width: 70 }}>Row</th>
                       <th style={{ padding: '8px 12px', fontWeight: 700, color: '#475569' }}>Record</th>
-                      <th style={{ padding: '8px 12px', fontWeight: 700, color: '#475569', width: 100 }}>Status</th>
+                      <th style={{ padding: '8px 12px', fontWeight: 700, color: '#475569', width: 110 }}>Status</th>
                       <th style={{ padding: '8px 12px', fontWeight: 700, color: '#475569' }}>Details</th>
                     </tr>
                   </thead>
                   <tbody>
                     {importReport.rows.map((r, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: r.status === 'failed' ? '#fff1f210' : '#fff' }}>
+                      <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: (r.status === 'failed' || r.status === 'unmatched') ? '#fff1f210' : '#fff' }}>
                         <td style={{ padding: '8px 12px', color: '#94a3b8', fontWeight: 700 }}>{r.rowNum}</td>
                         <td style={{ padding: '8px 12px', color: '#0f172a', fontWeight: 600 }}>{r.identifier}</td>
                         <td style={{ padding: '8px 12px' }}>
-                          {r.status === 'imported'
-                            ? <span style={{ color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>✓ Imported</span>
-                            : <span style={{ color: '#e11d48', background: '#fff1f2', border: '1px solid #fecdd3', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>✕ Failed</span>
-                          }
+                          {r.status === 'added' && (
+                            <span style={{ color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>✓ Added</span>
+                          )}
+                          {r.status === 'already_in_segment' && (
+                            <span style={{ color: '#9333ea', background: '#faf5ff', border: '1px solid #e9d5ff', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>⟳ In Segment</span>
+                          )}
+                          {r.status === 'unmatched' && (
+                            <span style={{ color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>✕ Unmatched</span>
+                          )}
+                          {r.status === 'ambiguous' && (
+                            <span style={{ color: '#ea580c', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>⚠ Ambiguous</span>
+                          )}
+                          {r.status === 'imported' && (
+                            <span style={{ color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>✓ Created</span>
+                          )}
+                          {r.status === 'updated' && (
+                            <span style={{ color: '#2563eb', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>⟳ Updated</span>
+                          )}
+                          {r.status === 'failed' && (
+                            <span style={{ color: '#e11d48', background: '#fff1f2', border: '1px solid #fecdd3', padding: '2px 8px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700 }}>✕ Failed</span>
+                          )}
                         </td>
-                        <td style={{ padding: '8px 12px', color: r.status === 'failed' ? '#dc2626' : '#64748b', fontSize: '0.76rem', fontWeight: r.status === 'failed' ? 600 : 400 }}>{r.reason}</td>
+                        <td style={{ padding: '8px 12px', color: (r.status === 'failed' || r.status === 'unmatched') ? '#dc2626' : '#64748b', fontSize: '0.76rem', fontWeight: (r.status === 'failed' || r.status === 'unmatched') ? 600 : 400 }}>{r.reason}</td>
                       </tr>
                     ))}
                   </tbody>
