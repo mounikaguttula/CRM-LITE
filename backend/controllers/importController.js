@@ -165,9 +165,20 @@ exports.resolveRelationships = async (req, res) => {
       return res.status(404).json({ error: `Object type '${targetObjectType}' not found.` });
     }
 
+const PLACEHOLDERS = new Set(['not found', 'n/a', 'na', 'none', 'null', '-', '--', 'undefined', 'nil']);
+const isPlaceholder = (val) => {
+  if (val === null || val === undefined) return true;
+  return PLACEHOLDERS.has(String(val).trim().toLowerCase());
+};
+
     if (matchByInternalId) {
       const validUuids = uniqueValues.filter((v) => isUuid(v));
-      const invalidValues = uniqueValues.filter((v) => !isUuid(v));
+      const placeholderValues = uniqueValues.filter((v) => !isUuid(v) && isPlaceholder(v));
+      const invalidValues = uniqueValues.filter((v) => !isUuid(v) && !isPlaceholder(v));
+
+      placeholderValues.forEach((v) => {
+        results[v] = { status: 'empty', resolvedId: null, resolvedName: 'None (Empty)', isPlaceholder: true };
+      });
 
       invalidValues.forEach((v) => {
         results[v] = { status: 'invalid', resolvedId: null, resolvedName: null, reason: `Invalid ID '${v}': Not a valid UUID format.` };
@@ -237,7 +248,14 @@ exports.resolveRelationships = async (req, res) => {
       });
     });
 
-    return res.json({ results: buildResults(uniqueValues, matchMap, targetObjectType, matchField) });
+    const nonPlaceholderValues = uniqueValues.filter((v) => !isPlaceholder(v));
+    const placeholderValues = uniqueValues.filter((v) => isPlaceholder(v));
+    const fieldResults = buildResults(nonPlaceholderValues, matchMap, targetObjectType, matchField);
+    placeholderValues.forEach((v) => {
+      fieldResults[v] = { status: 'empty', resolvedId: null, resolvedName: 'None (Empty)', isPlaceholder: true };
+    });
+
+    return res.json({ results: fieldResults });
   } catch (err) {
     console.error('[importController] resolveRelationships error:', err);
     return res.status(500).json({ error: err.message || 'Internal server error.' });

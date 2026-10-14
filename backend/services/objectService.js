@@ -1390,6 +1390,12 @@ const objectService = {
     const companyNamesSet = new Set();
     const contactNamesSet = new Set();
 
+    const PLACEHOLDERS = new Set(['not found', 'n/a', 'na', 'none', 'null', '-', '--', 'undefined', 'nil']);
+    const isPlaceholder = (val) => {
+      if (val === null || val === undefined) return true;
+      return PLACEHOLDERS.has(String(val).trim().toLowerCase());
+    };
+
     const extractedInputs = recordsArray.map((rowPayload) => {
       let companyIdInput = undefined;
       let companyNameInput = undefined;
@@ -1397,26 +1403,46 @@ const objectService = {
       let contactNameInput = undefined;
 
       if (!isCompanyObject) {
-        const explicitCompanyIdKeys = [
-          'company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id',
-          'primary_company_id', 'Primary Company ID', 'Primary Company IDs', 'Associated Company IDs (Primary)',
-          'associated_company_id', 'Associated Company ID', 'associated_company_ids', 'Associated Company IDs',
-          'assoc_company_id', 'assoc_company_ids'
-        ];
-        for (const k of explicitCompanyIdKeys) {
+        // Priority 1: Check if an internal UUID is already resolved in company, company_id, or parent_id
+        const resolvedCompanyKeys = ['company', 'company_id', 'parent_id', 'Company', 'Company_id'];
+        for (const k of resolvedCompanyKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            companyIdInput = String(rowPayload[k]).trim();
-            break;
+            const val = String(rowPayload[k]).trim();
+            if (isUuid(val)) {
+              companyIdInput = val;
+              break;
+            }
+          }
+        }
+
+        // Priority 2: If not resolved yet, check other explicit company ID keys, ignoring placeholders
+        if (companyIdInput === undefined) {
+          const explicitCompanyIdKeys = [
+            'company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id',
+            'primary_company_id', 'Primary Company ID', 'Primary Company IDs', 'Associated Company IDs (Primary)',
+            'associated_company_id', 'Associated Company ID', 'associated_company_ids', 'Associated Company IDs',
+            'assoc_company_id', 'assoc_company_ids'
+          ];
+          for (const k of explicitCompanyIdKeys) {
+            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+              const rawStr = String(rowPayload[k]).trim();
+              if (!isPlaceholder(rawStr)) {
+                companyIdInput = rawStr;
+                break;
+              }
+            }
           }
         }
         if (companyIdInput === undefined) {
           const rawComp = rowPayload.company !== undefined ? rowPayload.company : rowPayload.Company;
           if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
             const compStr = String(rawComp).trim();
-            if (isUuid(compStr)) {
-              companyIdInput = compStr;
-            } else {
-              companyNameInput = compStr;
+            if (!isPlaceholder(compStr)) {
+              if (isUuid(compStr)) {
+                companyIdInput = compStr;
+              } else {
+                companyNameInput = compStr;
+              }
             }
           }
         }
@@ -1425,7 +1451,7 @@ const objectService = {
           for (const k of explicitCompanyNameKeys) {
             if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
               const nameStr = String(rowPayload[k]).trim();
-              if (!isUuid(nameStr)) {
+              if (!isPlaceholder(nameStr) && !isUuid(nameStr)) {
                 companyNameInput = nameStr;
                 break;
               }
@@ -1436,43 +1462,68 @@ const objectService = {
         const parentCompanyIdKeys = ['parent_company_id', 'parent_id', 'parent_company_uuid', 'associated_company_id', 'Associated Company ID', 'Associated Company IDs'];
         for (const k of parentCompanyIdKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            companyIdInput = String(rowPayload[k]).trim();
-            break;
+            const pStr = String(rowPayload[k]).trim();
+            if (!isPlaceholder(pStr)) {
+              companyIdInput = pStr;
+              break;
+            }
           }
         }
         if (companyIdInput === undefined) {
           const rawParent = rowPayload.parent_company !== undefined ? rowPayload.parent_company : rowPayload.ParentCompany;
           if (rawParent !== undefined && rawParent !== null && String(rawParent).trim() !== '') {
             const parentStr = String(rawParent).trim();
-            if (isUuid(parentStr)) {
-              companyIdInput = parentStr;
-            } else {
-              companyNameInput = parentStr;
+            if (!isPlaceholder(parentStr)) {
+              if (isUuid(parentStr)) {
+                companyIdInput = parentStr;
+              } else {
+                companyNameInput = parentStr;
+              }
             }
           }
         }
       }
 
       if (!isContactObject) {
-        const explicitContactIdKeys = [
-          'contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id',
-          'primary_contact_id', 'Primary Contact ID', 'associated_contact_id', 'Associated Contact ID',
-          'associated_contact_ids', 'Associated Contact IDs', 'assoc_contact_id', 'assoc_contact_ids'
-        ];
-        for (const k of explicitContactIdKeys) {
+        // Priority 1: Check if an internal UUID is already resolved in contact, contact_id, or secondary_parent_id
+        const resolvedContactKeys = ['contact', 'contact_id', 'secondary_parent_id', 'Contact', 'Contact_id'];
+        for (const k of resolvedContactKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            contactIdInput = String(rowPayload[k]).trim();
-            break;
+            const val = String(rowPayload[k]).trim();
+            if (isUuid(val)) {
+              contactIdInput = val;
+              break;
+            }
+          }
+        }
+
+        // Priority 2: If not resolved yet, check explicit contact ID keys
+        if (contactIdInput === undefined) {
+          const explicitContactIdKeys = [
+            'contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id',
+            'primary_contact_id', 'Primary Contact ID', 'associated_contact_id', 'Associated Contact ID',
+            'associated_contact_ids', 'Associated Contact IDs', 'assoc_contact_id', 'assoc_contact_ids'
+          ];
+          for (const k of explicitContactIdKeys) {
+            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+              const cStr = String(rowPayload[k]).trim();
+              if (!isPlaceholder(cStr)) {
+                contactIdInput = cStr;
+                break;
+              }
+            }
           }
         }
         if (contactIdInput === undefined) {
           const rawCont = rowPayload.contact !== undefined ? rowPayload.contact : rowPayload.Contact;
           if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
             const contStr = String(rawCont).trim();
-            if (isUuid(contStr)) {
-              contactIdInput = contStr;
-            } else {
-              contactNameInput = contStr;
+            if (!isPlaceholder(contStr)) {
+              if (isUuid(contStr)) {
+                contactIdInput = contStr;
+              } else {
+                contactNameInput = contStr;
+              }
             }
           }
         }
@@ -1481,7 +1532,7 @@ const objectService = {
           for (const k of explicitContactNameKeys) {
             if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
               const nameStr = String(rowPayload[k]).trim();
-              if (!isUuid(nameStr)) {
+              if (!isPlaceholder(nameStr) && !isUuid(nameStr)) {
                 contactNameInput = nameStr;
                 break;
               }
@@ -1492,16 +1543,19 @@ const objectService = {
         const secondaryContactIdKeys = ['secondary_contact_id', 'secondary_parent_id'];
         for (const k of secondaryContactIdKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            contactIdInput = String(rowPayload[k]).trim();
-            break;
+            const secStr = String(rowPayload[k]).trim();
+            if (!isPlaceholder(secStr)) {
+              contactIdInput = secStr;
+              break;
+            }
           }
         }
       }
 
-      if (companyIdInput && companyIdInput !== 'null') companyIdsSet.add(companyIdInput);
-      if (contactIdInput && contactIdInput !== 'null') contactIdsSet.add(contactIdInput);
-      if (companyNameInput) companyNamesSet.add(companyNameInput.trim().toLowerCase());
-      if (contactNameInput) contactNamesSet.add(contactNameInput.trim().toLowerCase());
+      if (companyIdInput && !isPlaceholder(companyIdInput)) companyIdsSet.add(companyIdInput);
+      if (contactIdInput && !isPlaceholder(contactIdInput)) contactIdsSet.add(contactIdInput);
+      if (companyNameInput && !isPlaceholder(companyNameInput)) companyNamesSet.add(companyNameInput.trim().toLowerCase());
+      if (contactNameInput && !isPlaceholder(contactNameInput)) contactNamesSet.add(contactNameInput.trim().toLowerCase());
 
       return {
         companyIdInput,
@@ -1610,21 +1664,22 @@ const objectService = {
 
     // 4. Candidate Existing Record Identification (for Upsert / Update)
     const isSegmentObject = cleanKey.includes('segment');
-    const ID_KEYS = ['id', 'ID', 'record_id', 'Record ID', 'record_uuid', 'Record Id', 'recordId', 'crm_record_id'];
-    const activeIdKeys = isSegmentObject
-      ? ['id', 'ID', 'record_uuid', 'crm_record_id']
-      : ID_KEYS;
+    const INTERNAL_ID_KEYS = ['id', 'ID', 'record_uuid', 'crm_record_id', 'crm_record_uuid'];
+    const EXTERNAL_ID_KEYS = [
+      'record_id__c', 'external_id', 'hubspot_record_id', 'hubspot_reference_id',
+      'record_id', 'Record ID', 'Record Id', 'recordId'
+    ];
 
-    const getRowRecordId = (r) => {
+    const getRowInternalId = (r) => {
       if (!r || typeof r !== 'object') return null;
-      for (const k of activeIdKeys) {
+      for (const k of INTERNAL_ID_KEYS) {
         if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
           const val = String(r[k]).trim();
           if (isUuid(val)) return val;
         }
       }
       if (r.data && typeof r.data === 'object') {
-        for (const k of activeIdKeys) {
+        for (const k of INTERNAL_ID_KEYS) {
           if (r.data[k] !== undefined && r.data[k] !== null && String(r.data[k]).trim() !== '') {
             const val = String(r.data[k]).trim();
             if (isUuid(val)) return val;
@@ -1634,15 +1689,15 @@ const objectService = {
       return null;
     };
 
-    const getRawRowRecordId = (r) => {
+    const getRawRowInternalId = (r) => {
       if (!r || typeof r !== 'object') return null;
-      for (const k of activeIdKeys) {
+      for (const k of INTERNAL_ID_KEYS) {
         if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
           return String(r[k]).trim();
         }
       }
       if (r.data && typeof r.data === 'object') {
-        for (const k of activeIdKeys) {
+        for (const k of INTERNAL_ID_KEYS) {
           if (r.data[k] !== undefined && r.data[k] !== null && String(r.data[k]).trim() !== '') {
             return String(r.data[k]).trim();
           }
@@ -1651,9 +1706,28 @@ const objectService = {
       return null;
     };
 
+    const getRowExternalId = (r) => {
+      if (!r || typeof r !== 'object') return null;
+      for (const k of EXTERNAL_ID_KEYS) {
+        if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
+          const val = String(r[k]).trim();
+          if (!isPlaceholder(val)) return val;
+        }
+      }
+      if (r.data && typeof r.data === 'object') {
+        for (const k of EXTERNAL_ID_KEYS) {
+          if (r.data[k] !== undefined && r.data[k] !== null && String(r.data[k]).trim() !== '') {
+            const val = String(r.data[k]).trim();
+            if (!isPlaceholder(val)) return val;
+          }
+        }
+      }
+      return null;
+    };
+
     const candidateRecordIds = [];
     for (const r of recordsArray) {
-      const recId = getRowRecordId(r);
+      const recId = getRowInternalId(r);
       if (recId) candidateRecordIds.push(recId);
     }
 
@@ -1668,6 +1742,46 @@ const objectService = {
         .in('id', candidateRecordIds);
 
       (foundCandidateRows || []).forEach(r => existingRecordsByIdMap.set(r.id, r));
+    }
+
+    // External-ID resolution cache for non-segments (record_id__c / external_id / hubspot_reference_id)
+    const existingByExternalIdMap = new Map(); // normExtId -> Array<record>
+    const candidateExtIdsSet = new Set();
+    for (const r of recordsArray) {
+      const extId = getRowExternalId(r);
+      if (extId) candidateExtIdsSet.add(extId.toLowerCase());
+      const rawInt = getRawRowInternalId(r);
+      if (rawInt && !isUuid(rawInt) && (/^\d+$/.test(rawInt) || !rawInt.includes('-'))) {
+        candidateExtIdsSet.add(rawInt.toLowerCase());
+      }
+    }
+
+    if (candidateExtIdsSet.size > 0 && !isSegmentObject) {
+      const { data: extMatchedRows } = await dbClient
+        .from('universal_table')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('object_type_id', objDef.id)
+        .eq('is_deleted', false);
+
+      (extMatchedRows || []).forEach((row) => {
+        const extVals = [
+          row.data?.record_id__c,
+          row.data?.external_id,
+          row.data?.hubspot_reference_id,
+          row.data?.hubspot_record_id,
+        ];
+        extVals.forEach((val) => {
+          if (val !== undefined && val !== null && String(val).trim() !== '') {
+            const norm = String(val).trim().toLowerCase();
+            if (candidateExtIdsSet.has(norm)) {
+              if (!existingByExternalIdMap.has(norm)) existingByExternalIdMap.set(norm, []);
+              const list = existingByExternalIdMap.get(norm);
+              if (!list.some((e) => e.id === row.id)) list.push(row);
+            }
+          }
+        });
+      });
     }
 
     // External-ID resolution cache for Segments (HubSpot Segment ID / List ID)
@@ -1714,6 +1828,7 @@ const objectService = {
     uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Map())); // Map<normVal, rowNum>
     const seenCsvSegmentIdsMap = new Map(); // Map<normVal, rowNum>
     const seenCsvListIdsMap = new Map();    // Map<normVal, rowNum>
+    const seenCsvExternalIdsMap = new Map(); // Map<normVal, rowNum>
 
     const existingDbValuesMap = new Map();
     uniqueFields.forEach(f => existingDbValuesMap.set(f.name, new Map())); // Map<normVal, recordId>
@@ -1764,12 +1879,49 @@ const objectService = {
       const relInputs = extractedInputs[i];
 
       try {
-        const rawIdVal = getRawRowRecordId(payload);
-        if (rawIdVal && !isUuid(rawIdVal)) {
-          throw { statusCode: 400, message: `Validation Error: Record ID '${rawIdVal}' is not a valid UUID format.` };
+        const rawInternalId = getRawRowInternalId(payload);
+        let rowExternalId = getRowExternalId(payload);
+
+        // In-CSV duplicate detection for external record ID
+        if (rowExternalId) {
+          const normExt = rowExternalId.toLowerCase();
+          const prevRow = seenCsvExternalIdsMap.get(normExt);
+          if (prevRow !== undefined && prevRow !== rowNum) {
+            throw {
+              statusCode: 400,
+              message: `Validation Error: Duplicate Record ID '${rowExternalId}' found within the import payload (rows ${prevRow} and ${rowNum}).`
+            };
+          }
+          seenCsvExternalIdsMap.set(normExt, rowNum);
         }
-        const candidateId = rawIdVal;
-        let existingRecord = candidateId ? existingRecordsByIdMap.get(candidateId) : null;
+
+        let candidateId = null;
+        let existingRecord = null;
+
+        if (rawInternalId) {
+          if (isUuid(rawInternalId)) {
+            candidateId = rawInternalId;
+            existingRecord = existingRecordsByIdMap.get(candidateId) || null;
+          } else {
+            // rawInternalId is NOT a valid UUID
+            if (importMode === 'update_only') {
+              throw { statusCode: 400, message: `Validation Error: Record ID '${rawInternalId}' is not a valid UUID format.` };
+            } else if (importMode === 'create_only') {
+              // In Create Only: do not reject numeric external source ID; preserve it as external ID
+              if (!rowExternalId) {
+                rowExternalId = rawInternalId;
+              }
+            } else {
+              // In Upsert (Create & Update):
+              if (/^\d+$/.test(rawInternalId) || !rawInternalId.includes('-')) {
+                if (!rowExternalId) rowExternalId = rawInternalId;
+              } else {
+                // Malformed non-numeric string intended as internal UUID
+                throw { statusCode: 400, message: `Validation Error: Record ID '${rawInternalId}' is not a valid UUID format.` };
+              }
+            }
+          }
+        }
 
         // External-ID resolution for Segments if no direct UUID match was found
         const rowSegId = isSegmentObject ? String(payload.hubspot_segment_id ?? (payload.data && payload.data.hubspot_segment_id) ?? '').trim() : '';
@@ -1812,17 +1964,28 @@ const objectService = {
           existingRecord = segMatch || listMatch;
         }
 
+        // External-ID resolution for non-segments
+        if (!existingRecord && !isSegmentObject && rowExternalId) {
+          const matches = existingByExternalIdMap.get(rowExternalId.toLowerCase()) || [];
+          if (matches.length > 1) {
+            throw { statusCode: 400, message: `Ambiguity Error: Multiple records found with Record ID '${rowExternalId}'.` };
+          }
+          if (matches.length === 1) {
+            existingRecord = matches[0];
+          }
+        }
+
         if (importMode === 'update_only') {
-          if (!candidateId && !rowSegId && !rowListId) {
+          if (!candidateId && !rowSegId && !rowListId && !rowExternalId) {
             throw { statusCode: 400, message: 'Record ID or external identifier (HubSpot Segment ID / List ID) is required when import mode is set to Update Only.' };
           }
           if (!existingRecord) {
-            const missingId = candidateId || rowSegId || rowListId;
+            const missingId = candidateId || rowSegId || rowListId || rowExternalId;
             throw { statusCode: 404, message: `Record '${missingId}' was not found in ${objectKey}.` };
           }
         } else if (importMode === 'create_only') {
           if (existingRecord) {
-            const foundId = candidateId || rowSegId || rowListId;
+            const foundId = candidateId || rowSegId || rowListId || rowExternalId;
             throw { statusCode: 400, message: `Record with identifier '${foundId}' already exists. Import mode is set to Create Only.` };
           }
         }
@@ -1834,7 +1997,8 @@ const objectService = {
           cleanPayload[pk] = cleanImportValue(pv);
         }
         delete cleanPayload.__rowNum;
-        ID_KEYS.forEach(k => delete cleanPayload[k]);
+        INTERNAL_ID_KEYS.forEach(k => delete cleanPayload[k]);
+        EXTERNAL_ID_KEYS.forEach(k => delete cleanPayload[k]);
 
         if (isSegmentObject) {
           // Normalize and strictly validate Object Type values:
@@ -2047,7 +2211,10 @@ const objectService = {
         }
 
         const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = cleanPayload;
-        ID_KEYS.forEach(k => delete customData[k]);
+        INTERNAL_ID_KEYS.forEach(k => delete customData[k]);
+        if (rowExternalId && !customData.record_id__c) {
+          customData.record_id__c = rowExternalId;
+        }
 
         let resolvedName = '';
         if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
@@ -2080,9 +2247,20 @@ const objectService = {
         let resolvedParent = null;
         let resolvedParentName = null;
 
+        const companyField = (fields || []).find(
+          (f) => (f.name === 'company' || f.name === 'parent_id' || f.name === 'company_id') && f.type === 'lookup'
+        );
+        const isCompanyRequired = !!companyField?.required;
+
         if (relInputs.companyIdInput !== undefined && relInputs.companyIdInput && relInputs.companyIdInput !== 'null') {
           const inputVal = relInputs.companyIdInput;
-          if (isUuid(inputVal)) {
+          if (isPlaceholder(inputVal)) {
+            if (isCompanyRequired) {
+              throw { statusCode: 400, message: `Validation Error: Field '${companyField?.label || 'Company'}' is required for ${objectKey}.` };
+            }
+            resolvedParent = null;
+            resolvedParentName = null;
+          } else if (isUuid(inputVal)) {
             const parentRow = companyByIdMap.get(inputVal);
             if (!parentRow || parentRow.is_deleted) {
               throw { statusCode: 400, message: `Validation Error: Company ID '${inputVal}' was not found.` };
@@ -2114,34 +2292,42 @@ const objectService = {
             }
           }
         } else if (relInputs.companyNameInput) {
-          let extMatches = [];
-          for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
-            if (companyByExternalIdMap.has(k)) {
-              extMatches = companyByExternalIdMap.get(k);
-              break;
+          if (isPlaceholder(relInputs.companyNameInput)) {
+            if (isCompanyRequired) {
+              throw { statusCode: 400, message: `Validation Error: Field '${companyField?.label || 'Company'}' is required for ${objectKey}.` };
             }
-          }
-          if (extMatches.length === 1) {
-            resolvedParent = extMatches[0].id;
-            resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || relInputs.companyNameInput;
-          } else if (extMatches.length > 1) {
-            throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${relInputs.companyNameInput}'.` };
+            resolvedParent = null;
+            resolvedParentName = null;
           } else {
-            let matches = [];
+            let extMatches = [];
             for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
-              if (companyByNameMap.has(k)) {
-                matches = companyByNameMap.get(k);
+              if (companyByExternalIdMap.has(k)) {
+                extMatches = companyByExternalIdMap.get(k);
                 break;
               }
             }
-            if (matches.length > 1) {
-              throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
-            }
-            if (matches.length === 1) {
-              resolvedParent = matches[0].id;
-              resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
+            if (extMatches.length === 1) {
+              resolvedParent = extMatches[0].id;
+              resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || relInputs.companyNameInput;
+            } else if (extMatches.length > 1) {
+              throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${relInputs.companyNameInput}'.` };
             } else {
-              throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+              let matches = [];
+              for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
+                if (companyByNameMap.has(k)) {
+                  matches = companyByNameMap.get(k);
+                  break;
+                }
+              }
+              if (matches.length > 1) {
+                throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
+              }
+              if (matches.length === 1) {
+                resolvedParent = matches[0].id;
+                resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
+              } else {
+                throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+              }
             }
           }
         } else if (isUpdateRow) {

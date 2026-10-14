@@ -69,6 +69,12 @@ const cellValue = (v) => {
   return str;
 };
 
+const PLACEHOLDERS = new Set(['not found', 'n/a', 'na', 'none', 'null', '-', '--', 'undefined', 'nil']);
+const isPlaceholder = (val) => {
+  if (val === null || val === undefined) return true;
+  return PLACEHOLDERS.has(String(val).trim().toLowerCase());
+};
+
 /**
  * RFC-4180 style parser: quoted cells, "" escapes, multiline cells, BOM, CRLF.
  * Duplicate headers are made unique ("Email", "Email (2)") so each column can be mapped separately.
@@ -129,6 +135,7 @@ const targetLabel = (key, objectTypes) =>
 // Resolve status icon
 function StatusIcon({ status, size = 14 }) {
   if (status === 'resolved') return <CheckCircle2 size={size} style={{ color: '#16a34a' }} />;
+  if (status === 'empty') return <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>—</span>;
   if (status === 'not_found') return <XCircle size={size} style={{ color: '#dc2626' }} />;
   if (status === 'ambiguous') return <AlertTriangle size={size} style={{ color: '#d97706' }} />;
   if (status === 'invalid' || status === 'error') return <XCircle size={size} style={{ color: '#9f1239' }} />;
@@ -942,10 +949,30 @@ export default function CSVFieldMappingModal({
             relErrors.set(record.__rowNum, `${targetField}: "${val}" has no Match By configured`);
             break;
           }
+          const targetMeta = fieldMetadataList.find((f) => f.key === targetField);
+          const isRequired = !!targetMeta?.isRequired;
+          const isPl = isPlaceholder(val);
+
+          if (isPl) {
+            if (isRequired) {
+              relErrors.set(record.__rowNum, `${targetField}: "${val}" is a placeholder but field is required`);
+              break;
+            } else {
+              record[targetField] = null;
+              break;
+            }
+          }
+
           // Look up the validation result directly from previews for this mapped column
           const r = relationshipPreviews[header]?.[val];
           if (r?.status === 'resolved' && r.resolvedId) {
             record[targetField] = r.resolvedId;
+          } else if (r?.status === 'empty' || r?.isPlaceholder) {
+            if (isRequired) {
+              relErrors.set(record.__rowNum, `${targetField}: Field is required`);
+            } else {
+              record[targetField] = null;
+            }
           } else {
             relErrors.set(record.__rowNum, `${targetField}: "${val}" → ${r?.reason || r?.status || 'not validated'}`);
           }
@@ -1718,9 +1745,13 @@ export default function CSVFieldMappingModal({
                   <div style={sectionTitle}>Relationship Check (all rows)</div>
                   {Object.entries(relationshipPreviews).map(([header, preview]) => {
                     const entries = Object.entries(preview);
-                    const ok = entries.filter(([, r]) => r.status === 'resolved').length;
+                    const ok = entries.filter(([, r]) => r.status === 'resolved' || r.status === 'empty' || r.isPlaceholder).length;
                     // problems first so they are never hidden below the fold
-                    const sorted = [...entries].sort(([, a], [, b]) => (a.status === 'resolved') - (b.status === 'resolved'));
+                    const sorted = [...entries].sort(([, a], [, b]) => {
+                      const aOk = a.status === 'resolved' || a.status === 'empty' || a.isPlaceholder;
+                      const bOk = b.status === 'resolved' || b.status === 'empty' || b.isPlaceholder;
+                      return aOk - bOk;
+                    });
                     const matchLabel = (lookupFieldOptions[mappings[header]?.targetObjectType] || []).find((o) => o.key === mappings[header]?.matchField)?.label || mappings[header]?.matchField;
                     return (
                       <div key={header} style={{ marginBottom: 10, border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
@@ -1728,15 +1759,15 @@ export default function CSVFieldMappingModal({
                           <span>
                             {header} → {fieldMetadataList.find((f) => f.key === mappings[header]?.targetField)?.label} (match by {matchLabel})
                           </span>
-                          <span style={{ color: ok === entries.length ? '#16a34a' : '#d97706' }}>{ok} / {entries.length} found</span>
+                          <span style={{ color: ok === entries.length ? '#16a34a' : '#d97706' }}>{ok} / {entries.length} valid</span>
                         </div>
                         <div style={{ maxHeight: 160, overflowY: 'auto' }}>
                           {sorted.slice(0, 50).map(([val, result]) => (
                             <div key={val} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: '1px solid #f1f5f9', fontSize: '0.78rem' }}>
                               <StatusIcon status={result.status} />
                               <span style={{ flex: 1, color: '#334155', fontWeight: 500 }}>{val}</span>
-                              <span style={{ color: result.status === 'resolved' ? '#16a34a' : (result.status === 'ambiguous' ? '#d97706' : '#dc2626'), fontSize: '0.74rem', fontWeight: 600 }}>
-                                {result.status === 'resolved' ? (result.resolvedName || 'Found') : (result.reason || result.status.replace('_', ' '))}
+                              <span style={{ color: (result.status === 'resolved' || result.status === 'empty' || result.isPlaceholder) ? '#16a34a' : (result.status === 'ambiguous' ? '#d97706' : '#dc2626'), fontSize: '0.74rem', fontWeight: 600 }}>
+                                {result.status === 'resolved' ? (result.resolvedName || 'Found') : ((result.status === 'empty' || result.isPlaceholder) ? 'Empty (Optional / Skipped)' : (result.reason || result.status.replace('_', ' ')))}
                               </span>
                             </div>
                           ))}

@@ -79,11 +79,11 @@ export function buildFieldMetadataList(fieldsList = [], objectList = []) {
       };
     });
 
-  // Ensure 'id' (Record ID) is available at the top for upsert and update matching
+  // Ensure 'id' (CRM Internal UUID) is available at the top for upsert and update matching
   if (!result.some((f) => f.key === 'id')) {
     result.unshift({
       key: 'id',
-      label: 'Record ID',
+      label: 'Record ID (CRM Internal UUID)',
       type: 'text',
       isSystem: true,
       isRequired: false,
@@ -167,10 +167,30 @@ export function mapHeaderToField(rawHeader, fields = []) {
   }
 
   // Explicit check for CRMNow internal Record ID / ID headers
-  // Only exact CRM internal ID aliases map to internal id; never generic "... id"
-  if (raw === 'id' || raw === 'crm record id' || raw === 'crm_record_id' || raw === 'record_uuid' || (!isSegmentOrHubSpot && (raw === 'record id' || raw === 'record_id'))) {
+  // Only exact CRM internal ID aliases map to internal id; never generic "... id" or source Record ID
+  if (
+    raw === 'id' ||
+    raw === 'crm record id' ||
+    raw === 'crm_record_id' ||
+    raw === 'crm id' ||
+    raw === 'crm record uuid' ||
+    raw === 'record_uuid' ||
+    raw === 'record id (crm internal uuid)'
+  ) {
     const idField = fields.find((f) => f.key === 'id');
     if (idField) return idField;
+  }
+
+  // Generic "Record ID" or "record_id" -> map to external Record ID field if present!
+  if (raw === 'record id' || raw === 'record_id') {
+    const extField = fields.find(
+      (f) =>
+        f.key === 'record_id__c' ||
+        f.key === 'hubspot_record_id' ||
+        f.key === 'hubspot_reference_id' ||
+        f.key === 'external_id'
+    );
+    if (extField) return extField;
   }
 
   return (
