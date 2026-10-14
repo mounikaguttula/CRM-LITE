@@ -976,9 +976,10 @@ export default function CSVFieldMappingModal({
           }, { isUserActivity: true });
 
           const results = Array.isArray(res?.results) ? res.results : [];
-          const rows = results.map((r) => ({
-            rowNum: r.rowNumber,
-            identifier: r.identifier || `Row ${r.rowNumber}`,
+          const rows = results.map((r, idx) => ({
+            rowNum: idx + 1,
+            sourceCsvRow: r.rowNumber,
+            identifier: r.identifier || `Row ${idx + 1}`,
             status: r.status,
             reason: r.error || (r.status === 'added' ? 'Added to segment' : (r.status === 'already_in_segment' ? 'Already in segment' : r.status)),
             originalRow: allRows[r.rowNumber - 2] || {},
@@ -1013,9 +1014,10 @@ export default function CSVFieldMappingModal({
           }, { isUserActivity: true });
 
           const results = Array.isArray(res?.results) ? res.results : [];
-          const rows = results.map((r) => ({
-            rowNum: r.rowNumber,
-            identifier: r.identifier || `Row ${r.rowNumber}`,
+          const rows = results.map((r, idx) => ({
+            rowNum: idx + 1,
+            sourceCsvRow: r.rowNumber,
+            identifier: r.identifier || `Row ${idx + 1}`,
             status: r.status,
             reason: r.error || (r.status === 'imported' ? 'Created & added' : (r.status === 'updated' ? 'Updated & added' : r.status)),
             originalRow: allRows[r.rowNumber - 2] || {},
@@ -1101,7 +1103,7 @@ export default function CSVFieldMappingModal({
       }
     }
 
-    const rows = validRows.map((r) => {
+    const rows = validRows.map((r, i) => {
       const isCreated = createdRowNums.has(r.__rowNum);
       const isUpdated = updatedRowNums.has(r.__rowNum);
       const errObjs = backendErrors.filter((e) => e.rowNum === r.__rowNum);
@@ -1109,8 +1111,9 @@ export default function CSVFieldMappingModal({
       const combinedReason = reasons.length > 0 ? reasons.join('; ') : 'Validation error';
       const status = isCreated ? 'imported' : (isUpdated ? 'updated' : 'failed');
       return {
-        rowNum: r.__rowNum,
-        identifier: (identifierField && r[identifierField]) || `Row ${r.__rowNum}`,
+        rowNum: i + 1,
+        sourceCsvRow: r.__rowNum,
+        identifier: (identifierField && r[identifierField]) || `Row ${i + 1}`,
         status,
         reason: (status === 'imported' || status === 'updated') ? '—' : (relErrors.get(r.__rowNum) || combinedReason),
         originalRow: r.__originalRow || allRows[r.__rowNum - 2] || {},
@@ -1133,9 +1136,17 @@ export default function CSVFieldMappingModal({
   // ── Download Failed Records ────────────────────────────────────────────────
   const failedRows = useMemo(() => {
     if (!importReport?.rows) return [];
-    return importReport.rows.filter((r) =>
-      r.status === 'failed' || r.status === 'unmatched' || r.status === 'ambiguous' || r.status === 'invalid'
-    );
+    return importReport.rows.filter((r) => {
+      const st = String(r.status || '').toLowerCase().trim();
+      return (
+        st === 'failed' ||
+        st === 'unmatched' ||
+        st === 'ambiguous' ||
+        st === 'invalid' ||
+        st === 'error' ||
+        (!['imported', 'created', 'updated', 'added', 'already_in_segment'].includes(st))
+      );
+    });
   }, [importReport]);
 
   const handleDownloadFailedRecords = useCallback(() => {
@@ -1167,7 +1178,7 @@ export default function CSVFieldMappingModal({
     const csvLines = [outputHeaders.map(formatCell).join(',')];
 
     failedRows.forEach((r) => {
-      const orig = r.originalRow || allRows[r.rowNum - 2] || {};
+      const orig = r.originalRow || allRows[((r.sourceCsvRow || r.rowNum) - 2)] || {};
       const rowVals = headers.map((h) => (orig[h] !== undefined && orig[h] !== null ? orig[h] : ''));
       rowVals.push('FAILED');
       rowVals.push(r.reason || 'Import failed');
@@ -1838,7 +1849,7 @@ export default function CSVFieldMappingModal({
                   <tbody>
                     {importReport.rows.map((r, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: (r.status === 'failed' || r.status === 'unmatched') ? '#fff1f210' : '#fff' }}>
-                        <td style={{ padding: '8px 12px', color: '#94a3b8', fontWeight: 700 }}>{r.rowNum}</td>
+                        <td style={{ padding: '8px 12px', color: '#94a3b8', fontWeight: 700 }}>{r.rowNum ?? (i + 1)}</td>
                         <td style={{ padding: '8px 12px', color: '#0f172a', fontWeight: 600 }}>{r.identifier}</td>
                         <td style={{ padding: '8px 12px' }}>
                           {r.status === 'added' && (
@@ -1914,7 +1925,7 @@ export default function CSVFieldMappingModal({
 
           {step === 4 && (
             <>
-              {failedRows.length > 0 && (
+              {(failedRows.length > 0 || (importReport?.failedCount && importReport.failedCount > 0)) && (
                 <button
                   type="button"
                   id="btn-download-failed-records"
@@ -1942,7 +1953,7 @@ export default function CSVFieldMappingModal({
                     e.currentTarget.style.borderColor = '#fecdd3';
                   }}
                 >
-                  <Download size={14} /> Download Failed Records ({failedRows.length})
+                  <Download size={14} /> Download Failed Records ({failedRows.length || importReport.failedCount})
                 </button>
               )}
               <button type="button" onClick={reset} style={btnSecondary}>Import Another File</button>
