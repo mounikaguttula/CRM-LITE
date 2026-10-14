@@ -2194,7 +2194,6 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
   const tabs = ['Details', 'More Details', 'Related'];
   const currentObjKey = String(objectTypeId).toLowerCase();
-  const tabs = ['Details', 'Related'];
 
   /* All fields with Created Date/By, Modified Date/By pushed to VERY END, filtered & ordered by saved Page Layout */
   const rawMergedFields = getAllMergedFields(meta.fields, record, objectTypeId);
