@@ -1133,9 +1133,17 @@ export default function CSVFieldMappingModal({
   // ── Download Failed Records ────────────────────────────────────────────────
   const failedRows = useMemo(() => {
     if (!importReport?.rows) return [];
-    return importReport.rows.filter((r) =>
-      r.status === 'failed' || r.status === 'unmatched' || r.status === 'ambiguous' || r.status === 'invalid'
-    );
+    return importReport.rows.filter((r) => {
+      const st = String(r.status || '').toLowerCase().trim();
+      return (
+        st === 'failed' ||
+        st === 'unmatched' ||
+        st === 'ambiguous' ||
+        st === 'invalid' ||
+        st === 'error' ||
+        (!['imported', 'created', 'updated', 'added', 'already_in_segment'].includes(st))
+      );
+    });
   }, [importReport]);
 
   const handleDownloadFailedRecords = useCallback(() => {
@@ -1914,7 +1922,7 @@ export default function CSVFieldMappingModal({
 
           {step === 4 && (
             <>
-              {failedRows.length > 0 && (
+              {(failedRows.length > 0 || (importReport?.failedCount && importReport.failedCount > 0)) && (
                 <button
                   type="button"
                   id="btn-download-failed-records"
@@ -1942,7 +1950,7 @@ export default function CSVFieldMappingModal({
                     e.currentTarget.style.borderColor = '#fecdd3';
                   }}
                 >
-                  <Download size={14} /> Download Failed Records ({failedRows.length})
+                  <Download size={14} /> Download Failed Records ({failedRows.length || importReport.failedCount})
                 </button>
               )}
               <button type="button" onClick={reset} style={btnSecondary}>Import Another File</button>
