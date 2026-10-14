@@ -25,6 +25,7 @@ const companyRoutes = require('./routes/companyRoutes');
 const formRoutes = require('./routes/formRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const importRoutes = require('./routes/importRoutes');
+const segmentRoutes = require('./routes/segmentRoutes');
 
 
 
@@ -84,6 +85,8 @@ app.use('/api', companyRoutes);
 app.use('/', leadScannerRoutes);
 app.use('/', campaignRoutes);
 app.use('/', formRoutes);
+app.use('/', segmentRoutes);
+app.use('/api', segmentRoutes);
 app.use('/', accessRequestRoutes);
 app.use('/', metadataRoutes);
 app.use('/', userRoutes);

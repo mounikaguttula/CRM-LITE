@@ -164,7 +164,10 @@ const createRecord = async (req, res, next) => {
     await metadataService.checkPermission(req.user, objectType, 'create');
 
     if (Array.isArray(req.body)) {
-      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId);
+      const importMode = req.query.importMode || req.headers['x-import-mode'] || 'upsert';
+      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId, null, { importMode });
+
+      const isSuccess = (bulkResult.createdCount > 0 || bulkResult.updatedCount > 0);
 
       auditService.logUserActivity({
         organization_id: organizationId,
@@ -172,22 +175,23 @@ const createRecord = async (req, res, next) => {
         action: 'CREATE',
         module: objectType,
         record_id: null,
-        description: `Bulk processed ${bulkResult.totalProcessed} ${objectType} record(s): ${bulkResult.createdCount} created, ${bulkResult.failedCount} failed`,
+        description: `Bulk processed ${bulkResult.totalProcessed} ${objectType} record(s): ${bulkResult.createdCount} created, ${bulkResult.updatedCount || 0} updated, ${bulkResult.failedCount} failed`,
       }).catch((auditErr) => console.error('❌ Audit log error in bulk createRecord:', auditErr.message));
 
-      const statusCode = bulkResult.createdCount > 0 ? 201 : 400;
+      const statusCode = isSuccess ? 200 : 400;
       return res.status(statusCode).json({
-        success: bulkResult.createdCount > 0,
+        success: isSuccess,
         statusCode,
         totalProcessed: bulkResult.totalProcessed,
         createdCount: bulkResult.createdCount,
+        updatedCount: bulkResult.updatedCount || 0,
         failedCount: bulkResult.failedCount,
         skippedCount: bulkResult.skippedCount || 0,
         data: bulkResult.data,
         results: bulkResult.results,
         errors: bulkResult.errors,
-        message: bulkResult.createdCount > 0
-          ? `Bulk ${objectType} records processed: ${bulkResult.createdCount} created${bulkResult.failedCount > 0 ? `, ${bulkResult.failedCount} failed` : ''}.`
+        message: isSuccess
+          ? `Bulk ${objectType} records processed: ${bulkResult.createdCount} created, ${bulkResult.updatedCount || 0} updated${bulkResult.failedCount > 0 ? `, ${bulkResult.failedCount} failed` : ''}.`
           : `Failed to import ${objectType} records: All ${bulkResult.failedCount} rows failed.`,
       });
     }

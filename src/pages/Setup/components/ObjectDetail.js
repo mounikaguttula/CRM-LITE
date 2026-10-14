@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { apiGet, apiPost, apiDelete } from '../../../api/client';
+import { apiGet, apiPost, apiPut, apiDelete } from '../../../api/client';
 import { useWorkspace } from '../../../context/WorkspaceContext';
 import {
   ArrowLeft,
@@ -35,7 +35,11 @@ import {
   UserCheck,
   Pencil,
   AlertTriangle,
-  Search
+  Search,
+  Lock,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw
 } from 'lucide-react';
 
 
@@ -154,6 +158,7 @@ function ObjectDetail({ objectKey, onBack }) {
 
   const canCreateField = fieldDefPerm ? fieldDefPerm.canCreate !== false : true;
   const canUpdateModule = objDefPerm ? (objDefPerm.canUpdate !== false && objDefPerm.canEdit !== false) : true;
+  const canUpdateField = fieldDefPerm ? (fieldDefPerm.canUpdate !== false && fieldDefPerm.canEdit !== false) : true;
   const canDeleteField = fieldDefPerm ? fieldDefPerm.canDelete !== false : true;
 
   const [activeTab, setActiveTab] = useState('details');
@@ -163,6 +168,7 @@ function ObjectDetail({ objectKey, onBack }) {
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [showAddField, setShowAddField] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [editModalField, setEditModalField] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -538,8 +544,10 @@ function ObjectDetail({ objectKey, onBack }) {
           loading={fieldsLoading}
           deleteLoading={deleteLoading}
           canCreateField={canCreateField}
+          canUpdateField={canUpdateField}
           canDeleteField={canDeleteField}
           onDelete={handleDeleteFieldClick}
+          onEdit={(field) => setEditModalField(field)}
           onAddField={() => setShowAddField(true)}
           onRefresh={loadFields}
         />
@@ -670,6 +678,23 @@ function ObjectDetail({ objectKey, onBack }) {
             setShowAddField(false);
             loadFields();
             showToast('success', 'Custom field created successfully!');
+          }}
+          onError={(msg) => showToast('error', msg)}
+        />
+      )}
+
+      {/* ── Edit Field Modal ── */}
+      {editModalField && (
+        <EditFieldModal
+          objectKey={objectKey}
+          displayName={displayName}
+          field={editModalField}
+          onClose={() => setEditModalField(null)}
+          onSuccess={() => {
+            const updatedLabel = editModalField.label || editModalField.display_name || 'Field';
+            setEditModalField(null);
+            loadFields();
+            showToast('success', `Field "${updatedLabel}" updated successfully.`);
           }}
           onError={(msg) => showToast('error', msg)}
         />
@@ -824,7 +849,7 @@ function DetailsTab({ objectDef }) {
 /* ══════════════════════════════════════════════
    Tab 2: Fields & Relationships
    ══════════════════════════════════════════════ */
-function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, canCreateField = true, canDeleteField = true, onDelete, onAddField }) {
+function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, canCreateField = true, canUpdateField = true, canDeleteField = true, onDelete, onEdit, onAddField }) {
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Header bar */}
@@ -931,26 +956,87 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, can
                       </span>
                     </td>
                     <td style={{ padding: '14px 20px' }}>
-                      {!isSystem && canDeleteField ? (
-                        <button
-                          onClick={() => onDelete(fieldId, fieldLabel)}
-                          disabled={isDeleting}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 32, height: 32, borderRadius: 8,
-                            border: 'none', background: 'rgba(244,63,94,0.08)',
-                            color: '#f43f5e', cursor: isDeleting ? 'wait' : 'pointer',
-                            transition: 'all 0.15s ease',
-                            opacity: isDeleting ? 0.5 : 1,
-                          }}
-                          onMouseOver={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'rgba(244,63,94,0.18)'; } }}
-                          onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(244,63,94,0.08)'; }}
-                          title={`Delete ${fieldLabel}`}
-                        >
-                          {isDeleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
-                        </button>
+                      {!isSystem ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {canUpdateField && (
+                            <button
+                              onClick={() => onEdit(field)}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 32, height: 32, borderRadius: 8,
+                                border: 'none', background: 'rgba(99,102,241,0.08)',
+                                color: '#6366f1', cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                              onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)'; }}
+                              onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.08)'; }}
+                              title={`Edit ${fieldLabel}`}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                          {canDeleteField && (
+                            <button
+                              onClick={() => onDelete(fieldId, fieldLabel)}
+                              disabled={isDeleting}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 32, height: 32, borderRadius: 8,
+                                border: 'none', background: 'rgba(244,63,94,0.08)',
+                                color: '#f43f5e', cursor: isDeleting ? 'wait' : 'pointer',
+                                transition: 'all 0.15s ease',
+                                opacity: isDeleting ? 0.5 : 1,
+                              }}
+                              onMouseOver={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'rgba(244,63,94,0.18)'; } }}
+                              onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(244,63,94,0.08)'; }}
+                              title={`Delete ${fieldLabel}`}
+                            >
+                              {isDeleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
+                            </button>
+                          )}
+                          {!canUpdateField && !canDeleteField && (
+                            <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Protected</span>
+                          )}
+                        </div>
                       ) : (
-                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{isSystem ? 'System' : 'Protected'}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {canUpdateField ? (
+                            <>
+                              <button
+                                onClick={() => onEdit(field)}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  width: 32, height: 32, borderRadius: 8,
+                                  border: 'none', background: 'rgba(99,102,241,0.08)',
+                                  color: '#6366f1', cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.08)'; }}
+                                title={`Customize ${fieldLabel} for Organization`}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              {field.has_override ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.7rem', padding: '2px 8px', borderRadius: 12,
+                                    background: 'rgba(16, 185, 129, 0.1)', color: '#059669',
+                                    fontWeight: 600, border: '1px solid rgba(16, 185, 129, 0.25)',
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  }}
+                                  title="This field has organization-specific customizations"
+                                >
+                                  Customized
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>System</span>
+                              )}
+                            </>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>System</span>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -1830,6 +1916,665 @@ function AddFieldWizard({ objectKey, displayName, onClose, onSuccess, onError })
   );
 }
 
+
+/* ══════════════════════════════════════════════
+   Edit Field Modal
+   ══════════════════════════════════════════════ */
+function EditFieldModal({ objectKey, displayName, field, onClose, onSuccess, onError }) {
+  const isPicklist = field.type === 'picklist' || field.field_type === 'picklist' || field.type === 'dropdown' || field.field_type === 'dropdown';
+  const isSystem = Boolean(field.is_system);
+  const hasOverride = Boolean(field.has_override);
+
+  const [fieldLabel, setFieldLabel] = useState(field.label || field.display_name || field.name || '');
+  const [fieldHelpText, setFieldHelpText] = useState(field.help_text || field.helpText || '');
+  const [fieldRequired, setFieldRequired] = useState(Boolean(field.required));
+  const [fieldUnique, setFieldUnique] = useState(Boolean(field.is_unique || field.unique));
+  const [fieldReadOnly, setFieldReadOnly] = useState(Boolean(field.readonly || field.is_readonly));
+  const [fieldHidden, setFieldHidden] = useState(Boolean(field.hidden || field.is_hidden));
+
+  // Picklist options state
+  const initialOptions = Array.isArray(field.picklist_values)
+    ? field.picklist_values
+    : Array.isArray(field.options)
+      ? field.options
+      : [];
+  const [picklistOptions, setPicklistOptions] = useState(initialOptions);
+  const [renamedMap, setRenamedMap] = useState({});
+  const [newOptionText, setNewOptionText] = useState('');
+  const [editingOptionIdx, setEditingOptionIdx] = useState(null);
+  const [editingOptionText, setEditingOptionText] = useState('');
+
+  // Field-level security profiles
+  const [securityProfiles, setSecurityProfiles] = useState([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState(isPicklist ? 'picklist' : 'general'); // 'general' | 'picklist'
+
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setRolesLoading(true);
+    apiGet('/roles')
+      .then((res) => {
+        if (!mounted) return;
+        const roleList = Array.isArray(res) ? res : (res?.data || res?.roles || []);
+        if (roleList.length > 0) {
+          setSecurityProfiles(
+            roleList.map((r) => ({
+              id: r.id,
+              role: r.role_name || r.name || r.role || 'Role',
+              visible: true,
+              readOnly: false,
+            }))
+          );
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (mounted) setRolesLoading(false); });
+    return () => { mounted = false; };
+  }, []);
+
+  const handleAddOption = () => {
+    const trimmed = newOptionText.trim();
+    if (!trimmed) return;
+    if (picklistOptions.some(opt => opt.toLowerCase() === trimmed.toLowerCase())) {
+      setLocalError(`Option "${trimmed}" already exists in the list.`);
+      return;
+    }
+    setPicklistOptions([...picklistOptions, trimmed]);
+    setNewOptionText('');
+    setLocalError(null);
+  };
+
+  const handleRemoveOption = (indexToRemove) => {
+    if (picklistOptions.length <= 1) {
+      setLocalError('A picklist field must retain at least one option.');
+      return;
+    }
+    setPicklistOptions(picklistOptions.filter((_, idx) => idx !== indexToRemove));
+    setLocalError(null);
+  };
+
+  const handleMoveOption = (index, direction) => {
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= picklistOptions.length) return;
+    const next = [...picklistOptions];
+    const [moved] = next.splice(index, 1);
+    next.splice(targetIdx, 0, moved);
+    setPicklistOptions(next);
+  };
+
+  const handleStartEditOption = (index) => {
+    setEditingOptionIdx(index);
+    setEditingOptionText(picklistOptions[index]);
+  };
+
+  const handleSaveEditOption = (index) => {
+    const trimmed = editingOptionText.trim();
+    if (!trimmed) return;
+    const duplicate = picklistOptions.some((opt, idx) => idx !== index && opt.toLowerCase() === trimmed.toLowerCase());
+    if (duplicate) {
+      setLocalError(`Option "${trimmed}" already exists.`);
+      return;
+    }
+    const oldVal = picklistOptions[index];
+    if (oldVal !== trimmed) {
+      setRenamedMap((prev) => ({ ...prev, [oldVal]: trimmed }));
+    }
+    const next = [...picklistOptions];
+    next[index] = trimmed;
+    setPicklistOptions(next);
+    setEditingOptionIdx(null);
+    setEditingOptionText('');
+    setLocalError(null);
+  };
+
+  const handleResetToDefault = async () => {
+    if (!window.confirm(`Reset "${fieldLabel}" to default platform values? Your organization-specific picklist and label customizations will be removed.`)) {
+      return;
+    }
+    setSaving(true);
+    setLocalError(null);
+    try {
+      const fieldIdentifier = field.id || field.name || field.api_name;
+      await apiDelete(`/metadata/objects/${objectKey}/fields/${fieldIdentifier}/override`);
+      onSuccess();
+    } catch (err) {
+      const errMsg = err?.message || err?.data?.error || 'Failed to reset field to default.';
+      setLocalError(errMsg);
+      onError(errMsg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!fieldLabel.trim()) {
+      setLocalError('Field Label is required.');
+      return;
+    }
+    if (isPicklist && picklistOptions.length === 0) {
+      setLocalError('At least one picklist option is required.');
+      return;
+    }
+
+    setSaving(true);
+    setLocalError(null);
+    try {
+      const payload = {
+        display_name: fieldLabel.trim(),
+        label: fieldLabel.trim(),
+        help_text: fieldHelpText.trim() || null,
+        ...(isPicklist ? {
+          picklist_values: picklistOptions,
+          options: picklistOptions,
+          ...(Object.keys(renamedMap).length > 0 ? { rename_map: renamedMap } : {}),
+        } : {}),
+        ...(!isSystem ? {
+          required: fieldRequired,
+          readonly: fieldReadOnly,
+          hidden: fieldHidden,
+          is_unique: fieldUnique,
+          unique: fieldUnique,
+          security_profiles: securityProfiles.length > 0 ? securityProfiles : undefined,
+        } : {}),
+      };
+
+      const fieldIdentifier = field.id || field.name || field.api_name;
+      await apiPut(`/metadata/objects/${objectKey}/fields/${fieldIdentifier}`, payload);
+      onSuccess();
+    } catch (err) {
+      const errMsg = err?.message || err?.data?.error || 'Failed to update field definition.';
+      setLocalError(errMsg);
+      onError(errMsg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 99999,
+        background: 'rgba(15,19,48,0.55)', backdropFilter: 'blur(8px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '24px 16px', overflowY: 'auto',
+        animation: 'fadeIn 0.2s ease',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        style={{
+          width: '100%', maxWidth: 660, maxHeight: '90vh', overflowY: 'auto',
+          borderRadius: 18, padding: '28px 32px 24px', position: 'relative',
+          background: '#ffffff',
+          boxShadow: '0 24px 60px -12px rgba(15,19,48,0.25), 0 0 0 1px rgba(0,0,0,0.06)',
+          animation: 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          style={{
+            position: 'absolute', top: 16, right: 16,
+            width: 28, height: 28, borderRadius: 8,
+            border: 'none', background: 'rgba(139,148,185,0.1)',
+            color: '#64748b', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <X size={15} />
+        </button>
+
+        {/* Modal Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(79,70,229,0.25))',
+            color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Pencil size={18} />
+          </div>
+          <div>
+            <h2 className="font-display" style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#1c2033' }}>
+              {isSystem ? `Customize Standard Field: ${fieldLabel}` : 'Edit Field Definition'}
+            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+              <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Module: <strong>{displayName}</strong></span>
+              <span style={{ color: '#cbd5e1' }}>•</span>
+              <code className="font-mono" style={{ fontSize: '0.74rem', background: 'rgba(99,102,241,0.06)', padding: '2px 6px', borderRadius: 4, color: '#4338ca' }}>
+                {field.name || field.api_name}
+              </code>
+            </div>
+          </div>
+        </div>
+
+        {/* Organization Customization Notice for System Fields */}
+        {isSystem && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+            padding: '12px 16px', borderRadius: 12, marginBottom: 18,
+            background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)',
+            color: '#312e81', fontSize: '0.82rem', lineHeight: '1.45'
+          }}>
+            <Info size={17} style={{ flexShrink: 0, marginTop: 2, color: '#6366f1' }} />
+            <div>
+              <strong>Organization Customization:</strong> Changes affect only your organization.
+              Global system field defaults remain intact for other organizations.
+            </div>
+          </div>
+        )}
+
+        {/* Sub-tabs if picklist */}
+        {isPicklist && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('general')}
+              style={{
+                background: 'none', border: 'none', padding: '6px 12px',
+                fontSize: '0.84rem', fontWeight: activeTab === 'general' ? 700 : 500,
+                color: activeTab === 'general' ? '#4f46e5' : '#64748b',
+                borderBottom: activeTab === 'general' ? '2px solid #4f46e5' : '2px solid transparent',
+                cursor: 'pointer',
+              }}
+            >
+              Field Details
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('picklist')}
+              style={{
+                background: 'none', border: 'none', padding: '6px 12px',
+                fontSize: '0.84rem', fontWeight: activeTab === 'picklist' ? 700 : 500,
+                color: activeTab === 'picklist' ? '#4f46e5' : '#64748b',
+                borderBottom: activeTab === 'picklist' ? '2px solid #4f46e5' : '2px solid transparent',
+                cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <span>Picklist Values</span>
+              <span style={{
+                background: activeTab === 'picklist' ? '#e0e7ff' : '#f1f5f9',
+                color: activeTab === 'picklist' ? '#4338ca' : '#64748b',
+                fontSize: '0.72rem', padding: '1px 6px', borderRadius: 10, fontWeight: 700,
+              }}>
+                {picklistOptions.length}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Local error banner */}
+        {localError && (
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 14px', borderRadius: 8, marginBottom: 16,
+              background: '#fef2f2', border: '1px solid #fecaca',
+              color: '#991b1b', fontSize: '0.82rem',
+            }}
+          >
+            <AlertCircle size={16} style={{ flexShrink: 0 }} />
+            <span>{localError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          {activeTab === 'general' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Row 1: Label & Immutable API Name */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                    Field Label <span style={{ color: '#f43f5e' }}>*</span>
+                  </label>
+                  <input
+                    className="orbit-input"
+                    value={fieldLabel}
+                    onChange={(e) => setFieldLabel(e.target.value)}
+                    placeholder="Field Display Name"
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                    API Name (Immutable)
+                  </label>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 12px', borderRadius: 10,
+                    background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b',
+                  }}>
+                    <Lock size={14} style={{ color: '#94a3b8' }} />
+                    <code className="font-mono" style={{ fontSize: '0.82rem', flex: 1, color: '#475569' }}>
+                      {field.name || field.api_name}
+                    </code>
+                    <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>Locked</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 2: Data Type (Immutable) & Help Text */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                    Data Type (Immutable)
+                  </label>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 12px', borderRadius: 10,
+                    background: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569',
+                  }}>
+                    <DataTypeIcon type={field.type || field.field_type} />
+                    <span style={{ fontSize: '0.82rem', fontWeight: 600, textTransform: 'capitalize' }}>
+                      {field.type || field.field_type}
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>Preserved</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                    Help Text / Tooltip
+                  </label>
+                  <input
+                    className="orbit-input"
+                    value={fieldHelpText}
+                    onChange={(e) => setFieldHelpText(e.target.value)}
+                    placeholder="Guidance for users filling this field"
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
+                  />
+                </div>
+              </div>
+
+              {/* Behavior & Constraints Checkboxes */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+                  Behavior & Constraints
+                </label>
+                {!isSystem ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, background: 'rgba(99,102,241,0.02)', padding: '12px 16px', borderRadius: 12, border: '1px solid #f1f5f9' }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox" checked={fieldRequired}
+                        onChange={(e) => setFieldRequired(e.target.checked)}
+                        style={{ accentColor: '#4f46e5', width: 16, height: 16, marginTop: 2 }}
+                      />
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '0.84rem', color: '#1c2033' }}>Required</span>
+                        <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Always require a value on record save</div>
+                      </div>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox" checked={fieldUnique}
+                        onChange={(e) => setFieldUnique(e.target.checked)}
+                        style={{ accentColor: '#4f46e5', width: 16, height: 16, marginTop: 2 }}
+                      />
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '0.84rem', color: '#1c2033' }}>Unique</span>
+                        <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Prevent duplicate values across records</div>
+                      </div>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox" checked={fieldReadOnly}
+                        onChange={(e) => setFieldReadOnly(e.target.checked)}
+                        style={{ accentColor: '#4f46e5', width: 16, height: 16, marginTop: 2 }}
+                      />
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '0.84rem', color: '#1c2033' }}>Read-Only</span>
+                        <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Prevent direct editing by regular users</div>
+                      </div>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox" checked={fieldHidden}
+                        onChange={(e) => setFieldHidden(e.target.checked)}
+                        style={{ accentColor: '#4f46e5', width: 16, height: 16, marginTop: 2 }}
+                      />
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '0.84rem', color: '#1c2033' }}>Hidden</span>
+                        <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Hide this field from forms and views</div>
+                      </div>
+                    </label>
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '12px 16px', borderRadius: 12,
+                    background: 'rgba(241,245,249,0.7)', border: '1px solid #e2e8f0',
+                    color: '#64748b', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8
+                  }}>
+                    <Lock size={14} style={{ color: '#94a3b8' }} />
+                    <span>Field constraints (required, uniqueness, visibility) are locked at platform level for standard system fields.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'picklist' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                  Manage selectable options for this picklist field.
+                </span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#4f46e5' }}>
+                  {picklistOptions.length} Options
+                </span>
+              </div>
+
+              {/* Add Option Input Row */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="orbit-input"
+                  value={newOptionText}
+                  onChange={(e) => setNewOptionText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddOption(); } }}
+                  placeholder="Enter new picklist option..."
+                  style={{ flex: 1, padding: '9px 12px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: '0.86rem' }}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddOption}
+                  disabled={!newOptionText.trim()}
+                  style={{
+                    padding: '9px 16px', borderRadius: 10, border: 'none',
+                    background: '#4f46e5', color: '#ffffff', fontWeight: 600, fontSize: '0.84rem',
+                    cursor: newOptionText.trim() ? 'pointer' : 'default',
+                    opacity: newOptionText.trim() ? 1 : 0.6,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  <Plus size={15} />
+                  <span>Add Option</span>
+                </button>
+              </div>
+
+              {/* Options List */}
+              <div style={{
+                maxHeight: '260px', overflowY: 'auto',
+                border: '1px solid #e2e8f0', borderRadius: 12,
+                background: '#ffffff',
+              }}>
+                {picklistOptions.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '0.84rem' }}>
+                    No options configured. Add at least one option.
+                  </div>
+                ) : (
+                  picklistOptions.map((opt, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderBottom: idx < picklistOptions.length - 1 ? '1px solid #f1f5f9' : 'none',
+                        background: idx % 2 === 0 ? '#ffffff' : '#fcfcfd',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                        <span style={{ fontSize: '0.72rem', color: '#94a3b8', width: 20 }}>
+                          {idx + 1}.
+                        </span>
+                        {editingOptionIdx === idx ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                            <input
+                              className="orbit-input"
+                              value={editingOptionText}
+                              onChange={(e) => setEditingOptionText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); handleSaveEditOption(idx); }
+                                if (e.key === 'Escape') { setEditingOptionIdx(null); }
+                              }}
+                              autoFocus
+                              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #6366f1', fontSize: '0.84rem', flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEditOption(idx)}
+                              style={{ padding: '4px 8px', borderRadius: 6, background: '#4f46e5', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.74rem' }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingOptionIdx(null)}
+                              style={{ padding: '4px 8px', borderRadius: 6, background: '#f1f5f9', color: '#64748b', border: 'none', cursor: 'pointer', fontSize: '0.74rem' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.86rem', fontWeight: 600, color: '#1e293b' }}>
+                            {opt}
+                          </span>
+                        )}
+                      </div>
+
+                      {editingOptionIdx !== idx && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveOption(idx, -1)}
+                            disabled={idx === 0}
+                            style={{
+                              width: 26, height: 26, borderRadius: 6, border: 'none',
+                              background: 'transparent', color: idx === 0 ? '#cbd5e1' : '#64748b',
+                              cursor: idx === 0 ? 'default' : 'pointer',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            title="Move Up"
+                          >
+                            <ArrowUp size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveOption(idx, 1)}
+                            disabled={idx === picklistOptions.length - 1}
+                            style={{
+                              width: 26, height: 26, borderRadius: 6, border: 'none',
+                              background: 'transparent', color: idx === picklistOptions.length - 1 ? '#cbd5e1' : '#64748b',
+                              cursor: idx === picklistOptions.length - 1 ? 'default' : 'pointer',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            title="Move Down"
+                          >
+                            <ArrowDown size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditOption(idx)}
+                            style={{
+                              width: 26, height: 26, borderRadius: 6, border: 'none',
+                              background: 'rgba(99,102,241,0.08)', color: '#4f46e5',
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            title="Rename"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveOption(idx)}
+                            style={{
+                              width: 26, height: 26, borderRadius: 6, border: 'none',
+                              background: 'rgba(244,63,94,0.08)', color: '#f43f5e',
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            title="Remove"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Modal Footer */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 24, paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
+            {isSystem && hasOverride && (
+              <button
+                type="button"
+                onClick={handleResetToDefault}
+                disabled={saving}
+                style={{
+                  marginRight: 'auto',
+                  padding: '9px 16px', borderRadius: 10,
+                  border: '1px solid #fecaca', background: '#fff5f5',
+                  color: '#b91c1c', fontSize: '0.84rem', fontWeight: 600,
+                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}
+                title="Revert to global platform default definition"
+              >
+                <RotateCcw size={14} />
+                <span>Reset to Default</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              style={{
+                padding: '9px 18px', borderRadius: 10, border: '1px solid #cbd5e1',
+                background: '#ffffff', color: '#475569', fontSize: '0.84rem',
+                fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !fieldLabel.trim()}
+              style={{
+                padding: '9px 22px', borderRadius: 10, border: 'none',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                color: '#ffffff', fontSize: '0.84rem', fontWeight: 600,
+                cursor: saving ? 'wait' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+              }}
+            >
+              {saving ? <Loader size={14} className="spin" /> : <CheckCircle size={14} />}
+              <span>{saving ? 'Saving Changes...' : 'Save Changes'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 export default ObjectDetail;
 

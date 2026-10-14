@@ -317,7 +317,7 @@ const campaignController = {
 
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
-      const { name, subject, body, template_id, template_name, target_emails } = req.body || {};
+      const { name, subject, body, template_id, template_name, target_emails, type } = req.body || {};
 
       if (!name || !name.trim()) {
         return res.status(400).json({ message: 'Campaign name is required.' });
@@ -375,11 +375,20 @@ const campaignController = {
 
       const baseFormLink = `${clientUrl}/public/campaign-form?campaign_id=${campaignId}&org_id=${organizationId}`;
 
+      const templateTypeMap = {
+        welcome_email: 'Welcome Email',
+        product_promo: 'Product Promotion',
+        newsletter: 'Monthly Newsletter',
+        event_invitation: 'Event Invitation',
+      };
+      const campaignType = type || templateTypeMap[template_id] || (template_name ? (templateTypeMap[String(template_name).toLowerCase()] || template_name) : 'Welcome Email');
+
       // Create payload for universal_table
       const campaignPayload = {
         id: campaignId,
         name: name.trim(),
         status: 'Sent',
+        type: campaignType,
         template_id: template_id || 'welcome_email',
         template_name: template_name || 'Welcome Email',
         subject: subject.trim(),
@@ -428,6 +437,7 @@ const campaignController = {
         object_type_id: validObjectTypeId,
         name: name.trim(),
         status: 'Sent',
+        type: campaignType,
         owner_id: userId || null,
         template_id: template_id || 'welcome_email',
         template_name: template_name || 'Welcome Email',
@@ -581,7 +591,7 @@ const campaignController = {
           }).length;
 
           const currentCampStatus = String(campaign.status || '').toLowerCase();
-          const newStatus = currentCampStatus.includes('submit') ? 'Form Submitted' : 'Open';
+          const newStatus = currentCampStatus.includes('submit') ? 'Form Submitted' : 'Opened';
 
           await supabase
             .from('universal_table')

@@ -95,6 +95,20 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       const queryParams = new URLSearchParams(location.search);
       const prefill = {};
       queryParams.forEach((value, key) => { prefill[key] = value; });
+      const candidateTemplate = prefill.template || prefill.template_id || prefill.template_name;
+      if (candidateTemplate && !prefill.type) {
+        const templateTypeMap = {
+          welcome_email: 'Welcome Email',
+          product_promo: 'Product Promotion',
+          newsletter: 'Monthly Newsletter',
+          event_invitation: 'Event Invitation',
+          'welcome email': 'Welcome Email',
+          'product promotion': 'Product Promotion',
+          'monthly newsletter': 'Monthly Newsletter',
+          'event invitation': 'Event Invitation',
+        };
+        prefill.type = templateTypeMap[String(candidateTemplate).toLowerCase()] || candidateTemplate;
+      }
       if (Object.keys(prefill).length > 0) {
         setFormData((prev) => ({ ...prefill, ...prev }));
       }
@@ -154,6 +168,11 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       if (fieldName === 'title' || fieldName === 'job_title') {
         next.title = value;
         next.job_title = value;
+      }
+      if (fieldName === 'DealType' || fieldName === 'deal_type' || (isDealCreateObj && fieldName === 'type')) {
+        next.DealType = value;
+        next.deal_type = value;
+        next.type = value;
       }
       return next;
     });

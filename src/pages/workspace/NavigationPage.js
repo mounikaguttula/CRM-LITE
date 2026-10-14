@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Target, Briefcase, Users, Building2,
   Megaphone, FileText, QrCode, Folder, LogOut,
-  ChevronRight, Sparkles, ChevronDown, ChevronUp, Package
+  ChevronRight, Sparkles, ChevronDown, ChevronUp, Package, PieChart
 } from 'lucide-react';
 
 function getModuleIcon(name, size = 15) {
@@ -19,6 +19,7 @@ function getModuleIcon(name, size = 15) {
   if (str.includes('form') || str.includes('doc'))               return <FileText {...props} />;
   if (str.includes('qr') || str.includes('scan'))                return <QrCode {...props} />;
   if (str.includes('product') || str.includes('item'))           return <Package {...props} />;
+  if (str.includes('segment'))                                   return <PieChart {...props} />;
   return <Folder {...props} />;
 }
 

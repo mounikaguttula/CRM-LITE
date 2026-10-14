@@ -6,7 +6,7 @@ import { apiGet, apiPost, apiDelete } from '../../api/client';
 import {
   Megaphone, Plus, Search, Trash2, BarChart2, Check, ArrowRight, ArrowLeft,
   X, Send, RefreshCw, Mail, Eye, TrendingUp, Clock,
-  CheckCircle2, AlertCircle
+  CheckCircle2, AlertCircle, AlertTriangle
 } from 'lucide-react';
 
 /* ──────────────────────────────────────────
@@ -241,7 +241,7 @@ function CampaignCard({ campaign, onTrack, onDelete, canDelete = true, onCardCli
         {/* Delete button */}
         {canDelete && (
           <button
-            onClick={(e) => { e.stopPropagation(); onDelete(campaign.id, e); }}
+            onClick={(e) => { e.stopPropagation(); onDelete(campaign, e); }}
             style={{
               width: 34, height: 34, borderRadius: 10,
               background: '#fff1f2', border: '1px solid #fecdd3',
@@ -285,6 +285,9 @@ function CampaignsPage() {
   const [sending, setSending] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [deleteModalCampaign, setDeleteModalCampaign] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
 
   const [trackingCampaign, setTrackingCampaign] = useState(null);
 
@@ -331,11 +334,20 @@ function CampaignsPage() {
     setSending(true);
     setErrorMsg('');
 
+    const templateTypeMap = {
+      welcome_email: 'Welcome Email',
+      product_promo: 'Product Promotion',
+      newsletter: 'Monthly Newsletter',
+      event_invitation: 'Event Invitation',
+    };
+    const campaignType = templateTypeMap[selectedTemplate?.id] || selectedTemplate?.title || 'Welcome Email';
+
     try {
       await apiPost('/api/campaigns/send', {
         name: formData.name.trim(),
         subject: formData.subject.trim(),
         body: formData.body,
+        type: campaignType,
         template_id: selectedTemplate.id,
         template_name: selectedTemplate.title,
         target_emails: formData.target_emails,
@@ -351,14 +363,31 @@ function CampaignsPage() {
     }
   };
 
-  const handleDeleteCampaign = async (id, e) => {
+  const handleDeleteCampaign = (campaignOrId, e) => {
     e?.stopPropagation();
-    if (!window.confirm('Delete this campaign permanently?')) return;
+    const campaignObj = typeof campaignOrId === 'object' && campaignOrId !== null
+      ? campaignOrId
+      : campaigns.find(c => c.id === campaignOrId) || { id: campaignOrId, name: 'Campaign' };
+    setDeleteModalCampaign(campaignObj);
+    setDeleteError(null);
+  };
+
+  const confirmDeleteCampaign = async () => {
+    if (!deleteModalCampaign) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      await apiDelete(`/api/campaigns/${id}`);
-      setCampaigns(prev => prev.filter(c => c.id !== id));
+      await apiDelete(`/api/campaigns/${deleteModalCampaign.id}`);
+      setCampaigns(prev => prev.filter(c => c.id !== deleteModalCampaign.id));
+      setSuccessMsg(`"${deleteModalCampaign.name || 'Campaign'}" deleted successfully!`);
+      setTimeout(() => setSuccessMsg(''), 3500);
+      setDeleteModalCampaign(null);
     } catch (err) {
-      alert('Delete failed: ' + (err.message || 'Unknown error'));
+      console.error('Delete campaign error:', err);
+      const errMsg = err?.response?.data?.message || err?.message || 'Failed to delete campaign.';
+      setDeleteError(errMsg);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -988,6 +1017,99 @@ function CampaignsPage() {
           </div>
         </div>
       , document.body)}
+
+      {/* Delete Campaign Confirmation Custom Modal */}
+      {deleteModalCampaign && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 420,
+            padding: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(226, 232, 240, 0.8)', textAlign: 'center',
+            position: 'relative',
+          }}>
+            <button 
+              type="button" 
+              onClick={() => { setDeleteModalCampaign(null); setDeleteError(null); }}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', background: '#ffe4e6',
+              color: '#e11d48', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 16, boxShadow: '0 0 0 8px rgba(225, 29, 72, 0.08)'
+            }}>
+              <AlertTriangle size={28} />
+            </div>
+
+            <h3 style={{ margin: '0 0 8px 0', fontSize: 19, fontWeight: 700, color: '#0f172a' }}>
+              Delete Campaign?
+            </h3>
+
+            <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: '#64748b', lineHeight: 1.5 }}>
+              Are you sure you want to delete <strong style={{ color: '#0f172a' }}>"{deleteModalCampaign.name || 'this campaign'}"</strong>? This action cannot be undone.
+            </p>
+
+            {deleteError && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+                fontSize: '0.82rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => { setDeleteModalCampaign(null); setDeleteError(null); }}
+                disabled={deleting}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: '1px solid #cbd5e1',
+                  background: '#ffffff', color: '#334155', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', transition: 'all 0.15s ease'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteCampaign}
+                disabled={deleting}
+                style={{
+                  flex: 1, height: 44, borderRadius: 12, border: 'none',
+                  background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+                  color: '#ffffff', fontWeight: 600, fontSize: '0.88rem',
+                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  boxShadow: '0 4px 12px rgba(225, 29, 72, 0.25)', transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.filter = 'brightness(1)'}
+              >
+                {deleting ? (
+                  <span>Deleting…</span>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    <span>Delete Campaign</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

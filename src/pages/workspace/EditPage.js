@@ -252,7 +252,15 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         }
       }
 
-      if (initialForm) setFormData(initialForm);
+      if (initialForm) {
+        const savedDealType = initialForm.DealType || initialForm.deal_type || initialForm.type || '';
+        if (savedDealType) {
+          initialForm.DealType = savedDealType;
+          initialForm.deal_type = savedDealType;
+          initialForm.type = savedDealType;
+        }
+        setFormData(initialForm);
+      }
 
       setLookupData({
         users:     finalUsers,
@@ -341,6 +349,11 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       if (lower === 'title' || lower === 'job_title') {
         next.title = value;
         next.job_title = value;
+      }
+      if (lower === 'dealtype' || lower === 'deal_type' || (isDealEditObj && lower === 'type')) {
+        next.DealType = value;
+        next.deal_type = value;
+        next.type = value;
       }
       return next;
     });

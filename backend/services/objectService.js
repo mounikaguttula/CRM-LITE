@@ -1,4 +1,6 @@
 const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
+const dbClient = supabaseAdmin || supabase;
 const metadataService = require('./metadataService');
 const validationRuleService = require('./validationRuleService');
 
@@ -464,13 +466,15 @@ const objectService = {
     const dataObj = typeof data === 'object' && data !== null ? { ...data } : {};
     delete dataObj.data;
 
-    // Harmonize alias fields for Job Title, Designation/Role, Address/Country, Employees, Lead Source
+    // Harmonize alias fields for Job Title, Designation/Role, Address/Country, Employees, Lead Source, Deal Type
     const titleVal = dataObj.title || dataObj.job_title || '';
     const designationVal = dataObj.designation || dataObj.role || '';
     const addressVal = dataObj.address || dataObj.country || '';
     const employeesVal = dataObj.number_of_employees || dataObj.company_size || '';
     const sourceVal = dataObj.lead_source || dataObj.source || '';
     const stageVal = dataObj.stage || dataObj.Stage || null;
+    const isDealRow = Boolean(stageVal || dataObj.deal_name || dataObj.DealType || dataObj.deal_type || dataObj.dealType);
+    const dealTypeVal = dataObj.DealType || dataObj.deal_type || dataObj.dealType || (isDealRow ? dataObj.type : null) || null;
 
     // Resolve human name if row.name is a UUID
     let humanName = name;
@@ -483,6 +487,29 @@ const objectService = {
 
     if (humanName && typeof humanName === 'string' && !isUuid(humanName)) {
       dataObj.name = humanName;
+    }
+
+    // Map Campaign template to Type picklist value if type is not already explicitly set
+    if (!dataObj.type) {
+      const tId = dataObj.template_id || (row && row.template_id);
+      const tName = dataObj.template_name || (row && row.template_name);
+      const templateTypeMap = {
+        welcome_email: 'Welcome Email',
+        product_promo: 'Product Promotion',
+        newsletter: 'Monthly Newsletter',
+        event_invitation: 'Event Invitation',
+        'welcome email': 'Welcome Email',
+        'product promotion': 'Product Promotion',
+        'monthly newsletter': 'Monthly Newsletter',
+        'event invitation': 'Event Invitation',
+      };
+      if (tId && templateTypeMap[String(tId).toLowerCase()]) {
+        dataObj.type = templateTypeMap[String(tId).toLowerCase()];
+      } else if (tName && templateTypeMap[String(tName).toLowerCase()]) {
+        dataObj.type = templateTypeMap[String(tName).toLowerCase()];
+      } else if (tName && typeof tName === 'string') {
+        dataObj.type = tName;
+      }
     }
 
     return {
@@ -498,6 +525,7 @@ const objectService = {
       updated_at,
       ...dataObj,
       ...(stageVal ? { stage: stageVal } : {}),
+      ...(dealTypeVal ? { DealType: dealTypeVal, deal_type: dealTypeVal, type: dealTypeVal } : {}),
       ...(titleVal ? { title: titleVal, job_title: titleVal } : {}),
       ...(designationVal ? { designation: designationVal, role: designationVal } : {}),
       ...(addressVal ? { address: addressVal, country: addressVal } : {}),
@@ -786,6 +814,13 @@ const objectService = {
     }
 
     const cleanObjKey = String(objectKey || '').toLowerCase();
+    const isDealKey = cleanObjKey.includes('deal') || cleanObjKey.includes('opp');
+    const dealTypeCreateVal = (payload.DealType || payload.deal_type || payload.dealType || (isDealKey ? payload.type : '') || '').trim();
+    if (dealTypeCreateVal) {
+      customData.DealType = dealTypeCreateVal;
+      customData.deal_type = dealTypeCreateVal;
+      if (isDealKey) customData.type = dealTypeCreateVal;
+    }
 
     const relRes = await resolveRecordRelationships(payload, cleanObjKey, organizationId);
     let resolvedParent = relRes.resolvedParent;
@@ -890,6 +925,23 @@ const objectService = {
     delete customData.updated_by;
     delete customData.data;
 
+    // Generic form edits must not overwrite or wipe out relationship data
+    if (String(objectKey || '').toLowerCase().includes('segment')) {
+      delete customData.contact_ids;
+      delete customData._version;
+      const { data: latestSeg } = await dbClient
+        .from('universal_table')
+        .select('data')
+        .eq('id', id)
+        .maybeSingle();
+      if (latestSeg?.data?.contact_ids) {
+        customData.contact_ids = latestSeg.data.contact_ids;
+      }
+      if (latestSeg?.data?._version !== undefined) {
+        customData._version = latestSeg.data._version;
+      }
+    }
+
     // Bi-directional alias syncing on update (prioritize payload updates over unchanged existing values)
     let titleVal = '';
     if (payload.title !== undefined && String(payload.title).trim() !== '' && String(payload.title).trim() !== String(existing.title || '').trim()) {
@@ -918,6 +970,29 @@ const objectService = {
     }
 
     const cleanObjKey = String(objectKey || '').toLowerCase();
+    const isDealObj = cleanObjKey.includes('deal') || cleanObjKey.includes('opp');
+    let dealTypeUpdateVal = '';
+    if (payload.DealType !== undefined && String(payload.DealType).trim() !== '') {
+      dealTypeUpdateVal = String(payload.DealType).trim();
+    } else if (payload.deal_type !== undefined && String(payload.deal_type).trim() !== '') {
+      dealTypeUpdateVal = String(payload.deal_type).trim();
+    } else if (payload.dealType !== undefined && String(payload.dealType).trim() !== '') {
+      dealTypeUpdateVal = String(payload.dealType).trim();
+    } else if (isDealObj && payload.type !== undefined && String(payload.type).trim() !== '') {
+      dealTypeUpdateVal = String(payload.type).trim();
+    } else {
+      dealTypeUpdateVal = (payload.DealType || payload.deal_type || payload.dealType || customData.DealType || customData.deal_type || customData.dealType || (isDealObj ? (payload.type || customData.type) : '') || '').trim();
+    }
+    if (dealTypeUpdateVal) {
+      customData.DealType = dealTypeUpdateVal;
+      customData.deal_type = dealTypeUpdateVal;
+      if (isDealObj) customData.type = dealTypeUpdateVal;
+    } else if (payload.DealType === '' || payload.DealType === null || payload.deal_type === '' || payload.deal_type === null || (isDealObj && (payload.type === '' || payload.type === null))) {
+      delete customData.DealType;
+      delete customData.deal_type;
+      delete customData.dealType;
+      if (isDealObj) delete customData.type;
+    }
 
     // 1. Normalize & resolve Company Relationship for Update
     const payloadCompVal = extractPayloadAliasValue(payload, COMPANY_ALIASES);
@@ -1259,12 +1334,20 @@ const objectService = {
    *   Never passed from HTTP controllers. Only used by benchmark/profiling scripts.
    */
   bulkCreateRecords: async (objectKey, recordsArray, organizationId, userId, cacheContext = null, options = {}) => {
-    const dryRun = options.dryRun === true;
+    let resolvedUserId = userId;
+    let resolvedOptions = options || {};
+    if (userId && typeof userId === 'object' && !isUuid(userId)) {
+      resolvedOptions = userId;
+      resolvedUserId = resolvedOptions.userId || null;
+    }
+    const dryRun = resolvedOptions.dryRun === true;
+    const importMode = String(resolvedOptions.importMode || resolvedOptions.mode || 'upsert').toLowerCase().trim();
     if (!Array.isArray(recordsArray) || recordsArray.length === 0) {
       return {
         success: true,
         totalProcessed: 0,
         createdCount: 0,
+        updatedCount: 0,
         failedCount: 0,
         skippedCount: 0,
         data: [],
@@ -1525,18 +1608,117 @@ const objectService = {
     // Execute all relationship lookups concurrently
     await Promise.all(relationshipPromises);
 
-    // 4. Duplicate checks (in-CSV + existing DB)
-    // Option C: Fetch existing records ONCE and reuse for all unique fields.
-    // Previously each unique field triggered a separate full-table scan.
+    // 4. Candidate Existing Record Identification (for Upsert / Update)
+    const isSegmentObject = cleanKey.includes('segment');
+    const ID_KEYS = ['id', 'ID', 'record_id', 'Record ID', 'record_uuid', 'Record Id', 'recordId', 'crm_record_id'];
+    const activeIdKeys = isSegmentObject
+      ? ['id', 'ID', 'record_uuid', 'crm_record_id']
+      : ID_KEYS;
+
+    const getRowRecordId = (r) => {
+      if (!r || typeof r !== 'object') return null;
+      for (const k of activeIdKeys) {
+        if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
+          const val = String(r[k]).trim();
+          if (isUuid(val)) return val;
+        }
+      }
+      if (r.data && typeof r.data === 'object') {
+        for (const k of activeIdKeys) {
+          if (r.data[k] !== undefined && r.data[k] !== null && String(r.data[k]).trim() !== '') {
+            const val = String(r.data[k]).trim();
+            if (isUuid(val)) return val;
+          }
+        }
+      }
+      return null;
+    };
+
+    const getRawRowRecordId = (r) => {
+      if (!r || typeof r !== 'object') return null;
+      for (const k of activeIdKeys) {
+        if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
+          return String(r[k]).trim();
+        }
+      }
+      if (r.data && typeof r.data === 'object') {
+        for (const k of activeIdKeys) {
+          if (r.data[k] !== undefined && r.data[k] !== null && String(r.data[k]).trim() !== '') {
+            return String(r.data[k]).trim();
+          }
+        }
+      }
+      return null;
+    };
+
+    const candidateRecordIds = [];
+    for (const r of recordsArray) {
+      const recId = getRowRecordId(r);
+      if (recId) candidateRecordIds.push(recId);
+    }
+
+    const existingRecordsByIdMap = new Map();
+    if (candidateRecordIds.length > 0) {
+      const { data: foundCandidateRows } = await dbClient
+        .from('universal_table')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('object_type_id', objDef.id)
+        .eq('is_deleted', false)
+        .in('id', candidateRecordIds);
+
+      (foundCandidateRows || []).forEach(r => existingRecordsByIdMap.set(r.id, r));
+    }
+
+    // External-ID resolution cache for Segments (HubSpot Segment ID / List ID)
+    const existingBySegmentIdMap = new Map(); // normSegmentId -> Array<record>
+    const existingByListIdMap = new Map();    // normListId -> Array<record>
+
+    if (isSegmentObject) {
+      const segmentIdsSet = new Set();
+      const listIdsSet = new Set();
+
+      for (const r of recordsArray) {
+        const segId = String(r.hubspot_segment_id ?? (r.data && r.data.hubspot_segment_id) ?? '').trim();
+        const listId = String(r.hubspot_list_id ?? (r.data && r.data.hubspot_list_id) ?? '').trim();
+        if (segId) segmentIdsSet.add(segId.toLowerCase());
+        if (listId) listIdsSet.add(listId.toLowerCase());
+      }
+
+      if (segmentIdsSet.size > 0 || listIdsSet.size > 0) {
+        const { data: extMatchedRows } = await dbClient
+          .from('universal_table')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', objDef.id)
+          .eq('is_deleted', false);
+
+        (extMatchedRows || []).forEach((row) => {
+          const rSegId = String(row.data?.hubspot_segment_id ?? '').trim().toLowerCase();
+          const rListId = String(row.data?.hubspot_list_id ?? '').trim().toLowerCase();
+          if (rSegId && segmentIdsSet.has(rSegId)) {
+            if (!existingBySegmentIdMap.has(rSegId)) existingBySegmentIdMap.set(rSegId, []);
+            existingBySegmentIdMap.get(rSegId).push(row);
+          }
+          if (rListId && listIdsSet.has(rListId)) {
+            if (!existingByListIdMap.has(rListId)) existingByListIdMap.set(rListId, []);
+            existingByListIdMap.get(rListId).push(row);
+          }
+        });
+      }
+    }
+
+    // 5. Duplicate checks (in-CSV + existing DB)
     const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code');
     const seenCsvValuesMap = new Map();
-    uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Set()));
+    uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Map())); // Map<normVal, rowNum>
+    const seenCsvSegmentIdsMap = new Map(); // Map<normVal, rowNum>
+    const seenCsvListIdsMap = new Map();    // Map<normVal, rowNum>
 
     const existingDbValuesMap = new Map();
-    uniqueFields.forEach(f => existingDbValuesMap.set(f.name, new Set()));
+    uniqueFields.forEach(f => existingDbValuesMap.set(f.name, new Map())); // Map<normVal, recordId>
 
     if (uniqueFields.length > 0) {
-      // Check if ANY unique field has values in the current batch
       const anyBatchHasValues = uniqueFields.some(f => {
         return recordsArray.some(r => {
           const v = r[f.name] !== undefined ? r[f.name] : (r.data && r.data[f.name]);
@@ -1545,22 +1727,20 @@ const objectService = {
       });
 
       if (anyBatchHasValues) {
-        // Single fetch: retrieve existing records ONCE for this object type
-        const { data: allExistingRows } = await supabase
+        const { data: allExistingRows } = await dbClient
           .from('universal_table')
-          .select('data')
+          .select('id, data')
           .eq('organization_id', organizationId)
           .eq('object_type_id', objDef.id)
           .eq('is_deleted', false);
 
-        // Extract values for ALL unique fields from the single result set
         if (allExistingRows && allExistingRows.length > 0) {
           for (const f of uniqueFields) {
-            const dbSet = existingDbValuesMap.get(f.name);
+            const dbMap = existingDbValuesMap.get(f.name);
             allExistingRows.forEach(d => {
               const dbVal = d.data && d.data[f.name];
               if (dbVal && String(dbVal).trim()) {
-                dbSet.add(String(dbVal).trim().toLowerCase());
+                dbMap.set(String(dbVal).trim().toLowerCase(), d.id);
               }
             });
           }
@@ -1568,12 +1748,13 @@ const objectService = {
       }
     }
 
-    // 5. In-Memory Validation & Payload Construction Loop
+    // 6. In-Memory Validation & Payload Construction Loop
     const validNewRows = [];
     const validPayloadsToReturn = [];
     const rowResults = [];
     const errorDetails = [];
     let createdCount = 0;
+    let updatedCount = 0;
     let failedCount = 0;
 
     for (let i = 0; i < recordsArray.length; i++) {
@@ -1583,11 +1764,219 @@ const objectService = {
       const relInputs = extractedInputs[i];
 
       try {
+        const rawIdVal = getRawRowRecordId(payload);
+        if (rawIdVal && !isUuid(rawIdVal)) {
+          throw { statusCode: 400, message: `Validation Error: Record ID '${rawIdVal}' is not a valid UUID format.` };
+        }
+        const candidateId = rawIdVal;
+        let existingRecord = candidateId ? existingRecordsByIdMap.get(candidateId) : null;
+
+        // External-ID resolution for Segments if no direct UUID match was found
+        const rowSegId = isSegmentObject ? String(payload.hubspot_segment_id ?? (payload.data && payload.data.hubspot_segment_id) ?? '').trim() : '';
+        const rowListId = isSegmentObject ? String(payload.hubspot_list_id ?? (payload.data && payload.data.hubspot_list_id) ?? '').trim() : '';
+
+        if (!existingRecord && isSegmentObject) {
+          let segMatch = null;
+          let listMatch = null;
+
+          // 1. Primary external matching key: hubspot_segment_id (ILS Segment ID)
+          if (rowSegId) {
+            const matches = existingBySegmentIdMap.get(rowSegId.toLowerCase()) || [];
+            if (matches.length > 1) {
+              throw { statusCode: 400, message: `Ambiguity Error: Multiple segments found with HubSpot Segment ID '${rowSegId}'.` };
+            }
+            if (matches.length === 1) {
+              segMatch = matches[0];
+            }
+          }
+
+          // 2. Secondary fallback matching key: hubspot_list_id (Legacy List ID)
+          if (rowListId) {
+            const matches = existingByListIdMap.get(rowListId.toLowerCase()) || [];
+            if (matches.length > 1) {
+              throw { statusCode: 400, message: `Ambiguity Error: Multiple segments found with HubSpot List ID '${rowListId}'.` };
+            }
+            if (matches.length === 1) {
+              listMatch = matches[0];
+            }
+          }
+
+          // 3. Detect conflicting identifiers: both keys provide a match but point to different records
+          if (segMatch && listMatch && segMatch.id !== listMatch.id) {
+            throw {
+              statusCode: 400,
+              message: `Ambiguity Error: Conflicting identifiers. HubSpot Segment ID '${rowSegId}' identifies segment '${segMatch.id}', but HubSpot List ID '${rowListId}' identifies a different segment '${listMatch.id}'.`
+            };
+          }
+
+          existingRecord = segMatch || listMatch;
+        }
+
+        if (importMode === 'update_only') {
+          if (!candidateId && !rowSegId && !rowListId) {
+            throw { statusCode: 400, message: 'Record ID or external identifier (HubSpot Segment ID / List ID) is required when import mode is set to Update Only.' };
+          }
+          if (!existingRecord) {
+            const missingId = candidateId || rowSegId || rowListId;
+            throw { statusCode: 404, message: `Record '${missingId}' was not found in ${objectKey}.` };
+          }
+        } else if (importMode === 'create_only') {
+          if (existingRecord) {
+            const foundId = candidateId || rowSegId || rowListId;
+            throw { statusCode: 400, message: `Record with identifier '${foundId}' already exists. Import mode is set to Create Only.` };
+          }
+        }
+
+        const isUpdateRow = Boolean(existingRecord && (importMode === 'upsert' || importMode === 'update_only'));
+
         const cleanPayload = {};
         for (const [pk, pv] of Object.entries(payload)) {
           cleanPayload[pk] = cleanImportValue(pv);
         }
         delete cleanPayload.__rowNum;
+        ID_KEYS.forEach(k => delete cleanPayload[k]);
+
+        if (isSegmentObject) {
+          // Normalize and strictly validate Object Type values:
+          // 0-1 -> contact, 0-2 -> company, 0-3 -> deal, or lead
+          if (cleanPayload.target_object_type !== undefined && cleanPayload.target_object_type !== null && String(cleanPayload.target_object_type).trim() !== '') {
+            const rawTarget = String(cleanPayload.target_object_type).trim();
+            const lowerTarget = rawTarget.toLowerCase();
+            if (rawTarget === '0-1' || lowerTarget === 'contact' || lowerTarget === 'contacts') {
+              cleanPayload.target_object_type = 'contact';
+            } else if (rawTarget === '0-2' || lowerTarget === 'company' || lowerTarget === 'companies') {
+              cleanPayload.target_object_type = 'company';
+            } else if (rawTarget === '0-3' || lowerTarget === 'deal' || lowerTarget === 'deals') {
+              cleanPayload.target_object_type = 'deal';
+            } else if (lowerTarget === 'lead' || lowerTarget === 'leads') {
+              cleanPayload.target_object_type = 'lead';
+            } else {
+              throw { statusCode: 400, message: `Validation Error: Unrecognized target_object_type '${rawTarget}'. Allowed values are 0-1 (contact), 0-2 (company), 0-3 (deal), or lead.` };
+            }
+          }
+
+          // Validate and normalize Processing Type dynamically from field metadata
+          if (cleanPayload.hubspot_processing_type !== undefined && cleanPayload.hubspot_processing_type !== null && String(cleanPayload.hubspot_processing_type).trim() !== '') {
+            const rawProc = String(cleanPayload.hubspot_processing_type).trim();
+            const procDef = (fields || []).find((f) => (f.name || f.api_name) === 'hubspot_processing_type');
+            const allowedOptions = procDef?.options || procDef?.picklist_values;
+
+            if (!Array.isArray(allowedOptions) || allowedOptions.length === 0) {
+              throw {
+                statusCode: 400,
+                message: `Validation Error: Picklist configuration for '${procDef?.label || 'Processing Type'}' is missing or has no configured options. Cannot accept value '${rawProc}'.`
+              };
+            }
+
+            const matchedOption = allowedOptions.find((opt) => String(opt).trim().toLowerCase() === rawProc.toLowerCase());
+            if (matchedOption) {
+              cleanPayload.hubspot_processing_type = matchedOption;
+            } else {
+              throw {
+                statusCode: 400,
+                message: `Validation Error: Invalid value '${rawProc}' for '${procDef?.label || 'Processing Type'}'. Allowed options are: ${allowedOptions.join(', ')}.`
+              };
+            }
+          }
+
+          // Validate and parse source_record_count: Number; non-negative integer
+          if (cleanPayload.source_record_count !== undefined && cleanPayload.source_record_count !== null && String(cleanPayload.source_record_count).trim() !== '') {
+            const parsedCount = Number(cleanPayload.source_record_count);
+            if (isNaN(parsedCount) || !Number.isInteger(parsedCount) || parsedCount < 0) {
+              throw { statusCode: 400, message: `Validation Error: 'source_record_count' must be a non-negative integer.` };
+            }
+            cleanPayload.source_record_count = parsedCount;
+          }
+
+          // Validate and parse 7-Day Change: signed integer (supports negative numbers like -4)
+          if (cleanPayload.seven_day_change !== undefined && cleanPayload.seven_day_change !== null && String(cleanPayload.seven_day_change).trim() !== '') {
+            const parsedChange = Number(cleanPayload.seven_day_change);
+            if (isNaN(parsedChange) || !Number.isInteger(parsedChange)) {
+              throw { statusCode: 400, message: `Validation Error: 'seven_day_change' must be an integer.` };
+            }
+            cleanPayload.seven_day_change = parsedChange;
+          }
+
+          // Validate and parse decimal metric fields (percentages, similarity scores)
+          ['email_click_through_rate', 'email_open_rate', 'lookalike_similarity_score'].forEach((numKey) => {
+            if (cleanPayload[numKey] !== undefined && cleanPayload[numKey] !== null && String(cleanPayload[numKey]).trim() !== '') {
+              const parsedVal = parseFloat(cleanPayload[numKey]);
+              if (isNaN(parsedVal)) {
+                throw { statusCode: 400, message: `Validation Error: '${numKey}' must be a valid number.` };
+              }
+              cleanPayload[numKey] = parsedVal;
+            }
+          });
+
+          // Validate and parse integer counts/versions
+          ['hubspot_used_in_count', 'hubspot_segment_version'].forEach((intKey) => {
+            if (cleanPayload[intKey] !== undefined && cleanPayload[intKey] !== null && String(cleanPayload[intKey]).trim() !== '') {
+              const parsedVal = Number(cleanPayload[intKey]);
+              if (isNaN(parsedVal) || !Number.isInteger(parsedVal)) {
+                throw { statusCode: 400, message: `Validation Error: '${intKey}' must be an integer.` };
+              }
+              cleanPayload[intKey] = parsedVal;
+            }
+          });
+
+          // Handle 'Type: Active' boolean separately from processing type
+          if (cleanPayload['Type: Active'] !== undefined && cleanPayload.hubspot_type_active === undefined) {
+            cleanPayload.hubspot_type_active = cleanPayload['Type: Active'];
+          }
+          delete cleanPayload['Type: Active'];
+          delete cleanPayload['type:_active'];
+          delete cleanPayload['type_active'];
+          delete cleanPayload['type: active'];
+
+          // Parse boolean fields (TRUE/FALSE, 1/0, yes/no)
+          ['hubspot_type_active', 'is_read_only', 'generated_with_ai'].forEach((boolKey) => {
+            if (cleanPayload[boolKey] !== undefined && cleanPayload[boolKey] !== null && String(cleanPayload[boolKey]).trim() !== '') {
+              const lower = String(cleanPayload[boolKey]).trim().toLowerCase();
+              cleanPayload[boolKey] = (lower === 'true' || lower === '1' || lower === 'yes');
+            }
+          });
+
+          // Parse datetime fields to standard ISO-8601 strings
+          const dateKeys = [
+            'hubspot_created_at', 'hubspot_object_created_at',
+            'hubspot_updated_at', 'hubspot_object_last_modified_at',
+            'last_record_added_at', 'last_record_removed_at', 'owner_assigned_date'
+          ];
+          dateKeys.forEach((dKey) => {
+            if (cleanPayload[dKey] !== undefined && cleanPayload[dKey] !== null && String(cleanPayload[dKey]).trim() !== '') {
+              const dStr = String(cleanPayload[dKey]).trim();
+              const dParsed = new Date(dStr);
+              if (!isNaN(dParsed.getTime())) {
+                cleanPayload[dKey] = dParsed.toISOString();
+              }
+            }
+          });
+
+          // Preserve raw HubSpot Record ID in hubspot_record_id and block mapping to internal id
+          if (cleanPayload['Record ID'] !== undefined && cleanPayload.hubspot_record_id === undefined) {
+            cleanPayload.hubspot_record_id = cleanPayload['Record ID'];
+          }
+          delete cleanPayload['Record ID'];
+          delete cleanPayload.record_id;
+
+          // In-CSV duplicate detection for HubSpot external identifiers
+          if (rowSegId) {
+            const normSeg = rowSegId.toLowerCase();
+            const prevRow = seenCsvSegmentIdsMap.get(normSeg);
+            if (prevRow !== undefined && prevRow !== rowNum) {
+              throw { statusCode: 400, message: `Validation Error: Duplicate HubSpot Segment ID '${rowSegId}' found within the import payload (rows ${prevRow} and ${rowNum}).` };
+            }
+            seenCsvSegmentIdsMap.set(normSeg, rowNum);
+          }
+          if (rowListId) {
+            const normList = rowListId.toLowerCase();
+            const prevRow = seenCsvListIdsMap.get(normList);
+            if (prevRow !== undefined && prevRow !== rowNum) {
+              throw { statusCode: 400, message: `Validation Error: Duplicate HubSpot List ID '${rowListId}' found within the import payload (rows ${prevRow} and ${rowNum}).` };
+            }
+            seenCsvListIdsMap.set(normList, rowNum);
+          }
+        }
 
         // Canonical name derivation (run BEFORE required-field validation)
         const fnInput = (cleanPayload.first_name || '').trim();
@@ -1604,9 +1993,21 @@ const objectService = {
         validateEmailFormats(cleanPayload, fields, { isBulkImport: true });
 
         // Required field validation
-        for (const field of fields) {
-          if (field.required && field.type !== 'lookup' && (cleanPayload[field.name] === undefined || cleanPayload[field.name] === '')) {
-            throw { statusCode: 400, message: `Validation Error: Field '${field.label || field.name}' is required for ${objectKey}.` };
+        if (!isUpdateRow) {
+          for (const field of fields) {
+            if (field.required && field.type !== 'lookup' && (cleanPayload[field.name] === undefined || cleanPayload[field.name] === '')) {
+              throw { statusCode: 400, message: `Validation Error: Field '${field.label || field.name}' is required for ${objectKey}.` };
+            }
+          }
+        } else {
+          for (const field of fields) {
+            const existingVal = existingRecord[field.name] !== undefined ? existingRecord[field.name] : (existingRecord.data && existingRecord.data[field.name]);
+            const newVal = cleanPayload[field.name];
+            const hasExisting = existingVal !== undefined && existingVal !== null && String(existingVal).trim() !== '';
+            const hasNew = newVal !== undefined && newVal !== null && String(newVal).trim() !== '';
+            if (field.required && field.type !== 'lookup' && !hasExisting && !hasNew) {
+              throw { statusCode: 400, message: `Validation Error: Field '${field.label || field.name}' is required for ${objectKey}.` };
+            }
           }
         }
 
@@ -1615,23 +2016,28 @@ const objectService = {
           const rawVal = cleanPayload[f.name];
           if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '') {
             const normVal = String(rawVal).trim().toLowerCase();
-            const seenSet = seenCsvValuesMap.get(f.name);
-            const dbSet = existingDbValuesMap.get(f.name);
+            const seenMap = seenCsvValuesMap.get(f.name);
+            const dbMap = existingDbValuesMap.get(f.name);
 
-            if (seenSet.has(normVal)) {
-              throw { statusCode: 400, message: `Validation Error: Duplicate ${f.label || f.name} '${rawVal}' found within the import payload.` };
+            const prevSeenRow = seenMap.get(normVal);
+            if (prevSeenRow !== undefined && prevSeenRow !== rowNum) {
+              throw { statusCode: 400, message: `Validation Error: Duplicate ${f.label || f.name} '${rawVal}' found within the import payload (rows ${prevSeenRow} and ${rowNum}).` };
             }
-            if (dbSet.has(normVal)) {
+
+            const dbOwnerId = dbMap.get(normVal);
+            if (dbOwnerId && (!isUpdateRow || dbOwnerId !== existingRecord.id)) {
               throw { statusCode: 400, message: `Validation Error: ${f.label || f.name} '${rawVal}' already exists.` };
             }
-            seenSet.add(normVal);
+
+            seenMap.set(normVal, rowNum);
           }
         }
 
         // Custom validation rules (in-memory)
         const vErrors = [];
+        const payloadToValidate = isUpdateRow ? { ...(existingRecord.data || {}), ...cleanPayload } : cleanPayload;
         (validationRules || []).forEach(rule => {
-          const isValid = validationRuleService.evaluateRule(rule, cleanPayload);
+          const isValid = validationRuleService.evaluateRule(rule, payloadToValidate);
           if (!isValid) {
             vErrors.push(rule.error_message || `Validation rule '${rule.rule_name}' failed.`);
           }
@@ -1641,6 +2047,8 @@ const objectService = {
         }
 
         const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = cleanPayload;
+        ID_KEYS.forEach(k => delete customData[k]);
+
         let resolvedName = '';
         if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
           const candidate = cleanPayload.name || cleanPayload.company_name || cleanPayload.account_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.company_name));
@@ -1650,16 +2058,16 @@ const objectService = {
           const fn = String(cleanPayload.first_name || (cleanPayload.data && cleanPayload.data.first_name) || '').trim();
           const ln = String(cleanPayload.last_name || (cleanPayload.data && cleanPayload.data.last_name) || '').trim();
           const combined = `${fn} ${ln}`.trim();
-          resolvedName = explicitName || combined || (!isUuid(cleanPayload.email) && cleanPayload.email ? String(cleanPayload.email).split('@')[0] : 'Contact');
+          resolvedName = explicitName || combined || (!isUuid(cleanPayload.email) && cleanPayload.email ? String(cleanPayload.email).split('@')[0] : (isUpdateRow ? existingRecord.name : 'Contact'));
         } else if (cleanKey === 'deal' || cleanKey === 'opportunity' || cleanKey === 'deals' || cleanKey === 'opportunities') {
           const candidate = cleanPayload.name || cleanPayload.deal_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.deal_name));
-          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : 'New Deal';
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : (isUpdateRow ? existingRecord.name : 'New Deal');
         } else {
           const candidate = cleanPayload.name || cleanPayload.title || cleanPayload.subject || (cleanPayload.data && cleanPayload.data.name);
-          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : 'Untitled';
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : (isUpdateRow ? existingRecord.name : 'Untitled');
         }
 
-        if (!resolvedName) resolvedName = (!isUuid(name) && String(name || '').trim()) ? String(name).trim() : 'Untitled';
+        if (!resolvedName) resolvedName = (!isUuid(name) && String(name || '').trim()) ? String(name).trim() : (isUpdateRow ? existingRecord.name : 'Untitled');
         customData.name = resolvedName;
 
         // Bi-directional alias syncing
@@ -1688,7 +2096,6 @@ const objectService = {
             resolvedParent = parentRow.id;
             resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || 'Company';
           } else {
-            // Non-UUID input passed in companyIdInput (e.g. external numeric ID like '345663697623')
             let extMatches = [];
             for (const k of getNormalizedKeys(inputVal)) {
               if (companyByExternalIdMap.has(k)) {
@@ -1737,6 +2144,9 @@ const objectService = {
               throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
             }
           }
+        } else if (isUpdateRow) {
+          resolvedParent = existingRecord.parent_id;
+          resolvedParentName = existingRecord.data?.company_name || null;
         }
 
         if (resolvedParent) {
@@ -1746,9 +2156,11 @@ const objectService = {
           customData.Company_id = resolvedParent;
           if (resolvedParentName) customData.company_name = resolvedParentName;
         } else if (!isCompanyObject) {
-          customData.company = null; customData.company_id = null; customData.Company = null; customData.Company_id = null;
-          if (relInputs.companyIdInput !== undefined) customData.company_name = null;
-          else customData.company_name = resolvedParentName || null;
+          if (!isUpdateRow) {
+            customData.company = null; customData.company_id = null; customData.Company = null; customData.Company_id = null;
+            if (relInputs.companyIdInput !== undefined) customData.company_name = null;
+            else customData.company_name = resolvedParentName || null;
+          }
         } else {
           customData.company_name = resolvedName;
         }
@@ -1776,8 +2188,8 @@ const objectService = {
             resolvedSecondaryName = secRow.name || secRow.data?.name || secRow.data?.contact_name || 'Contact';
           }
         } else if (relInputs.contactNameInput) {
-          const cleanName = relInputs.contactNameInput.trim().toLowerCase();
-          const matches = contactByNameMap.get(cleanName) || [];
+          const cleanContactName = relInputs.contactNameInput.trim().toLowerCase();
+          const matches = contactByNameMap.get(cleanContactName) || [];
           if (matches.length > 1) {
             throw { statusCode: 400, message: `Validation Error: Multiple Contacts found with the name '${relInputs.contactNameInput}'. Please provide Contact ID.` };
           }
@@ -1792,6 +2204,9 @@ const objectService = {
               resolvedSecondaryName = relInputs.contactNameInput;
             }
           }
+        } else if (isUpdateRow) {
+          resolvedSecondary = existingRecord.secondary_parent_id;
+          resolvedSecondaryName = existingRecord.data?.contact_name || null;
         }
 
         if (resolvedSecondary) {
@@ -1801,11 +2216,125 @@ const objectService = {
           customData.Contact_id = resolvedSecondary;
           if (resolvedSecondaryName) customData.contact_name = resolvedSecondaryName;
         } else if (!isContactObject) {
-          customData.contact = null; customData.contact_id = null; customData.Contact = null; customData.Contact_id = null;
-          if (relInputs.contactIdInput !== undefined) customData.contact_name = null;
-          else customData.contact_name = resolvedSecondaryName || null;
+          if (!isUpdateRow) {
+            customData.contact = null; customData.contact_id = null; customData.Contact = null; customData.Contact_id = null;
+            if (relInputs.contactIdInput !== undefined) customData.contact_name = null;
+            else customData.contact_name = resolvedSecondaryName || null;
+          }
         } else {
           customData.contact_name = resolvedName;
+        }
+
+        // UPDATE BRANCH: Merge non-blank values into existing record and persist
+        if (isUpdateRow) {
+          const existingData = (existingRecord.data && typeof existingRecord.data === 'object') ? { ...existingRecord.data } : {};
+          const mergedCustomData = { ...existingData };
+
+          // Only merge non-blank values so empty cells in CSV don't overwrite existing values
+          for (const [k, v] of Object.entries(customData)) {
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+              mergedCustomData[k] = v;
+            }
+          }
+
+          // Ensure relationship contact_ids and _version are preserved and cannot be overwritten by CSV import
+          if (cleanKey.includes('segment')) {
+            delete customData.contact_ids;
+            delete customData._version;
+            if (existingData.contact_ids && Array.isArray(existingData.contact_ids)) {
+              mergedCustomData.contact_ids = existingData.contact_ids;
+            } else {
+              mergedCustomData.contact_ids = [];
+            }
+            if (existingData._version !== undefined) {
+              mergedCustomData._version = existingData._version;
+            } else {
+              mergedCustomData._version = 1;
+            }
+          }
+
+          let finalName = existingRecord.name;
+          if (cleanPayload.name && String(cleanPayload.name).trim() !== '') {
+            finalName = String(cleanPayload.name).trim();
+          } else if (cleanPayload.first_name || cleanPayload.last_name) {
+            const fn = String(cleanPayload.first_name || mergedCustomData.first_name || '').trim();
+            const ln = String(cleanPayload.last_name || mergedCustomData.last_name || '').trim();
+            const comb = `${fn} ${ln}`.trim();
+            if (comb) finalName = comb;
+          }
+          mergedCustomData.name = finalName;
+
+          if (resolvedParent) {
+            mergedCustomData.company = resolvedParent;
+            mergedCustomData.company_id = resolvedParent;
+            mergedCustomData.Company = resolvedParent;
+            mergedCustomData.Company_id = resolvedParent;
+            if (resolvedParentName) mergedCustomData.company_name = resolvedParentName;
+          }
+
+          if (resolvedSecondary) {
+            mergedCustomData.contact = resolvedSecondary;
+            mergedCustomData.contact_id = resolvedSecondary;
+            mergedCustomData.Contact = resolvedSecondary;
+            mergedCustomData.Contact_id = resolvedSecondary;
+            if (resolvedSecondaryName) mergedCustomData.contact_name = resolvedSecondaryName;
+          }
+
+          const statusVal = (status && String(status).trim() !== '') ? status : existingRecord.status;
+          const ownerVal = (owner_id && String(owner_id).trim() !== '') ? owner_id : existingRecord.owner_id;
+
+          if (dryRun) {
+            updatedCount++;
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'dry_run',
+              recordId: existingRecord.id,
+              error: null
+            });
+          } else {
+            const updatePayload = {
+              name: finalName,
+              status: statusVal,
+              owner_id: ownerVal,
+              parent_id: resolvedParent,
+              secondary_parent_id: resolvedSecondary,
+              data: mergedCustomData,
+              updated_by: userId || null,
+              updated_at: new Date().toISOString()
+            };
+
+            const { data: updatedRow, error: updateErr } = await dbClient
+              .from('universal_table')
+              .update(updatePayload)
+              .eq('id', existingRecord.id)
+              .eq('organization_id', organizationId)
+              .select()
+              .single();
+
+            if (updateErr) {
+              throw { statusCode: 400, message: `Failed to update record '${existingRecord.id}': ${updateErr.message}` };
+            }
+
+            const normRecord = objectService.normalizeRecord(updatedRow);
+            updatedCount++;
+            validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'updated',
+              recordId: normRecord.id,
+              error: null
+            });
+          }
+          continue;
+        }
+
+        if (cleanKey.includes('segment')) {
+          delete customData.contact_ids;
+          delete customData._version;
+          customData.contact_ids = [];
+          customData._version = 1;
         }
 
         const newRow = {
@@ -1819,7 +2348,6 @@ const objectService = {
           data: customData,
           created_by: userId || null,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
           __rowNum: rowNum,
           __rowIdentifier: rowIdentifier
         };
@@ -1827,13 +2355,59 @@ const objectService = {
         validNewRows.push(newRow);
       } catch (err) {
         failedCount++;
-        const errMsg = err.message || err.error || `Failed to create ${objectKey} record.`;
+        const errMsg = err.message || err.error || `Failed to process ${objectKey} record.`;
         errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg });
         rowResults.push({ rowNumber: rowNum, identifier: String(rowIdentifier).trim(), status: 'failed', recordId: null, error: errMsg });
       }
     }
 
-    // 6. Bulk Insert Valid Rows into universal_table with Controlled Backend Isolation
+    // 6. Pre-insert concurrency deduplication for Segments
+    if (validNewRows.length > 0 && !dryRun && isSegmentObject) {
+      const segIds = validNewRows.map(r => r.data?.hubspot_segment_id).filter(Boolean);
+      const listIds = validNewRows.map(r => r.data?.hubspot_list_id).filter(Boolean);
+      if (segIds.length > 0 || listIds.length > 0) {
+        const { data: latestRows } = await dbClient
+          .from('universal_table')
+          .select('id, data')
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', objDef.id)
+          .eq('is_deleted', false);
+
+        if (latestRows && latestRows.length > 0) {
+          const latestSegMap = new Map();
+          const latestListMap = new Map();
+          latestRows.forEach(r => {
+            const sid = String(r.data?.hubspot_segment_id || '').trim().toLowerCase();
+            const lid = String(r.data?.hubspot_list_id || '').trim().toLowerCase();
+            if (sid) latestSegMap.set(sid, r.id);
+            if (lid) latestListMap.set(lid, r.id);
+          });
+
+          for (let idx = validNewRows.length - 1; idx >= 0; idx--) {
+            const r = validNewRows[idx];
+            const rSeg = String(r.data?.hubspot_segment_id || '').trim().toLowerCase();
+            const rList = String(r.data?.hubspot_list_id || '').trim().toLowerCase();
+            const collisionId = (rSeg && latestSegMap.get(rSeg)) || (rList && latestListMap.get(rList));
+            if (collisionId) {
+              const collidingKey = (rSeg && latestSegMap.has(rSeg)) ? r.data.hubspot_segment_id : r.data.hubspot_list_id;
+              failedCount++;
+              const errMsg = `Unique Constraint Violation: Segment with external identifier '${collidingKey}' was already created concurrently.`;
+              errorDetails.push({ rowNum: r.__rowNum, identifier: String(r.__rowIdentifier).trim(), reason: errMsg });
+              rowResults.push({
+                rowNumber: r.__rowNum,
+                identifier: String(r.__rowIdentifier).trim(),
+                status: 'failed',
+                recordId: null,
+                error: errMsg
+              });
+              validNewRows.splice(idx, 1);
+            }
+          }
+        }
+      }
+    }
+
+    // 7. Bulk Insert Valid Rows into universal_table with Controlled Backend Isolation
     if (validNewRows.length > 0 && !dryRun) {
       const rowsToInsert = validNewRows.map(r => {
         const copy = { ...r };
@@ -1927,9 +2501,10 @@ const objectService = {
     rowResults.sort((a, b) => a.rowNumber - b.rowNumber);
 
     return {
-      success: createdCount > 0,
+      success: (createdCount > 0 || updatedCount > 0),
       totalProcessed: recordsArray.length,
       createdCount,
+      updatedCount,
       failedCount,
       skippedCount: 0,
       data: validPayloadsToReturn,

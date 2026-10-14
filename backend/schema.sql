@@ -499,6 +499,37 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 
+-- ---------------------------------------------------------
+-- 5. ORGANIZATION FIELD OVERRIDES TABLE
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.organization_field_overrides (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  field_id uuid NOT NULL,
+  picklist_values jsonb NULL,
+  field_label text NULL,
+  help_text text NULL,
+  created_by uuid NULL,
+  updated_by uuid NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT organization_field_overrides_pkey PRIMARY KEY (id),
+  CONSTRAINT organization_field_overrides_organization_id_fkey 
+    FOREIGN KEY (organization_id) REFERENCES public.organization (id) ON DELETE CASCADE,
+  CONSTRAINT organization_field_overrides_field_id_fkey 
+    FOREIGN KEY (field_id) REFERENCES public.field_definitions (id) ON DELETE CASCADE,
+  CONSTRAINT organization_field_overrides_created_by_fkey 
+    FOREIGN KEY (created_by) REFERENCES public.users (id) ON DELETE SET NULL,
+  CONSTRAINT organization_field_overrides_updated_by_fkey 
+    FOREIGN KEY (updated_by) REFERENCES public.users (id) ON DELETE SET NULL,
+  CONSTRAINT organization_field_overrides_org_field_unique 
+    UNIQUE (organization_id, field_id)
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_org_field_overrides_org_field
+  ON public.organization_field_overrides (organization_id, field_id);
+
+
 
 
 

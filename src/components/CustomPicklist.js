@@ -28,12 +28,23 @@ export default function CustomPicklist({
     return { value: String(opt), label: String(opt) };
   });
 
-  const normalizedOptions = [...rawNormalized];
-  if (value && String(value).trim() !== '' && !normalizedOptions.some((o) => o.value === String(value))) {
-    normalizedOptions.unshift({ value: String(value), label: String(value) });
-  }
+  const isValueConfigured = Boolean(
+    value !== undefined &&
+    value !== null &&
+    String(value).trim() !== '' &&
+    rawNormalized.some((o) => o.value === String(value))
+  );
 
-  const selectedOpt = normalizedOptions.find((o) => o.value === String(value));
+  const isLegacyValue = Boolean(
+    value !== undefined &&
+    value !== null &&
+    String(value).trim() !== '' &&
+    !isValueConfigured
+  );
+
+  const selectedOpt = isValueConfigured
+    ? rawNormalized.find((o) => o.value === String(value))
+    : null;
 
   const updateCoords = () => {
     if (buttonRef.current) {
@@ -80,7 +91,7 @@ export default function CustomPicklist({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredOptions = normalizedOptions.filter((o) =>
+  const filteredOptions = rawNormalized.filter((o) =>
     o.label.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -109,9 +120,9 @@ export default function CustomPicklist({
             ? '1.5px solid #ef4444'
             : '1px solid #cbd5e1',
           background: disabled ? '#f1f5f9' : '#ffffff',
-          color: selectedOpt ? '#0f172a' : '#94a3b8',
+          color: selectedOpt ? '#0f172a' : isLegacyValue ? '#b45309' : '#94a3b8',
           fontSize: '0.88rem',
-          fontWeight: selectedOpt ? 600 : 400,
+          fontWeight: (selectedOpt || isLegacyValue) ? 600 : 400,
           cursor: disabled ? 'not-allowed' : 'pointer',
           boxShadow: open
             ? '0 0 0 3.5px rgba(99, 102, 241, 0.15)'
@@ -120,8 +131,17 @@ export default function CustomPicklist({
           ...style,
         }}
       >
-        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>
-          {selectedOpt ? selectedOpt.label : placeholder}
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {selectedOpt ? (
+            selectedOpt.label
+          ) : isLegacyValue ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span>{String(value)}</span>
+              <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>Legacy</span>
+            </span>
+          ) : (
+            placeholder
+          )}
         </span>
         {open ? (
           <ChevronUp size={16} style={{ color: '#6366f1', flexShrink: 0 }} />
@@ -148,7 +168,7 @@ export default function CustomPicklist({
             }}
           >
             {/* Search Input Bar (if enabled and options > 5) */}
-            {searchable && normalizedOptions.length > 5 && (
+            {searchable && rawNormalized.length > 5 && (
               <div style={{ padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <Search size={13} style={{ position: 'absolute', left: 10, color: '#94a3b8' }} />
@@ -177,6 +197,24 @@ export default function CustomPicklist({
                     />
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Non-selectable legacy notice if current value is unconfigured */}
+            {isLegacyValue && (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  margin: '8px 10px 4px',
+                  fontSize: 11.5,
+                  color: '#92400e',
+                  backgroundColor: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  borderRadius: 8,
+                  lineHeight: 1.4,
+                }}
+              >
+                Current saved value: <strong>{String(value)}</strong> (legacy). Select an allowed option below:
               </div>
             )}
 

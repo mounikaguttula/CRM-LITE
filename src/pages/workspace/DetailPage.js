@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { apiGet, apiPost, apiPut, apiDelete } from '../../api/client';
 import AccessDenied from '../../components/AccessDenied';
+import CSVFieldMappingModal from '../../components/CSVFieldMappingModal';
 import {
   Edit3,
   Mail,
@@ -32,6 +33,9 @@ import {
   AlertTriangle,
   MapPin,
   Sparkles,
+  Download,
+  UploadCloud,
+  UserMinus,
 } from 'lucide-react';
 
 /* ═══════════ DASHBOARD COLOR SYSTEM (UI only) ═══════════ */
@@ -447,6 +451,11 @@ function deriveHeaderTiles(objectTypeId, record, currentUser, organization, comp
 
     const rev = getRealVal(['annual_revenue', 'revenue']);
     if (rev) tiles.push({ label: 'Revenue', value: formatKPIValue(rev, true), color: '#f6d365' });
+  } else if (type.includes('segment')) {
+    const targetMod = getRealVal(['target_object_type', 'target_module']) || 'contact';
+    tiles.push({ label: 'Target', value: targetMod.toUpperCase(), color: '#8b5cf6' });
+    const segType = getRealVal(['type', 'segment_type']) || 'STATIC';
+    tiles.push({ label: 'Type', value: String(segType).toUpperCase(), color: '#00b09b' });
   }
 
   // Fallback to real fields if tiles list has < 3 items
@@ -918,6 +927,13 @@ function StageProgress({ record, meta, objectTypeId, recordId, onRecordUpdated, 
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   SegmentMembersSection (Retired - Segment module manages definitions)
+   ═══════════════════════════════════════════════════════════════ */
+function SegmentMembersSection() {
+  return null;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    DetailPage
    ═══════════════════════════════════════════════════════════════ */
 function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, onClose, onEdit }) {
@@ -970,6 +986,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [parentCompany, setParentCompany] = useState(null);
   const [primaryContact, setPrimaryContact] = useState(null);
 
+  /* Segment & Contact Relationship states */
+  const [segmentContacts, setSegmentContacts] = useState([]);
+  const [associatedSegments, setAssociatedSegments] = useState([]);
+  const [allOrgContacts, setAllOrgContacts] = useState([]);
+  const [showAddSegmentContactModal, setShowAddSegmentContactModal] = useState(false);
+  const [selectedContactIdsToAdd, setSelectedContactIdsToAdd] = useState([]);
+  const [addingContacts, setAddingContacts] = useState(false);
+  const [segmentContactSearch, setSegmentContactSearch] = useState('');
+
   /* Products & Line Items state */
   const [lineItems, setLineItems] = useState([]);
   const [catalogProducts, setCatalogProducts] = useState([]);
@@ -1009,6 +1034,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
         const compList = Array.isArray(compListRes) ? compListRes : compListRes?.data || [];
         const contactList = Array.isArray(contactListRes) ? contactListRes : contactListRes?.data || [];
+        setAllOrgContacts(contactList);
         const dealList = Array.isArray(dealListRes) ? dealListRes : dealListRes?.data || [];
         const userList = Array.isArray(userListRes) ? userListRes : userListRes?.data || [];
 
@@ -1072,6 +1098,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               (compId && (String(d.company_id) === String(compId) || String(d.parent_id) === String(compId)))
           );
           setRelatedDeals(matchedDeals);
+
+          apiGet(`/api/segments/by-contact/${curId}`)
+            .then((res) => {
+              const segs = Array.isArray(res) ? res : res?.data || [];
+              setAssociatedSegments(segs);
+            })
+            .catch(() => setAssociatedSegments([]));
+        } else if (currentObjKey.includes('segment')) {
+          apiGet(`/api/segments/${curId}/contacts`)
+            .then((res) => {
+              const cts = res?.data?.contacts || res?.contacts || [];
+              setSegmentContacts(cts);
+            })
+            .catch(() => setSegmentContacts([]));
         } else if (currentObjKey.includes('campaign')) {
           const formList = Array.isArray(formRes) ? formRes : formRes?.data || [];
           setAllForms(formList);
@@ -1264,6 +1304,65 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       showToast('Failed to link form.', 'error');
     } finally {
       setLinkingForm(false);
+    }
+  };
+
+  /* Segment & Contact Relationship Handlers */
+  const handleOpenAddSegmentContactsModal = () => {
+    setSelectedContactIdsToAdd([]);
+    setSegmentContactSearch('');
+    setShowAddSegmentContactModal(true);
+  };
+
+  const handleAddSegmentContactsSubmit = async () => {
+    if (!selectedContactIdsToAdd.length) return;
+    setAddingContacts(true);
+    try {
+      const res = await apiPost(`/api/segments/${recordId}/contacts`, {
+        contact_ids: selectedContactIdsToAdd,
+      });
+      const updatedContacts = res?.data?.contacts || res?.contacts || [];
+      setSegmentContacts(updatedContacts);
+      if (res?.data?.segment) {
+        setRecord((prev) => ({
+          ...prev,
+          ...res.data.segment,
+          data: {
+            ...(prev?.data || {}),
+            ...(res.data.segment?.data || {}),
+          },
+        }));
+      }
+      setShowAddSegmentContactModal(false);
+      setSelectedContactIdsToAdd([]);
+      showToast(`Successfully added ${selectedContactIdsToAdd.length} contact(s) to segment.`, 'success');
+    } catch (err) {
+      console.error('Failed to add contacts to segment:', err);
+      showToast(err.response?.data?.message || err.message || 'Failed to add contacts to segment.', 'error');
+    } finally {
+      setAddingContacts(false);
+    }
+  };
+
+  const handleRemoveSegmentContact = async (contactId) => {
+    if (!window.confirm('Are you sure you want to remove this contact from the segment?')) return;
+    try {
+      const res = await apiDelete(`/api/segments/${recordId}/contacts/${contactId}`);
+      setSegmentContacts((prev) => prev.filter((c) => String(c.id) !== String(contactId)));
+      if (res?.data?.segment) {
+        setRecord((prev) => ({
+          ...prev,
+          ...res.data.segment,
+          data: {
+            ...(prev?.data || {}),
+            ...(res.data.segment?.data || {}),
+          },
+        }));
+      }
+      showToast('Contact removed from segment.', 'success');
+    } catch (err) {
+      console.error('Failed to remove contact from segment:', err);
+      showToast(err.response?.data?.message || err.message || 'Failed to remove contact from segment.', 'error');
     }
   };
 
@@ -2054,8 +2153,8 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     return <span style={{ fontWeight: 600, color: displayVal === '—' ? C.dim : C.text }}>{displayVal}</span>;
   };
 
-  const tabs = ['Details', 'Related'];
   const currentObjKey = String(objectTypeId).toLowerCase();
+  const tabs = ['Details', 'Related'];
 
   /* All fields with Created Date/By, Modified Date/By pushed to VERY END */
   const mergedFields = getAllMergedFields(meta.fields, record, objectTypeId);
@@ -2804,6 +2903,70 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                       </div>
                     )}
                   </section>
+
+                  {/* SEGMENTS ASSOCIATED WITH CONTACT */}
+                  <section style={{
+                    borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                    boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                  }}>
+                    <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                          <Layers size={18} />
+                        </span>
+                        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                          SEGMENTS
+                        </h3>
+                        <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                          {associatedSegments.length}
+                        </span>
+                      </div>
+                    </header>
+
+                    {associatedSegments.length > 0 ? (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                              <th style={{ padding: '12px 20px' }}>Segment Name</th>
+                              <th style={{ padding: '12px 16px' }}>Type</th>
+                              <th style={{ padding: '12px 16px' }}>Status</th>
+                              <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {associatedSegments.map((seg) => (
+                              <tr key={seg.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                                <td style={{ padding: '14px 20px', fontWeight: 700 }}>
+                                  <Link to={`/workspace/object/segment/${seg.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                    <Layers size={14} />
+                                    {seg.name || seg.data?.name || 'Untitled Segment'}
+                                  </Link>
+                                </td>
+                                <td style={{ padding: '14px 16px' }}>
+                                  <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: '#f1f5f9', color: '#475569' }}>
+                                    {seg.type || seg.data?.type || seg.data?.hubspot_processing_type || 'Static'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '14px 16px' }}>
+                                  {statusBadge(seg.status || seg.data?.status || 'Active')}
+                                </td>
+                                <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                  <Link to={`/workspace/object/segment/${seg.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                    View <ChevronRight size={14} />
+                                  </Link>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                        No segments associated with this contact yet.
+                      </div>
+                    )}
+                  </section>
                 </>
               )}
 
@@ -3012,7 +3175,98 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </div>
               )}
 
-              {!currentObjKey.includes('company') && !currentObjKey.includes('account') && !currentObjKey.includes('contact') && !currentObjKey.includes('deal') && (
+              {currentObjKey.includes('segment') && (
+                <section style={{
+                  borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                  boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                }}>
+                  <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        <Users size={18} />
+                      </span>
+                      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                        RELATED CONTACTS
+                      </h3>
+                      <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        {segmentContacts.length}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={handleOpenAddSegmentContactsModal}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                        color: '#fff', background: C.primaryGrad,
+                      }}
+                    >
+                      <Plus size={15} /> Add Contacts
+                    </button>
+                  </header>
+
+                  {segmentContacts.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                            <th style={{ padding: '12px 20px' }}>Contact Name</th>
+                            <th style={{ padding: '12px 16px' }}>Email</th>
+                            <th style={{ padding: '12px 16px' }}>Phone</th>
+                            <th style={{ padding: '12px 16px' }}>Company</th>
+                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {segmentContacts.map((ct) => (
+                            <tr key={ct.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '14px 20px', fontWeight: 700 }}>
+                                <Link to={`/workspace/object/contact/${ct.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <User size={14} />
+                                  {ct.name || `${ct.first_name || ''} ${ct.last_name || ''}`.trim() || 'Unnamed Contact'}
+                                </Link>
+                              </td>
+                              <td style={{ padding: '14px 16px', color: C.dim }}>
+                                {ct.email || ct.data?.email || '—'}
+                              </td>
+                              <td style={{ padding: '14px 16px', color: C.dim }}>
+                                {ct.phone || ct.data?.phone || ct.mobile || '—'}
+                              </td>
+                              <td style={{ padding: '14px 16px', color: C.text, fontWeight: 600 }}>
+                                {ct.company_name || ct.data?.company_name || '—'}
+                              </td>
+                              <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                  <Link to={`/workspace/object/contact/${ct.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                    View <ChevronRight size={14} />
+                                  </Link>
+                                  <button
+                                    onClick={() => handleRemoveSegmentContact(ct.id)}
+                                    title="Remove from Segment"
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                      padding: '6px 10px', borderRadius: 8, border: '1px solid #fee2e2',
+                                      background: '#fff1f2', color: '#e11d48', cursor: 'pointer',
+                                    }}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No contacts added to this segment yet. Click "Add Contacts" to associate contacts.
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {!currentObjKey.includes('company') && !currentObjKey.includes('account') && !currentObjKey.includes('contact') && !currentObjKey.includes('deal') && !currentObjKey.includes('campaign') && !currentObjKey.includes('form') && !currentObjKey.includes('segment') && (
                 <section style={{
                   borderRadius: 22, border: `1px dashed ${C.border}`, background: 'rgba(255,255,255,.6)',
                   padding: '64px 26px', textAlign: 'center', color: C.dim, fontSize: 14,
@@ -3729,6 +3983,153 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               >
                 {linkingForm ? 'Linking...' : 'Link Form'}
               </button>
+            </footer>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Add Contacts to Segment Modal ── */}
+      {showAddSegmentContactModal && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 99999,
+          background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 560,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column', maxHeight: '85vh',
+            border: '1px solid #e2e8f0',
+          }}>
+            <header style={{
+              padding: '18px 24px', borderBottom: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: '#f8fafc',
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0f172a' }}>
+                  Add Contacts to Segment
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#64748b' }}>
+                  Select existing contacts to associate with {record?.name || 'this segment'}.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddSegmentContactModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc'
+              }}>
+                <Search size={15} color="#94a3b8" />
+                <input
+                  type="text"
+                  placeholder="Search contacts by name or email..."
+                  value={segmentContactSearch}
+                  onChange={(e) => setSegmentContactSearch(e.target.value)}
+                  style={{
+                    border: 'none', background: 'transparent', outline: 'none',
+                    fontSize: 13.5, width: '100%', color: '#1e293b'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 24px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {allOrgContacts
+                .filter((c) => {
+                  const alreadyInSegment = segmentContacts.some((sc) => String(sc.id) === String(c.id));
+                  if (alreadyInSegment) return false;
+                  if (!segmentContactSearch.trim()) return true;
+                  const q = segmentContactSearch.toLowerCase();
+                  const name = (c.name || `${c.first_name || ''} ${c.last_name || ''}`).toLowerCase();
+                  const email = (c.email || c.data?.email || '').toLowerCase();
+                  return name.includes(q) || email.includes(q);
+                })
+                .map((c) => {
+                  const isChecked = selectedContactIdsToAdd.includes(c.id);
+                  const cName = c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unnamed Contact';
+                  const cEmail = c.email || c.data?.email || '';
+                  return (
+                    <label
+                      key={c.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                        borderRadius: 10, border: `1px solid ${isChecked ? '#818cf8' : '#e2e8f0'}`,
+                        background: isChecked ? '#eef2ff' : '#ffffff',
+                        cursor: 'pointer', transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedContactIdsToAdd((prev) => [...prev, c.id]);
+                          } else {
+                            setSelectedContactIdsToAdd((prev) => prev.filter((id) => id !== c.id));
+                          }
+                        }}
+                        style={{ width: 16, height: 16, accentColor: '#6366f1' }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1e293b' }}>
+                          {cName}
+                        </div>
+                        {cEmail && (
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            {cEmail}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              {allOrgContacts.filter((c) => !segmentContacts.some((sc) => String(sc.id) === String(c.id))).length === 0 && (
+                <div style={{ textAlign: 'center', padding: '32px 16px', color: '#94a3b8', fontSize: 13.5 }}>
+                  All available contacts are already associated with this segment.
+                </div>
+              )}
+            </div>
+
+            <footer style={{
+              padding: '16px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>
+                {selectedContactIdsToAdd.length} contact(s) selected
+              </span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setShowAddSegmentContactModal(false)}
+                  disabled={addingContacts}
+                  style={{
+                    padding: '8px 16px', borderRadius: 10, border: '1px solid #cbd5e1',
+                    background: '#fff', color: '#475569', fontSize: 13.5, fontWeight: 700, cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddSegmentContactsSubmit}
+                  disabled={selectedContactIdsToAdd.length === 0 || addingContacts}
+                  style={{
+                    padding: '8px 18px', borderRadius: 10, border: 'none',
+                    background: selectedContactIdsToAdd.length === 0 ? '#cbd5e1' : C.primaryGrad,
+                    color: '#fff', fontSize: 13.5, fontWeight: 700,
+                    cursor: selectedContactIdsToAdd.length === 0 || addingContacts ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {addingContacts ? 'Adding...' : 'Add Selected'}
+                </button>
+              </div>
             </footer>
           </div>
         </div>,

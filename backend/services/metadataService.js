@@ -1,4 +1,6 @@
 const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
+const dbClient = supabaseAdmin || supabase;
 const redisClient = require('../config/redis');
 
 
@@ -35,12 +37,16 @@ const inMemoryCache = {
   }
 };
 
+// In-memory fallback and performance cache for organization field overrides
+const inMemoryOverrides = new Map();
+
 /**
  * Helper: Invalidate metadata cache in Redis & in-memory whenever metadata schema changes.
  * Also clears permissions cache so record APIs pick up fresh role data.
  */
 const invalidateMetadataCache = async (organizationId) => {
   inMemoryCache.clear();
+
   if (!redisClient || !redisClient.isOpen) return;
 
 
@@ -82,6 +88,8 @@ const CANONICAL_MAP = {
   products: 'product',
   line_item: 'line_item',
   line_items: 'line_item',
+  segment: 'segment',
+  segments: 'segment',
 };
 
 const getCanonicalObjectKey = (rawKey) => {
@@ -99,6 +107,273 @@ const getCanonicalObjectKey = (rawKey) => {
  */
 const metadataService = {
   getCanonicalObjectKey,
+
+  /**
+   * Fetch organization-specific field overrides from Supabase (or in-memory fallback).
+   */
+  getFieldOverrides: async (organizationId) => {
+    if (!organizationId) return [];
+
+    try {
+      const { data, error } = await dbClient
+        .from('organization_field_overrides')
+        .select('*')
+        .eq('organization_id', organizationId);
+
+      if (!error && Array.isArray(data)) {
+        data.forEach((row) => {
+          inMemoryOverrides.set(`${organizationId}_${row.field_id}`, row);
+        });
+        return data;
+      }
+      if (error) {
+        console.warn('⚠️ Supabase error fetching field overrides:', error.message);
+      }
+    } catch (err) {
+      console.warn('⚠️ Exception fetching field overrides:', err.message);
+    }
+
+    const results = [];
+    for (const [key, val] of inMemoryOverrides.entries()) {
+      if (val.organization_id === organizationId || key.startsWith(`${organizationId}_`)) {
+        results.push(val);
+      }
+    }
+    return results;
+  },
+
+  /**
+   * Fetch a single organization-specific field override.
+   */
+  getFieldOverride: async (organizationId, fieldId) => {
+    if (!organizationId || !fieldId) return null;
+    const cacheKey = `${organizationId}_${fieldId}`;
+    if (inMemoryOverrides.has(cacheKey)) {
+      return inMemoryOverrides.get(cacheKey);
+    }
+    if (!isUuid(fieldId)) return null;
+
+    try {
+      const { data, error } = await dbClient
+        .from('organization_field_overrides')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('field_id', fieldId)
+        .maybeSingle();
+
+      if (!error && data) {
+        inMemoryOverrides.set(cacheKey, data);
+        return data;
+      }
+      if (error) {
+        console.warn('⚠️ Supabase error fetching field override:', error.message);
+      }
+    } catch (err) {
+      console.warn('⚠️ Exception fetching field override:', err.message);
+    }
+
+    return null;
+  },
+
+  /**
+   * Save (create or update) organization-specific field override.
+   */
+  saveFieldOverride: async (organizationId, fieldId, overrideData, user = null) => {
+    const now = new Date().toISOString();
+    const userId = (user?.id && isUuid(user.id)) ? user.id : null;
+    const existing = await metadataService.getFieldOverride(organizationId, fieldId);
+    const crypto = require('crypto');
+    const overrideId = existing?.id || (crypto.randomUUID ? crypto.randomUUID() : `ov_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+
+    const record = {
+      id: overrideId,
+      organization_id: organizationId,
+      field_id: fieldId,
+      picklist_values: overrideData.picklist_values !== undefined ? overrideData.picklist_values : (existing?.picklist_values || null),
+      field_label: overrideData.field_label !== undefined ? overrideData.field_label : (existing?.field_label || null),
+      help_text: overrideData.help_text !== undefined ? overrideData.help_text : (existing?.help_text || null),
+      updated_by: userId,
+      updated_at: now,
+      created_by: existing?.created_by || userId,
+      created_at: existing?.created_at || now,
+    };
+
+    inMemoryOverrides.set(`${organizationId}_${fieldId}`, record);
+
+    if (!isUuid(fieldId)) {
+      return record;
+    }
+
+    try {
+      const { data, error } = await dbClient
+        .from('organization_field_overrides')
+        .upsert(record, { onConflict: 'organization_id,field_id' })
+        .select()
+        .maybeSingle();
+
+      if (!error && data) {
+        inMemoryOverrides.set(`${organizationId}_${fieldId}`, data);
+        return data;
+      }
+
+      if (error) {
+        console.warn('⚠️ Supabase upsert error on organization_field_overrides:', error.message);
+        // If foreign key constraint failed on user id (e.g. 23503), retry with created_by/updated_by set to null
+        if (error.code === '23503' && (record.created_by || record.updated_by)) {
+          const sanitizedRecord = { ...record, created_by: null, updated_by: null };
+          const { data: retryData, error: retryError } = await dbClient
+            .from('organization_field_overrides')
+            .upsert(sanitizedRecord, { onConflict: 'organization_id,field_id' })
+            .select()
+            .maybeSingle();
+          if (!retryError && retryData) {
+            inMemoryOverrides.set(`${organizationId}_${fieldId}`, retryData);
+            return retryData;
+          }
+          if (retryError) console.error('❌ Retry upsert error:', retryError.message);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Exception saving organization_field_overrides:', err.message);
+    }
+
+    return record;
+  },
+
+  /**
+   * Delete organization-specific field override (revert to global defaults).
+   */
+  deleteFieldOverride: async (organizationId, fieldId) => {
+    inMemoryOverrides.delete(`${organizationId}_${fieldId}`);
+    if (!isUuid(fieldId)) return true;
+
+    try {
+      const { error } = await dbClient
+        .from('organization_field_overrides')
+        .delete()
+        .eq('organization_id', organizationId)
+        .eq('field_id', fieldId);
+
+      if (error) {
+        console.warn('⚠️ Supabase delete error on organization_field_overrides:', error.message);
+      }
+    } catch (err) {
+      console.warn('⚠️ Exception deleting organization_field_overrides:', err.message);
+    }
+
+    return true;
+  },
+
+  /**
+   * Apply organization-specific field overrides to an array of field definitions.
+   * Merges picklist_values, field_label, and help_text while keeping original field metadata.
+   */
+  applyFieldOverrides: (fields, overrides) => {
+    if (!Array.isArray(fields) || !Array.isArray(overrides) || overrides.length === 0) {
+      return fields || [];
+    }
+
+    const map = new Map();
+    overrides.forEach((ov) => {
+      if (ov.field_id) {
+        map.set(String(ov.field_id).toLowerCase(), ov);
+      }
+    });
+
+    return fields.map((field) => {
+      const fId = field.id ? String(field.id).toLowerCase() : '';
+      const fName = field.name ? String(field.name).toLowerCase() : '';
+      const fApi = field.api_name ? String(field.api_name).toLowerCase() : '';
+
+      const ov = map.get(fId) || map.get(fName) || map.get(fApi);
+      if (!ov) return field;
+
+      const merged = { ...field, has_override: true, override_id: ov.id };
+      if (Array.isArray(ov.picklist_values) && ov.picklist_values.length > 0) {
+        merged.picklist_values = ov.picklist_values;
+        merged.options = ov.picklist_values;
+      }
+      if (ov.field_label) {
+        merged.label = ov.field_label;
+        merged.display_name = ov.field_label;
+      }
+      if (ov.help_text !== undefined && ov.help_text !== null) {
+        merged.help_text = ov.help_text;
+      }
+      return merged;
+    });
+  },
+
+  /**
+   * Reset organization-specific system field override to platform defaults.
+   */
+  resetFieldOverride: async (objectType, fieldId, organizationId, user = null) => {
+    if (!fieldId) throw { statusCode: 400, message: 'Field ID or name is required for reset.' };
+
+    let objDef = null;
+    if (objectType) {
+      objDef = await metadataService.getObjectTypeByApiName(objectType, organizationId);
+    }
+
+    let selectQuery = supabase.from('field_definitions').select('*');
+    if (isUuid(fieldId)) {
+      selectQuery = selectQuery.eq('id', fieldId);
+    } else {
+      selectQuery = selectQuery.eq('api_name', fieldId);
+      if (objDef?.id) selectQuery = selectQuery.eq('object_type_id', objDef.id);
+    }
+
+    const { data: fieldRows } = await selectQuery;
+    let fieldDef = fieldRows && fieldRows.length > 0 ? fieldRows[0] : null;
+
+    if (!fieldDef) {
+      const cleanId = String(fieldId || '').toLowerCase();
+      const pfMatch = PLATFORM_FIELDS.find(pf => pf.id === cleanId || pf.name === cleanId);
+      if (pfMatch) {
+        fieldDef = {
+          id: pfMatch.id,
+          api_name: pfMatch.name,
+          display_name: pfMatch.label,
+          field_type: pfMatch.type,
+          is_system: true,
+          object_type_id: objDef?.id || null,
+          organization_id: null,
+          picklist_values: pfMatch.picklist_values || null,
+        };
+      }
+    }
+
+    if (!fieldDef) {
+      throw { statusCode: 404, message: `Field '${fieldId}' not found.` };
+    }
+
+    // Delete override by ID and API name
+    await metadataService.deleteFieldOverride(organizationId, fieldDef.id);
+    if (fieldDef.api_name) {
+      await metadataService.deleteFieldOverride(organizationId, fieldDef.api_name);
+    }
+
+    // Invalidate caches
+    await invalidateMetadataCache(organizationId);
+
+    return {
+      id: fieldDef.id,
+      name: fieldDef.api_name,
+      label: fieldDef.display_name,
+      type: fieldDef.field_type === 'dropdown' ? 'picklist' : fieldDef.field_type,
+      description: fieldDef.description || '',
+      help_text: fieldDef.help_text || null,
+      placeholder: fieldDef.placeholder || null,
+      required: fieldDef.required || false,
+      readonly: fieldDef.readonly || false,
+      hidden: fieldDef.hidden || false,
+      is_system: true,
+      picklist_values: fieldDef.picklist_values || null,
+      options: fieldDef.picklist_values || null,
+      has_override: false,
+      ...extraFieldFlags(fieldDef),
+    };
+  },
 
   /**
    * Fetch object type definition by API name or ID.
@@ -333,13 +608,15 @@ const metadataService = {
     if (objDef.id) {
       let fQuery = supabase
         .from('field_definitions')
-        .select('id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values, is_unique, searchable, readonly, hidden, is_active, lookup_target_object_type_id')
+        .select('id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values, is_unique, searchable, readonly, hidden, is_active, lookup_target_object_type_id, help_text, placeholder, default_value')
         .eq('object_type_id', objDef.id)
         .order('display_order', { ascending: true });
 
 
       if (isUuid(organizationId)) {
         fQuery = fQuery.or(`organization_id.eq.${organizationId},organization_id.is.null`);
+      } else {
+        fQuery = fQuery.is('organization_id', null);
       }
 
 
@@ -362,6 +639,9 @@ const metadataService = {
             label: fieldLabel,
             type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
             description: f.description || '',
+            help_text: f.help_text || null,
+            placeholder: f.placeholder || null,
+            default_value: f.default_value || null,
             required: f.required || false,
             is_system: f.is_system || false,
             picklist_values: f.picklist_values || null,
@@ -454,11 +734,30 @@ const metadataService = {
           businessFields.push(scf);
         }
       });
+    } else if (stdLowerKey.includes('segment')) {
+      const stdSegmentFields = [
+        { id: 'f_target_object_type', name: 'target_object_type', label: 'Target Module', type: 'picklist', options: ['contact', 'lead', 'company', 'deal'], isTitle: false },
+        { id: 'f_type', name: 'type', label: 'Segment Type', type: 'picklist', options: ['static', 'dynamic'], isTitle: false },
+        { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
+        { id: 'f_hubspot_segment_id', name: 'hubspot_segment_id', label: 'HubSpot Segment ID', type: 'text', isTitle: false },
+        { id: 'f_hubspot_list_id', name: 'hubspot_list_id', label: 'HubSpot List ID', type: 'text', isTitle: false },
+        { id: 'f_source_record_count', name: 'source_record_count', label: 'List Size', type: 'number', isTitle: false },
+        { id: 'f_folder_id', name: 'folder_id', label: 'Folder ID', type: 'text', isTitle: false },
+      ];
+      stdSegmentFields.forEach((ssf) => {
+        const hasField = businessFields.some((f) => {
+          const fn = (f.name || f.api_name || '').toLowerCase();
+          return fn === ssf.name;
+        });
+        if (!hasField) {
+          businessFields.push(ssf);
+        }
+      });
     }
 
 
     // Unified collection: Platform Fields + Business Fields
-    const allFields = [...PLATFORM_FIELDS];
+    let allFields = [...PLATFORM_FIELDS];
     businessFields.forEach((bf) => {
       const existingIndex = allFields.findIndex((pf) => pf.name.toLowerCase() === (bf.name || '').toLowerCase());
       if (existingIndex >= 0) {
@@ -483,7 +782,7 @@ const metadataService = {
           if (lowerObjKey.includes('lead')) {
             statusOptions = ['New', 'Qualified', 'Not Qualified', 'Converted'];
           } else if (lowerObjKey.includes('company') || lowerObjKey.includes('account')) {
-            statusOptions = ['Active', 'Inactive'];
+            statusOptions = ['Qualified', 'Active', 'Inactive'];
           } else if (lowerObjKey.includes('contact')) {
             statusOptions = ['Active', 'Inactive'];
           } else if (lowerObjKey.includes('deal')) {
@@ -498,6 +797,12 @@ const metadataService = {
       }
     });
 
+
+    // Apply organization-specific field overrides if an organization context is provided
+    if (organizationId) {
+      const overrides = await metadataService.getFieldOverrides(organizationId);
+      allFields = metadataService.applyFieldOverrides(allFields, overrides);
+    }
 
     return {
       definition: objDef,
@@ -1062,7 +1367,7 @@ const metadataService = {
     // Prepare Relational Metadata Query Promise (object_type_definitions + field_definitions)
     let metaQuery = supabase
       .from('object_type_definitions')
-      .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at, field_definitions!object_type_id(id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values, is_unique, searchable, readonly, hidden, is_active, lookup_target_object_type_id)');
+      .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at, field_definitions!object_type_id(id, organization_id, object_type_id, api_name, display_name, field_type, required, display_order, is_system, picklist_values, is_unique, searchable, readonly, hidden, is_active, lookup_target_object_type_id, help_text, placeholder, default_value)');
 
 
     if (isUuid(user?.organization_id)) {
@@ -1083,10 +1388,11 @@ const metadataService = {
 
 
     // Parallel Database Query Execution
-    const [orgRes, metaRes, userRes] = await Promise.all([
+    const [orgRes, metaRes, userRes, fieldOverrides] = await Promise.all([
       orgQueryPromise,
       metaQuery,
       userQueryPromise,
+      metadataService.getFieldOverrides(user?.organization_id),
     ]);
     const dbDuration = Date.now() - supabaseStart;
 
@@ -1233,7 +1539,10 @@ const metadataService = {
 
     const objectTypes = {};
     for (const obj of availableObjects) {
-      const rawFieldRows = obj.field_definitions || [];
+      const rawFieldRows = (obj.field_definitions || []).filter((f) => {
+        if (!f.organization_id) return true;
+        return isUuid(user?.organization_id) && f.organization_id === user.organization_id;
+      });
       let businessFields = [];
 
 
@@ -1253,6 +1562,9 @@ const metadataService = {
             label: fieldLabel,
             type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
             description: f.description || '',
+            help_text: f.help_text || null,
+            placeholder: f.placeholder || null,
+            default_value: f.default_value || null,
             required: f.required || false,
             is_system: f.is_system || false,
             picklist_values: f.picklist_values || null,
@@ -1294,6 +1606,17 @@ const metadataService = {
             { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
             { id: 'f_billing_address', name: 'billing_address', label: 'Billing Address', type: 'address', isTitle: false },
             { id: 'f_shipping_address', name: 'shipping_address', label: 'Shipping Address', type: 'address', isTitle: false },
+          ];
+        } else if (lowerKey.includes('segment')) {
+          businessFields = [
+            { id: 'f_target_object_type', name: 'target_object_type', label: 'Target Module', type: 'picklist', options: ['contact', 'lead', 'company', 'deal'], isTitle: false },
+            { id: 'f_type', name: 'type', label: 'Segment Type', type: 'picklist', options: ['static', 'dynamic'], isTitle: false },
+            { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
+            { id: 'f_hubspot_segment_id', name: 'hubspot_segment_id', label: 'HubSpot Segment ID', type: 'text', isTitle: false },
+            { id: 'f_hubspot_list_id', name: 'hubspot_list_id', label: 'HubSpot List ID', type: 'text', isTitle: false },
+            { id: 'f_source_record_count', name: 'source_record_count', label: 'List Size', type: 'number', isTitle: false },
+            { id: 'f_folder_id', name: 'folder_id', label: 'Folder ID', type: 'text', isTitle: false },
+            { id: 'f_hubspot_processing_type', name: 'hubspot_processing_type', label: 'Processing Type', type: 'text', isTitle: false },
           ];
         }
       }
@@ -1340,20 +1663,55 @@ const metadataService = {
             businessFields.push(scf);
           }
         });
+      } else if (stdLowerObjKey.includes('segment')) {
+        const stdSegmentFields = [
+          { id: 'f_target_object_type', name: 'target_object_type', label: 'Target Module', type: 'picklist', options: ['contact', 'lead', 'company', 'deal'], isTitle: false },
+          { id: 'f_type', name: 'type', label: 'Segment Type', type: 'picklist', options: ['static', 'dynamic'], isTitle: false },
+          { id: 'f_description', name: 'description', label: 'Description', type: 'text', isTitle: false },
+          { id: 'f_hubspot_segment_id', name: 'hubspot_segment_id', label: 'HubSpot Segment ID', type: 'text', isTitle: false },
+          { id: 'f_hubspot_list_id', name: 'hubspot_list_id', label: 'HubSpot List ID', type: 'text', isTitle: false },
+          { id: 'f_source_record_count', name: 'source_record_count', label: 'List Size', type: 'number', isTitle: false },
+          { id: 'f_folder_id', name: 'folder_id', label: 'Folder ID', type: 'text', isTitle: false },
+          { id: 'f_hubspot_processing_type', name: 'hubspot_processing_type', label: 'Processing Type', type: 'text', isTitle: false },
+        ];
+        stdSegmentFields.forEach((ssf) => {
+          const hasField = businessFields.some((f) => {
+            const fn = (f.name || f.api_name || '').toLowerCase();
+            return fn === ssf.name;
+          });
+          if (!hasField) {
+            businessFields.push(ssf);
+          }
+        });
       }
 
 
-      const allFields = [...PLATFORM_FIELDS];
+      let allFields = [...PLATFORM_FIELDS];
       businessFields.forEach((bf) => {
         const bfNameLower = (bf.name || bf.api_name || '').toLowerCase();
-        const isDuplicateOwner = (bfNameLower === 'owner' || bfNameLower === 'owner_id') && allFields.some((pf) => pf.name === 'owner_id');
-        const isDuplicateCompany = (bfNameLower === 'company' || bfNameLower === 'company_id') && allFields.some((pf) => pf.name === 'company_id');
+        const existingIndex = allFields.findIndex((pf) => (pf.name || '').toLowerCase() === bfNameLower);
 
-        if (!isDuplicateOwner && !isDuplicateCompany && !allFields.some((pf) => pf.name.toLowerCase() === bfNameLower)) {
-          allFields.push(bf);
+        if (existingIndex >= 0) {
+          if (bf.picklist_values || bf.options) {
+            allFields[existingIndex] = {
+              ...allFields[existingIndex],
+              picklist_values: bf.picklist_values || bf.options,
+              options: bf.options || bf.picklist_values,
+            };
+          }
+        } else {
+          const isDuplicateOwner = (bfNameLower === 'owner' || bfNameLower === 'owner_id') && allFields.some((pf) => pf.name === 'owner_id');
+          const isDuplicateCompany = (bfNameLower === 'company' || bfNameLower === 'company_id') && allFields.some((pf) => pf.name === 'company_id');
+
+          if (!isDuplicateOwner && !isDuplicateCompany) {
+            allFields.push(bf);
+          }
         }
       });
 
+      if (fieldOverrides && fieldOverrides.length > 0) {
+        allFields = metadataService.applyFieldOverrides(allFields, fieldOverrides);
+      }
 
       const cleanFields = allFields.filter((f) => !['id', 'created_by', 'updated_by', 'deleted_by', 'is_deleted', 'organization_id'].includes(f.name));
       const titleF = cleanFields.find((f) => f.isTitle || ['name', 'title', 'first_name'].includes(f.name)) || cleanFields[0];
@@ -1515,17 +1873,35 @@ const metadataService = {
     }
 
 
+    const isPicklistType = (fieldData.field_type || fieldData.type) === 'picklist' || (fieldData.field_type || fieldData.type) === 'dropdown';
+    const rawPicklist = fieldData.picklist_values !== undefined ? fieldData.picklist_values : fieldData.options;
+    let validatedPicklist = null;
+    if (isPicklistType && Array.isArray(rawPicklist)) {
+      const seen = new Set();
+      validatedPicklist = rawPicklist
+        .map(v => String(v || '').trim())
+        .filter(v => {
+          if (!v) return false;
+          const lower = v.toLowerCase();
+          if (seen.has(lower)) return false;
+          seen.add(lower);
+          return true;
+        });
+    }
+
     const payload = {
       object_type_id: objDef.id,
-      organization_id: (isUuid(organizationId) ? organizationId : (isUuid(objDef.organization_id) ? objDef.organization_id : null)),
+      organization_id: isUuid(organizationId) ? organizationId : null,
       api_name: apiName,
       display_name: displayName,
-      field_type: fieldData.field_type || fieldData.type || 'text',
+      field_type: ((fieldData.field_type || fieldData.type || 'text') === 'picklist' ? 'dropdown' : ((fieldData.field_type || fieldData.type) === 'checkbox' ? 'boolean' : (fieldData.field_type || fieldData.type || 'text'))),
       required: !!fieldData.required,
       readonly: fieldData.readonly !== undefined ? !!fieldData.readonly : (fieldData.read_only !== undefined ? !!fieldData.read_only : false),
       hidden: fieldData.hidden !== undefined ? !!fieldData.hidden : (fieldData.visible !== undefined ? !fieldData.visible : false),
       is_unique: !!fieldData.unique || !!fieldData.is_unique,
       help_text: fieldData.help_text || fieldData.helpText || null,
+      placeholder: fieldData.placeholder || null,
+      picklist_values: validatedPicklist,
       is_system: false,
       display_order: 100,
       ...(lookupTargetId ? { lookup_target_object_type_id: lookupTargetId } : {}),
@@ -1602,11 +1978,471 @@ const metadataService = {
       label: inserted.display_name,
       type: inserted.field_type === 'dropdown' ? 'picklist' : inserted.field_type,
       description: fieldData.description || '',
+      help_text: inserted.help_text || null,
+      placeholder: inserted.placeholder || null,
+      picklist_values: inserted.picklist_values || null,
+      options: inserted.picklist_values || null,
       required: inserted.required || false,
       readonly: inserted.readonly || false,
       hidden: inserted.hidden || false,
       is_system: false,
       ...extraFieldFlags(inserted),
+    };
+  },
+
+
+  /**
+   * Update existing custom field definition in database table field_definitions.
+   * Enforces role-based permissions, system-field protection, tenant isolation,
+   * picklist integrity, and invalidates metadata cache.
+   */
+  updateField: async (objectType, fieldId, updateData, organizationId, user = null) => {
+    if (!fieldId) {
+      throw { statusCode: 400, message: 'Field ID or name is required for updating.' };
+    }
+
+    const cleanId = String(fieldId || '').toLowerCase();
+    const systemFieldNames = ['id', 'name', 'status', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by', 'is_deleted', 'organization_id', 'owner_id'];
+    const uRole = String(user?.role || user?.role_name || '').toLowerCase();
+    const isSuperAdmin = uRole === 'super admin' || user?.is_super_admin === true;
+
+    // 2. Resolve object definition if objectType provided
+    let objDef = null;
+    if (objectType) {
+      objDef = await metadataService.getObjectTypeByApiName(objectType, organizationId);
+    }
+
+    // 3. Fetch current field definition
+    let selectQuery = supabase.from('field_definitions').select('*');
+    if (isUuid(fieldId)) {
+      selectQuery = selectQuery.eq('id', fieldId);
+    } else {
+      selectQuery = selectQuery.eq('api_name', fieldId);
+      if (objDef?.id) {
+        selectQuery = selectQuery.eq('object_type_id', objDef.id);
+      }
+    }
+
+    const { data: fieldRows, error: findError } = await selectQuery;
+    if (findError) {
+      console.error('Supabase query error finding field:', findError);
+      throw { statusCode: 500, message: findError.message || 'Error locating field.' };
+    }
+
+    let fieldDef = fieldRows && fieldRows.length > 0 ? fieldRows[0] : null;
+    if (fieldRows && fieldRows.length > 1 && organizationId) {
+      const orgMatch = fieldRows.find(f => f.organization_id === organizationId);
+      if (orgMatch) fieldDef = orgMatch;
+    }
+
+    // Fallback: check if standard platform field exists in PLATFORM_FIELDS
+    if (!fieldDef) {
+      const pfMatch = PLATFORM_FIELDS.find(pf => pf.id === cleanId || pf.name === cleanId);
+      if (pfMatch) {
+        fieldDef = {
+          id: pfMatch.id,
+          api_name: pfMatch.name,
+          display_name: pfMatch.label,
+          field_type: pfMatch.type,
+          is_system: true,
+          object_type_id: objDef?.id || null,
+          organization_id: null,
+          picklist_values: pfMatch.picklist_values || null,
+        };
+      }
+    }
+
+    if (!fieldDef) {
+      throw { statusCode: 404, message: `Field '${fieldId}' not found.` };
+    }
+
+    // Validate objectType match if provided
+    if (objDef && fieldDef.object_type_id && fieldDef.object_type_id !== objDef.id) {
+      throw { statusCode: 400, message: `Field '${fieldId}' does not belong to object '${objectType}'.` };
+    }
+
+    const cleanApi = String(fieldDef.api_name || '').toLowerCase();
+    const isSystemField = Boolean(
+      fieldDef.is_system ||
+      !fieldDef.organization_id ||
+      systemFieldNames.includes(cleanApi) ||
+      systemFieldNames.includes(cleanId)
+    );
+
+    // =========================================================================
+    // BRANCH A: SYSTEM FIELD OVERRIDE (Organization-Specific Customization)
+    // =========================================================================
+    if (isSystemField) {
+      // 1. RBAC Check: Ensure user is authorized Admin / CRM Manager
+      await metadataService.checkPermission(user, 'object_field', 'update');
+      const isAuthorized = uRole.includes('admin') || uRole.includes('manager') || isSuperAdmin;
+      if (!isAuthorized) {
+        throw { statusCode: 403, message: 'Forbidden: Insufficient permissions to customize system fields.' };
+      }
+
+      // 2. Reject changes to immutable system properties
+      if (updateData.id && updateData.id !== fieldDef.id) {
+        throw { statusCode: 400, message: 'System field ID cannot be modified.' };
+      }
+      if (updateData.api_name && String(updateData.api_name).toLowerCase() !== cleanApi) {
+        throw { statusCode: 400, message: 'System field API Name cannot be modified.' };
+      }
+      if (updateData.name && String(updateData.name).toLowerCase() !== cleanApi) {
+        throw { statusCode: 400, message: 'System field API Name cannot be modified.' };
+      }
+      if (updateData.field_type && String(updateData.field_type).toLowerCase() !== String(fieldDef.field_type).toLowerCase()) {
+        throw { statusCode: 400, message: 'System field Data Type cannot be modified.' };
+      }
+      if (updateData.type && String(updateData.type).toLowerCase() !== String(fieldDef.field_type).toLowerCase()) {
+        throw { statusCode: 400, message: 'System field Data Type cannot be modified.' };
+      }
+      if (updateData.object_type_id && fieldDef.object_type_id && updateData.object_type_id !== fieldDef.object_type_id) {
+        throw { statusCode: 400, message: 'System field object relationship cannot be modified.' };
+      }
+      if (updateData.organization_id !== undefined && updateData.organization_id !== fieldDef.organization_id) {
+        throw { statusCode: 400, message: 'System field ownership cannot be modified.' };
+      }
+      if (updateData.is_system !== undefined && updateData.is_system !== fieldDef.is_system) {
+        throw { statusCode: 400, message: 'System field identity cannot be modified.' };
+      }
+
+      // 3. Picklist validation, removal check against in-use records, and rename migration
+      let cleanedOptions = null;
+      const isPicklist = fieldDef.field_type === 'picklist' || fieldDef.field_type === 'dropdown' || cleanApi === 'status' || cleanApi === 'stage' || Array.isArray(fieldDef.picklist_values);
+
+      if (isPicklist && (updateData.picklist_values !== undefined || updateData.options !== undefined)) {
+        const rawOptions = updateData.picklist_values !== undefined ? updateData.picklist_values : updateData.options;
+        if (!Array.isArray(rawOptions)) {
+          throw { statusCode: 400, message: 'Picklist values must be an array of strings.' };
+        }
+
+        cleanedOptions = [];
+        const seenOptions = new Set();
+        for (const opt of rawOptions) {
+          if (typeof opt !== 'string' && typeof opt !== 'number') continue;
+          const strVal = String(opt).trim();
+          if (!strVal) continue;
+          const lowerVal = strVal.toLowerCase();
+          if (!seenOptions.has(lowerVal)) {
+            seenOptions.add(lowerVal);
+            cleanedOptions.push(strVal);
+          }
+        }
+
+        if (cleanedOptions.length === 0) {
+          throw { statusCode: 400, message: 'Picklist must have at least one valid option.' };
+        }
+
+        // Fetch current effective options from existing override or base field
+        const existingOverride = await metadataService.getFieldOverride(organizationId, fieldDef.id);
+        const currentOptions = (existingOverride && Array.isArray(existingOverride.picklist_values))
+          ? existingOverride.picklist_values
+          : (Array.isArray(fieldDef.picklist_values) ? fieldDef.picklist_values : []);
+
+        const renameMap = updateData.rename_map || updateData.renameMap || {};
+        const removedOptions = currentOptions.filter((oldOpt) => {
+          const lower = String(oldOpt).trim().toLowerCase();
+          return !seenOptions.has(lower) && !renameMap[oldOpt];
+        });
+
+        // Safeguard: Check if removed options are in use by records in this tenant
+        if (removedOptions.length > 0 && fieldDef.object_type_id && organizationId) {
+          for (const removedVal of removedOptions) {
+            const { count, error } = await supabase
+              .from('universal_table')
+              .select('id', { count: 'exact', head: true })
+              .eq('object_type_id', fieldDef.object_type_id)
+              .eq('organization_id', organizationId)
+              .eq('is_deleted', false)
+              .filter(`data->>${fieldDef.api_name}`, 'eq', removedVal);
+
+            if (!error && count && count > 0) {
+              throw {
+                statusCode: 400,
+                message: `Cannot remove picklist option "${removedVal}" because it is currently used by ${count} existing record(s).`
+              };
+            }
+          }
+        }
+
+        // Explicit migration for renamed options if rename_map provided
+        if (renameMap && Object.keys(renameMap).length > 0 && fieldDef.object_type_id && organizationId) {
+          for (const [oldVal, newVal] of Object.entries(renameMap)) {
+            if (oldVal !== newVal && newVal) {
+              const { data: rowsToMigrate } = await supabase
+                .from('universal_table')
+                .select('id, data')
+                .eq('object_type_id', fieldDef.object_type_id)
+                .eq('organization_id', organizationId)
+                .eq('is_deleted', false)
+                .filter(`data->>${fieldDef.api_name}`, 'eq', oldVal);
+
+              if (rowsToMigrate && rowsToMigrate.length > 0) {
+                for (const r of rowsToMigrate) {
+                  const updatedData = { ...r.data, [fieldDef.api_name]: newVal };
+                  await supabase
+                    .from('universal_table')
+                    .update({ data: updatedData, updated_at: new Date().toISOString() })
+                    .eq('id', r.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Save organization override
+      const overridePayload = {
+        picklist_values: cleanedOptions !== null ? cleanedOptions : (fieldDef.picklist_values || null),
+        field_label: updateData.display_name || updateData.label || updateData.field_label || null,
+        help_text: updateData.help_text !== undefined ? updateData.help_text : (updateData.helpText !== undefined ? updateData.helpText : null),
+      };
+
+      const savedOverride = await metadataService.saveFieldOverride(
+        organizationId,
+        fieldDef.id,
+        overridePayload,
+        user
+      );
+
+      // Invalidate metadata and permissions caches
+      await invalidateMetadataCache(organizationId);
+
+      return {
+        id: fieldDef.id,
+        name: fieldDef.api_name,
+        label: overridePayload.field_label || fieldDef.display_name,
+        type: fieldDef.field_type === 'dropdown' ? 'picklist' : fieldDef.field_type,
+        description: fieldDef.description || '',
+        help_text: overridePayload.help_text !== null ? overridePayload.help_text : (fieldDef.help_text || null),
+        placeholder: fieldDef.placeholder || null,
+        required: fieldDef.required || false,
+        readonly: fieldDef.readonly || false,
+        hidden: fieldDef.hidden || false,
+        is_system: true,
+        picklist_values: overridePayload.picklist_values,
+        options: overridePayload.picklist_values,
+        has_override: true,
+        override_id: savedOverride.id,
+        ...extraFieldFlags(fieldDef),
+      };
+    }
+
+    // =========================================================================
+    // BRANCH B: CUSTOM FIELD UPDATE (Existing Logic)
+    // =========================================================================
+
+    // Tenant boundary check
+    if (organizationId && fieldDef.organization_id && fieldDef.organization_id !== organizationId && !isSuperAdmin) {
+      throw { statusCode: 403, message: 'Unauthorized to modify field for another organization.' };
+    }
+
+    // 4. Validate updates
+    const updates = {};
+
+    // Display Name / Label
+    if (updateData.display_name !== undefined || updateData.label !== undefined) {
+      const newLabel = String(updateData.display_name || updateData.label || '').trim();
+      if (!newLabel) {
+        throw { statusCode: 400, message: 'Field Label cannot be empty.' };
+      }
+      updates.display_name = newLabel;
+    }
+
+    // Required setting
+    if (updateData.required !== undefined) {
+      updates.required = Boolean(updateData.required);
+    }
+
+    // Readonly & Hidden
+    if (updateData.readonly !== undefined) {
+      updates.readonly = Boolean(updateData.readonly);
+    } else if (updateData.read_only !== undefined) {
+      updates.readonly = Boolean(updateData.read_only);
+    }
+
+    if (updateData.hidden !== undefined) {
+      updates.hidden = Boolean(updateData.hidden);
+    } else if (updateData.visible !== undefined) {
+      updates.hidden = !updateData.visible;
+    }
+
+    // Help text & placeholder & description
+    if (updateData.help_text !== undefined) {
+      updates.help_text = updateData.help_text ? String(updateData.help_text).trim() : null;
+    } else if (updateData.helpText !== undefined) {
+      updates.help_text = updateData.helpText ? String(updateData.helpText).trim() : null;
+    }
+
+    if (updateData.placeholder !== undefined) {
+      updates.placeholder = updateData.placeholder ? String(updateData.placeholder).trim() : null;
+    }
+
+    if (updateData.default_value !== undefined) {
+      updates.default_value = updateData.default_value ? String(updateData.default_value).trim() : null;
+    }
+
+    if (updateData.display_order !== undefined && !isNaN(parseInt(updateData.display_order, 10))) {
+      updates.display_order = parseInt(updateData.display_order, 10);
+    }
+
+    // Uniqueness constraint validation
+    if (updateData.is_unique !== undefined || updateData.unique !== undefined) {
+      const newUnique = Boolean(updateData.is_unique !== undefined ? updateData.is_unique : updateData.unique);
+      if (newUnique && !fieldDef.is_unique) {
+        // If enabling uniqueness, verify whether existing records already have duplicates
+        if (fieldDef.object_type_id) {
+          const { data: existingRows } = await supabase
+            .from('universal_table')
+            .select('data')
+            .eq('object_type_id', fieldDef.object_type_id)
+            .eq('organization_id', organizationId || fieldDef.organization_id)
+            .eq('is_deleted', false);
+
+          if (existingRows && existingRows.length > 0) {
+            const seen = new Set();
+            for (const r of existingRows) {
+              const val = r.data && r.data[fieldDef.api_name];
+              if (val !== undefined && val !== null && String(val).trim() !== '') {
+                const normVal = String(val).trim().toLowerCase();
+                if (seen.has(normVal)) {
+                  throw { statusCode: 400, message: `Cannot set unique constraint: duplicate value "${val}" already exists in records.` };
+                }
+                seen.add(normVal);
+              }
+            }
+          }
+        }
+      }
+      updates.is_unique = newUnique;
+    }
+
+    // Lookup target update
+    if (fieldDef.field_type === 'lookup' && (updateData.lookup_target_object_type_id || updateData.target || updateData.lookup_target)) {
+      const targetKey = updateData.lookup_target_object_type_id || updateData.target || updateData.lookup_target;
+      if (isUuid(targetKey)) {
+        updates.lookup_target_object_type_id = targetKey;
+      } else {
+        const targetObj = await metadataService.getObjectTypeByApiName(targetKey, organizationId);
+        if (targetObj) updates.lookup_target_object_type_id = targetObj.id;
+      }
+    }
+
+    // Picklist handling
+    const isPicklist = fieldDef.field_type === 'picklist' || fieldDef.field_type === 'dropdown';
+    if (isPicklist && (updateData.picklist_values !== undefined || updateData.options !== undefined)) {
+      const rawOptions = updateData.picklist_values !== undefined ? updateData.picklist_values : updateData.options;
+      if (!Array.isArray(rawOptions)) {
+        throw { statusCode: 400, message: 'Picklist values must be an array of strings.' };
+      }
+
+      // Clean & deduplicate options preserving order
+      const cleanedOptions = [];
+      const seenOptions = new Set();
+      for (const opt of rawOptions) {
+        if (typeof opt !== 'string' && typeof opt !== 'number') continue;
+        const strVal = String(opt).trim();
+        if (!strVal) continue;
+        const lowerVal = strVal.toLowerCase();
+        if (!seenOptions.has(lowerVal)) {
+          seenOptions.add(lowerVal);
+          cleanedOptions.push(strVal);
+        }
+      }
+
+      if (cleanedOptions.length === 0) {
+        throw { statusCode: 400, message: 'Picklist must have at least one valid option.' };
+      }
+
+      // Check for removed options that existing records might be using
+      const oldOptions = Array.isArray(fieldDef.picklist_values) ? fieldDef.picklist_values : [];
+      const removedOptions = oldOptions.filter(oldOpt => !seenOptions.has(String(oldOpt).trim().toLowerCase()));
+
+      if (removedOptions.length > 0 && fieldDef.object_type_id) {
+        const tenantId = organizationId || fieldDef.organization_id;
+        for (const removedVal of removedOptions) {
+          let countQuery = supabase
+            .from('universal_table')
+            .select('id', { count: 'exact', head: true })
+            .eq('object_type_id', fieldDef.object_type_id)
+            .eq('is_deleted', false)
+            .filter(`data->>${fieldDef.api_name}`, 'eq', removedVal);
+
+          if (tenantId) {
+            countQuery = countQuery.eq('organization_id', tenantId);
+          }
+
+          const { count, error } = await countQuery;
+          if (!error && count && count > 0) {
+            throw {
+              statusCode: 400,
+              message: `Cannot remove picklist option "${removedVal}" because it is currently used by ${count} existing record(s).`
+            };
+          }
+        }
+      }
+
+      updates.picklist_values = cleanedOptions;
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    // 5. Update field_definitions record in database (preserving ID, api_name, relationships)
+    const { data: updatedRows, error: updateError } = await supabase
+      .from('field_definitions')
+      .update(updates)
+      .eq('id', fieldDef.id)
+      .select();
+
+    if (updateError) {
+      console.error('Supabase field update error:', updateError);
+      throw { statusCode: 500, message: updateError.message || 'Database update failed for field.' };
+    }
+
+    const updated = updatedRows && updatedRows.length > 0 ? updatedRows[0] : { ...fieldDef, ...updates };
+
+    // 6. Update field_permissions if security profiles provided
+    const securityProfiles = updateData.security_profiles || updateData.securityProfiles || updateData.permissions;
+    if (Array.isArray(securityProfiles) && securityProfiles.length > 0) {
+      const fpRows = securityProfiles
+        .filter(p => p.id && isUuid(p.id))
+        .map(p => ({
+          role_id: p.id,
+          field_definition_id: updated.id,
+          organization_id: updated.organization_id || (isUuid(organizationId) ? organizationId : null),
+          can_read: p.visible !== false && p.can_read !== false,
+          can_create: !p.readOnly && p.can_create !== false,
+          can_update: !p.readOnly && p.can_update !== false,
+        }));
+
+      if (fpRows.length > 0) {
+        const { error: fpErr } = await supabase
+          .from('field_permissions')
+          .upsert(fpRows, { onConflict: 'role_id,field_definition_id' });
+        if (fpErr) {
+          console.warn('⚠️ Field permissions upsert error:', fpErr.message);
+        }
+      }
+    }
+
+    // 7. Invalidate metadata and permissions caches
+    await invalidateMetadataCache(organizationId || fieldDef.organization_id);
+
+    return {
+      id: updated.id,
+      name: updated.api_name,
+      label: updated.display_name,
+      type: updated.field_type === 'dropdown' ? 'picklist' : updated.field_type,
+      description: updated.description || '',
+      help_text: updated.help_text || null,
+      placeholder: updated.placeholder || null,
+      required: updated.required || false,
+      readonly: updated.readonly || false,
+      hidden: updated.hidden || false,
+      is_system: updated.is_system || false,
+      picklist_values: updated.picklist_values || null,
+      options: updated.picklist_values || null,
+      ...extraFieldFlags(updated),
     };
   },
 
@@ -1736,6 +2572,7 @@ const metadataService = {
   },
 };
 
+metadataService.invalidateMetadataCache = invalidateMetadataCache;
 
 module.exports = metadataService;
 
