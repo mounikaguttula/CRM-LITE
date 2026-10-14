@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
@@ -9,7 +9,10 @@ import {
   Edit3,
   Mail,
   ArrowLeft,
+  ChevronLeft,
   ChevronRight,
+  CheckSquare,
+  Square,
   Calendar,
   User,
   Building2,
@@ -991,9 +994,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [associatedSegments, setAssociatedSegments] = useState([]);
   const [allOrgContacts, setAllOrgContacts] = useState([]);
   const [showAddSegmentContactModal, setShowAddSegmentContactModal] = useState(false);
-  const [selectedContactIdsToAdd, setSelectedContactIdsToAdd] = useState([]);
   const [addingContacts, setAddingContacts] = useState(false);
-  const [segmentContactSearch, setSegmentContactSearch] = useState('');
 
   /* Products & Line Items state */
   const [lineItems, setLineItems] = useState([]);
@@ -1309,17 +1310,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
   /* Segment & Contact Relationship Handlers */
   const handleOpenAddSegmentContactsModal = () => {
-    setSelectedContactIdsToAdd([]);
-    setSegmentContactSearch('');
     setShowAddSegmentContactModal(true);
   };
 
-  const handleAddSegmentContactsSubmit = async () => {
-    if (!selectedContactIdsToAdd.length) return;
+  const handleAddSegmentContactsSubmit = async (contactIds) => {
+    if (!contactIds || !contactIds.length) return;
     setAddingContacts(true);
     try {
       const res = await apiPost(`/api/segments/${recordId}/contacts`, {
-        contact_ids: selectedContactIdsToAdd,
+        contact_ids: contactIds,
       });
       const updatedContacts = res?.data?.contacts || res?.contacts || [];
       setSegmentContacts(updatedContacts);
@@ -1334,8 +1333,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         }));
       }
       setShowAddSegmentContactModal(false);
-      setSelectedContactIdsToAdd([]);
-      showToast(`Successfully added ${selectedContactIdsToAdd.length} contact(s) to segment.`, 'success');
+      showToast(`Successfully added ${contactIds.length} contact(s) to segment.`, 'success');
     } catch (err) {
       console.error('Failed to add contacts to segment:', err);
       showToast(err.response?.data?.message || err.message || 'Failed to add contacts to segment.', 'error');
@@ -3990,152 +3988,354 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       )}
 
       {/* ── Add Contacts to Segment Modal ── */}
-      {showAddSegmentContactModal && ReactDOM.createPortal(
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 99999,
-          background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+      <AddSegmentContactModal
+        isOpen={showAddSegmentContactModal}
+        onClose={() => setShowAddSegmentContactModal(false)}
+        onSubmit={handleAddSegmentContactsSubmit}
+        allContacts={allOrgContacts}
+        existingSegmentContacts={segmentContacts}
+        segmentName={record?.name || 'this segment'}
+        adding={addingContacts}
+        primaryGrad={C.primaryGrad}
+      />
+    </>
+  );
+}
+
+/* ── Optimized Add Contacts to Segment Modal Sub-Component ── */
+const SEGMENT_MODAL_PAGE_SIZE = 50;
+
+function AddSegmentContactModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  allContacts = [],
+  existingSegmentContacts = [],
+  segmentName = 'this segment',
+  adding = false,
+  primaryGrad = 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+}) {
+  const [rawSearch, setRawSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [page, setPage] = useState(1);
+
+  // Reset local state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setRawSearch('');
+      setDebouncedSearch('');
+      setSelectedIds(new Set());
+      setPage(1);
+    }
+  }, [isOpen]);
+
+  // Debounce search input by 250ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(rawSearch);
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [rawSearch]);
+
+  // O(1) Set of existing Segment members
+  const existingMemberSet = useMemo(() => {
+    const s = new Set();
+    if (Array.isArray(existingSegmentContacts)) {
+      existingSegmentContacts.forEach((c) => {
+        if (c?.id) s.add(String(c.id));
+      });
+    }
+    return s;
+  }, [existingSegmentContacts]);
+
+  // Available contacts (excluding existing members)
+  const availableContacts = useMemo(() => {
+    if (!Array.isArray(allContacts)) return [];
+    return allContacts.filter((c) => c?.id && !existingMemberSet.has(String(c.id)));
+  }, [allContacts, existingMemberSet]);
+
+  // Filtered contacts based on search query
+  const filteredContacts = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    if (!q) return availableContacts;
+    return availableContacts.filter((c) => {
+      const name = (c.name || `${c.first_name || ''} ${c.last_name || ''}`).toLowerCase();
+      const email = (c.email || c.data?.email || '').toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [availableContacts, debouncedSearch]);
+
+  // Pagination / Windowing
+  const totalPages = Math.max(1, Math.ceil(filteredContacts.length / SEGMENT_MODAL_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+
+  const visibleContacts = useMemo(() => {
+    const start = (currentPage - 1) * SEGMENT_MODAL_PAGE_SIZE;
+    return filteredContacts.slice(start, start + SEGMENT_MODAL_PAGE_SIZE);
+  }, [filteredContacts, currentPage]);
+
+  // O(1) Checkbox toggle
+  const handleToggleContact = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allVisibleSelected = useMemo(() => {
+    if (visibleContacts.length === 0) return false;
+    return visibleContacts.every((c) => selectedIds.has(c.id));
+  }, [visibleContacts, selectedIds]);
+
+  const handleToggleSelectPage = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleContacts.forEach((c) => next.delete(c.id));
+      } else {
+        visibleContacts.forEach((c) => next.add(c.id));
+      }
+      return next;
+    });
+  }, [allVisibleSelected, visibleContacts]);
+
+  const handleSubmit = useCallback(() => {
+    if (selectedIds.size === 0 || adding) return;
+    onSubmit(Array.from(selectedIds));
+  }, [selectedIds, adding, onSubmit]);
+
+  if (!isOpen) return null;
+
+  const startIdx = filteredContacts.length > 0 ? (currentPage - 1) * SEGMENT_MODAL_PAGE_SIZE + 1 : 0;
+  const endIdx = Math.min(currentPage * SEGMENT_MODAL_PAGE_SIZE, filteredContacts.length);
+
+  return ReactDOM.createPortal(
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 99999,
+      background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+    }}>
+      <div style={{
+        background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 580,
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', maxHeight: '85vh',
+        border: '1px solid #e2e8f0',
+      }}>
+        {/* Header */}
+        <header style={{
+          padding: '18px 24px', borderBottom: '1px solid #e2e8f0',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#f8fafc',
         }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0f172a' }}>
+              Add Contacts to Segment
+            </h3>
+            <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#64748b' }}>
+              Select existing contacts to associate with {segmentName}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={adding}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        {/* Search Bar */}
+        <div style={{ padding: '14px 24px 10px', borderBottom: '1px solid #f1f5f9' }}>
           <div style={{
-            background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 560,
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', overflow: 'hidden',
-            display: 'flex', flexDirection: 'column', maxHeight: '85vh',
-            border: '1px solid #e2e8f0',
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+            borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc'
           }}>
-            <header style={{
-              padding: '18px 24px', borderBottom: '1px solid #e2e8f0',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: '#f8fafc',
-            }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0f172a' }}>
-                  Add Contacts to Segment
-                </h3>
-                <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#64748b' }}>
-                  Select existing contacts to associate with {record?.name || 'this segment'}.
-                </p>
-              </div>
+            <Search size={15} color="#94a3b8" />
+            <input
+              type="text"
+              placeholder="Search contacts by name or email..."
+              value={rawSearch}
+              onChange={(e) => setRawSearch(e.target.value)}
+              style={{
+                border: 'none', background: 'transparent', outline: 'none',
+                fontSize: 13.5, width: '100%', color: '#1e293b'
+              }}
+            />
+            {rawSearch && (
               <button
-                onClick={() => setShowAddSegmentContactModal(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}
+                type="button"
+                onClick={() => setRawSearch('')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2 }}
               >
-                <X size={18} />
+                <X size={14} />
               </button>
-            </header>
+            )}
+          </div>
 
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid #f1f5f9' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-                borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc'
-              }}>
-                <Search size={15} color="#94a3b8" />
-                <input
-                  type="text"
-                  placeholder="Search contacts by name or email..."
-                  value={segmentContactSearch}
-                  onChange={(e) => setSegmentContactSearch(e.target.value)}
-                  style={{
-                    border: 'none', background: 'transparent', outline: 'none',
-                    fontSize: 13.5, width: '100%', color: '#1e293b'
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 24px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {allOrgContacts
-                .filter((c) => {
-                  const alreadyInSegment = segmentContacts.some((sc) => String(sc.id) === String(c.id));
-                  if (alreadyInSegment) return false;
-                  if (!segmentContactSearch.trim()) return true;
-                  const q = segmentContactSearch.toLowerCase();
-                  const name = (c.name || `${c.first_name || ''} ${c.last_name || ''}`).toLowerCase();
-                  const email = (c.email || c.data?.email || '').toLowerCase();
-                  return name.includes(q) || email.includes(q);
-                })
-                .map((c) => {
-                  const isChecked = selectedContactIdsToAdd.includes(c.id);
-                  const cName = c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unnamed Contact';
-                  const cEmail = c.email || c.data?.email || '';
-                  return (
-                    <label
-                      key={c.id}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                        borderRadius: 10, border: `1px solid ${isChecked ? '#818cf8' : '#e2e8f0'}`,
-                        background: isChecked ? '#eef2ff' : '#ffffff',
-                        cursor: 'pointer', transition: 'all 0.15s ease'
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedContactIdsToAdd((prev) => [...prev, c.id]);
-                          } else {
-                            setSelectedContactIdsToAdd((prev) => prev.filter((id) => id !== c.id));
-                          }
-                        }}
-                        style={{ width: 16, height: 16, accentColor: '#6366f1' }}
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1e293b' }}>
-                          {cName}
-                        </div>
-                        {cEmail && (
-                          <div style={{ fontSize: 12, color: '#64748b' }}>
-                            {cEmail}
-                          </div>
-                        )}
-                      </div>
-                    </label>
-                  );
-                })}
-              {allOrgContacts.filter((c) => !segmentContacts.some((sc) => String(sc.id) === String(c.id))).length === 0 && (
-                <div style={{ textAlign: 'center', padding: '32px 16px', color: '#94a3b8', fontSize: 13.5 }}>
-                  All available contacts are already associated with this segment.
-                </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginTop: 8, fontSize: 12, color: '#64748b', fontWeight: 600
+          }}>
+            <div>
+              {filteredContacts.length > 0 ? (
+                <>Showing {startIdx}–{endIdx} of {filteredContacts.length} contacts</>
+              ) : (
+                <>0 contacts found</>
               )}
             </div>
-
-            <footer style={{
-              padding: '16px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>
-                {selectedContactIdsToAdd.length} contact(s) selected
-              </span>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button
-                  onClick={() => setShowAddSegmentContactModal(false)}
-                  disabled={addingContacts}
-                  style={{
-                    padding: '8px 16px', borderRadius: 10, border: '1px solid #cbd5e1',
-                    background: '#fff', color: '#475569', fontSize: 13.5, fontWeight: 700, cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddSegmentContactsSubmit}
-                  disabled={selectedContactIdsToAdd.length === 0 || addingContacts}
-                  style={{
-                    padding: '8px 18px', borderRadius: 10, border: 'none',
-                    background: selectedContactIdsToAdd.length === 0 ? '#cbd5e1' : C.primaryGrad,
-                    color: '#fff', fontSize: 13.5, fontWeight: 700,
-                    cursor: selectedContactIdsToAdd.length === 0 || addingContacts ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {addingContacts ? 'Adding...' : 'Add Selected'}
-                </button>
-              </div>
-            </footer>
+            {visibleContacts.length > 0 && (
+              <button
+                type="button"
+                onClick={handleToggleSelectPage}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: '#6366f1', fontSize: 12, fontWeight: 700,
+                  display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0
+                }}
+              >
+                {allVisibleSelected ? (
+                  <><CheckSquare size={13} /> Deselect Page</>
+                ) : (
+                  <><Square size={13} /> Select Page</>
+                )}
+              </button>
+            )}
           </div>
-        </div>,
-        document.body
-      )}
-    </>
+        </div>
+
+        {/* Contact List */}
+        <div style={{
+          flex: 1, overflowY: 'auto', padding: '12px 24px',
+          display: 'flex', flexDirection: 'column', gap: 6, minHeight: 220
+        }}>
+          {visibleContacts.map((c) => {
+            const isChecked = selectedIds.has(c.id);
+            const cName = c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unnamed Contact';
+            const cEmail = c.email || c.data?.email || '';
+
+            return (
+              <label
+                key={c.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                  borderRadius: 10, border: `1px solid ${isChecked ? '#818cf8' : '#e2e8f0'}`,
+                  background: isChecked ? '#eef2ff' : '#ffffff',
+                  cursor: 'pointer', transition: 'all 0.15s ease'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => handleToggleContact(c.id)}
+                  style={{ width: 16, height: 16, accentColor: '#6366f1' }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1e293b' }}>
+                    {cName}
+                  </div>
+                  {cEmail && (
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                      {cEmail}
+                    </div>
+                  )}
+                </div>
+              </label>
+            );
+          })}
+
+          {availableContacts.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8', fontSize: 13.5 }}>
+              All available contacts are already associated with this segment.
+            </div>
+          )}
+
+          {availableContacts.length > 0 && filteredContacts.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8', fontSize: 13.5 }}>
+              No contacts matching "{debouncedSearch}".
+            </div>
+          )}
+        </div>
+
+        {/* Pagination Bar */}
+        {totalPages > 1 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
+            padding: '8px 24px', background: '#f8fafc', borderTop: '1px solid #f1f5f9',
+            fontSize: 12.5, color: '#475569', fontWeight: 600
+          }}>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', borderRadius: 6, border: '1px solid #cbd5e1',
+                background: '#fff', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer',
+                opacity: currentPage <= 1 ? 0.5 : 1, fontSize: 12, fontWeight: 600
+              }}
+            >
+              <ChevronLeft size={14} /> Previous
+            </button>
+            <span>Page {currentPage} of {totalPages}</span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', borderRadius: 6, border: '1px solid #cbd5e1',
+                background: '#fff', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
+                opacity: currentPage >= totalPages ? 0.5 : 1, fontSize: 12, fontWeight: 600
+              }}
+            >
+              Next <ChevronRight size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Footer */}
+        <footer style={{
+          padding: '16px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>
+            {selectedIds.size} contact(s) selected
+          </span>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={adding}
+              style={{
+                padding: '8px 16px', borderRadius: 10, border: '1px solid #cbd5e1',
+                background: '#fff', color: '#475569', fontSize: 13.5, fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={selectedIds.size === 0 || adding}
+              style={{
+                padding: '8px 18px', borderRadius: 10, border: 'none',
+                background: selectedIds.size === 0 ? '#cbd5e1' : primaryGrad,
+                color: '#fff', fontSize: 13.5, fontWeight: 700,
+                cursor: selectedIds.size === 0 || adding ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {adding ? 'Adding...' : 'Add Selected'}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>,
+    document.body
   );
 }
 
