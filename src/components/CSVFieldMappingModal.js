@@ -18,7 +18,7 @@ import ReactDOM from 'react-dom';
 import {
   X, UploadCloud, AlertTriangle, Check, RefreshCw,
   ChevronDown, Link2, Save, Trash2, Sparkles, ArrowRight,
-  CheckCircle2, XCircle, HelpCircle, ChevronUp, Search
+  CheckCircle2, XCircle, HelpCircle, ChevronUp, Search, Download
 } from 'lucide-react';
 import { apiGet, apiPost } from '../api/client';
 import { mapHeaderToField, buildFieldMetadataList } from '../utils/csvImportMapping';
@@ -914,7 +914,7 @@ export default function CSVFieldMappingModal({
     const identifierField = mappings[headers.find((h) => mappings[h]?.targetField && !mappings[h].isRelationship)]?.targetField;
 
     const mappedRows = allRows.map((row, idx) => {
-      const record = { __rowNum: idx + 2 }; // row 1 is the header
+      const record = { __rowNum: idx + 2, __originalRow: row }; // row 1 is the header
       const lookupGroups = {};              // targetField → [{ header, cfg }]
 
       headers.forEach((h) => {
@@ -959,10 +959,12 @@ export default function CSVFieldMappingModal({
 
     // Rows with nothing mapped are dropped
     const validRows = mappedRows.filter((r) => {
-      const { __rowNum, ...fields } = r;
+      const { __rowNum, __originalRow, ...fields } = r;
       return Object.values(fields).some((v) => v !== null && v !== undefined && String(v).trim() !== '');
     });
-    const sendRows = validRows.filter((r) => !relErrors.has(r.__rowNum));
+    const sendRows = validRows
+      .filter((r) => !relErrors.has(r.__rowNum))
+      .map(({ __originalRow, ...cleanRecord }) => cleanRecord);
 
     // ── Segments Integration: Route to Segment Association Endpoints ──────────
     if (segmentContext?.segmentId) {
@@ -979,6 +981,7 @@ export default function CSVFieldMappingModal({
             identifier: r.identifier || `Row ${r.rowNumber}`,
             status: r.status,
             reason: r.error || (r.status === 'added' ? 'Added to segment' : (r.status === 'already_in_segment' ? 'Already in segment' : r.status)),
+            originalRow: allRows[r.rowNumber - 2] || {},
           }));
 
           const report = {
@@ -1015,6 +1018,7 @@ export default function CSVFieldMappingModal({
             identifier: r.identifier || `Row ${r.rowNumber}`,
             status: r.status,
             reason: r.error || (r.status === 'imported' ? 'Created & added' : (r.status === 'updated' ? 'Updated & added' : r.status)),
+            originalRow: allRows[r.rowNumber - 2] || {},
           }));
 
           const report = {
@@ -1100,13 +1104,16 @@ export default function CSVFieldMappingModal({
     const rows = validRows.map((r) => {
       const isCreated = createdRowNums.has(r.__rowNum);
       const isUpdated = updatedRowNums.has(r.__rowNum);
-      const errObj = backendErrors.find((e) => e.rowNum === r.__rowNum);
+      const errObjs = backendErrors.filter((e) => e.rowNum === r.__rowNum);
+      const reasons = errObjs.map((e) => e.reason).filter(Boolean);
+      const combinedReason = reasons.length > 0 ? reasons.join('; ') : 'Validation error';
       const status = isCreated ? 'imported' : (isUpdated ? 'updated' : 'failed');
       return {
         rowNum: r.__rowNum,
         identifier: (identifierField && r[identifierField]) || `Row ${r.__rowNum}`,
         status,
-        reason: (status === 'imported' || status === 'updated') ? '—' : (relErrors.get(r.__rowNum) || errObj?.reason || 'Validation error'),
+        reason: (status === 'imported' || status === 'updated') ? '—' : (relErrors.get(r.__rowNum) || combinedReason),
+        originalRow: r.__originalRow || allRows[r.__rowNum - 2] || {},
       };
     });
     const report = {
@@ -1122,6 +1129,63 @@ export default function CSVFieldMappingModal({
     setStep(4);
     if (onImportComplete) onImportComplete(report);
   }, [allRows, headers, mappings, objectTypeId, relationshipPreviews, onImportComplete, importMode, segmentContext, segmentImportMode]);
+
+  // ── Download Failed Records ────────────────────────────────────────────────
+  const failedRows = useMemo(() => {
+    if (!importReport?.rows) return [];
+    return importReport.rows.filter((r) =>
+      r.status === 'failed' || r.status === 'unmatched' || r.status === 'ambiguous' || r.status === 'invalid'
+    );
+  }, [importReport]);
+
+  const handleDownloadFailedRecords = useCallback(() => {
+    if (!failedRows.length) return;
+
+    let baseName = objectDisplayName || objectTypeId || 'Records';
+    baseName = String(baseName).trim().replace(/\s+/g, '_');
+    baseName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
+    const lower = baseName.toLowerCase();
+    if (!lower.endsWith('s')) {
+      if (lower.endsWith('y')) {
+        baseName = baseName.slice(0, -1) + 'ies';
+      } else {
+        baseName = baseName + 's';
+      }
+    }
+    const filename = `Failed_${baseName}_Import.csv`;
+
+    const formatCell = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const outputHeaders = [...headers, 'Import Status', 'Import Error', 'Source Row Number'];
+    const csvLines = [outputHeaders.map(formatCell).join(',')];
+
+    failedRows.forEach((r) => {
+      const orig = r.originalRow || allRows[r.rowNum - 2] || {};
+      const rowVals = headers.map((h) => (orig[h] !== undefined && orig[h] !== null ? orig[h] : ''));
+      rowVals.push('FAILED');
+      rowVals.push(r.reason || 'Import failed');
+      rowVals.push(r.rowNum);
+      csvLines.push(rowVals.map(formatCell).join(','));
+    });
+
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [failedRows, headers, allRows, objectDisplayName, objectTypeId]);
 
   // ── Counts ─────────────────────────────────────────────────────────────────
   const { mappedCount, unmappedCount, lookupCount } = useMemo(() => {
@@ -1850,6 +1914,37 @@ export default function CSVFieldMappingModal({
 
           {step === 4 && (
             <>
+              {failedRows.length > 0 && (
+                <button
+                  type="button"
+                  id="btn-download-failed-records"
+                  onClick={handleDownloadFailedRecords}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    background: '#fff1f2',
+                    color: '#e11d48',
+                    border: '1px solid #fecdd3',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#ffe4e6';
+                    e.currentTarget.style.borderColor = '#fda4af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#fff1f2';
+                    e.currentTarget.style.borderColor = '#fecdd3';
+                  }}
+                >
+                  <Download size={14} /> Download Failed Records ({failedRows.length})
+                </button>
+              )}
               <button type="button" onClick={reset} style={btnSecondary}>Import Another File</button>
               <button type="button" onClick={onClose} style={btnPrimary}><Check size={14} /> Done</button>
             </>
