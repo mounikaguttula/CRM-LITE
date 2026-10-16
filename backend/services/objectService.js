@@ -870,9 +870,19 @@ const objectService = {
       }
     }
 
+    // Guard: object_type_id must always come from metadataService — never from a hardcoded
+    // fallback UUID. A hardcoded fallback would silently create data under the wrong object
+    // type in any tenant whose database uses different UUIDs (all production tenants).
+    if (!objDef || !objDef.id) {
+      throw {
+        statusCode: 400,
+        message: `Cannot create record: object type '${objectKey}' could not be resolved for this organization. Please ensure the module exists and you have access.`,
+      };
+    }
+
     const newRow = {
       organization_id: organizationId,
-      object_type_id: objDef.id || 'd0eebc99-9c0b-4ef8-bb6d-6bb9bd380a41',
+      object_type_id: objDef.id,
       name: resolvedName,
       status: status || 'Active',
       owner_id: owner_id || userId || null,
@@ -1497,7 +1507,11 @@ const objectService = {
           }
         }
 
-        // Priority 2: If not resolved yet, check explicit contact ID keys
+        // Priority 2: If not resolved yet, check explicit contact ID keys.
+        // Only accept a value from these keys as a CRM UUID (contactIdInput) when the value
+        // IS a UUID. Non-UUID display values (e.g. "Andrew Carl (andrew@example.com)") are
+        // redirected to contactNameInput for name-based resolution rather than being
+        // validated as UUIDs and thrown as errors.
         if (contactIdInput === undefined) {
           const explicitContactIdKeys = [
             'contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id',
@@ -1508,7 +1522,13 @@ const objectService = {
             if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
               const cStr = String(rowPayload[k]).trim();
               if (!isPlaceholder(cStr)) {
-                contactIdInput = cStr;
+                if (isUuid(cStr)) {
+                  // Confirmed CRM UUID — use it directly for the ID-based lookup
+                  contactIdInput = cStr;
+                } else if (contactNameInput === undefined) {
+                  // Display value (name, email-label, etc.) — route to name-based lookup
+                  contactNameInput = cStr;
+                }
                 break;
               }
             }
@@ -1751,7 +1771,11 @@ const objectService = {
       const extId = getRowExternalId(r);
       if (extId) candidateExtIdsSet.add(extId.toLowerCase());
       const rawInt = getRawRowInternalId(r);
-      if (rawInt && !isUuid(rawInt) && (/^\d+$/.test(rawInt) || !rawInt.includes('-'))) {
+      // Only treat rawInt as an external-ID candidate if it is a plain numeric string or
+      // an alphanumeric external reference that cannot possibly be mistaken for a UUID.
+      // Display names (contain spaces, @, etc.) are skipped here; they are not valid
+      // external ID keys and should not pollute the lookup cache.
+      if (rawInt && !isUuid(rawInt) && /^[a-z0-9_\-.:]+$/i.test(rawInt) && !/@|\s/.test(rawInt)) {
         candidateExtIdsSet.add(rawInt.toLowerCase());
       }
     }
@@ -1882,19 +1906,6 @@ const objectService = {
         const rawInternalId = getRawRowInternalId(payload);
         let rowExternalId = getRowExternalId(payload);
 
-        // In-CSV duplicate detection for external record ID
-        if (rowExternalId) {
-          const normExt = rowExternalId.toLowerCase();
-          const prevRow = seenCsvExternalIdsMap.get(normExt);
-          if (prevRow !== undefined && prevRow !== rowNum) {
-            throw {
-              statusCode: 400,
-              message: `Validation Error: Duplicate Record ID '${rowExternalId}' found within the import payload (rows ${prevRow} and ${rowNum}).`
-            };
-          }
-          seenCsvExternalIdsMap.set(normExt, rowNum);
-        }
-
         let candidateId = null;
         let existingRecord = null;
 
@@ -1907,21 +1918,50 @@ const objectService = {
             if (importMode === 'update_only') {
               throw { statusCode: 400, message: `Validation Error: Record ID '${rawInternalId}' is not a valid UUID format.` };
             } else if (importMode === 'create_only') {
-              // In Create Only: do not reject numeric external source ID; preserve it as external ID
-              if (!rowExternalId) {
+              // In Create Only: preserve numeric/alphanumeric external source IDs (e.g. HubSpot IDs).
+              // Silently skip display names (contain whitespace or '@') — they are not valid
+              // external IDs and should not be stored as record_id__c.
+              const looksLikeUuidAttemptCO = /^[0-9a-f]{8}-/i.test(rawInternalId);
+              const isDisplayName = /[@\s]/.test(rawInternalId);
+              if (!looksLikeUuidAttemptCO && !isDisplayName && !rowExternalId) {
                 rowExternalId = rawInternalId;
               }
             } else {
               // In Upsert (Create & Update):
-              if (/^\d+$/.test(rawInternalId) || !rawInternalId.includes('-')) {
+              // Treat the value as an external/source ID if it is:
+              //   a) a pure numeric string (e.g. HubSpot record IDs like 20498359428), OR
+              //   b) a plain alphanumeric external reference with no whitespace or @ symbols.
+              // Reject only values that look like a genuine UUID attempt (hex chars + hyphens
+              // in roughly the 8-4-4-4-12 pattern) but fail full UUID validation.
+              // Display names and email-label values (which may contain hyphens in domains)
+              // are treated as external IDs rather than rejected.
+              const looksLikeUuidAttempt = /^[0-9a-f]{8}-/i.test(rawInternalId);
+              if (!looksLikeUuidAttempt) {
+                // Not a UUID attempt — treat as external / source ID
                 if (!rowExternalId) rowExternalId = rawInternalId;
               } else {
-                // Malformed non-numeric string intended as internal UUID
+                // Genuinely looks like a malformed UUID (starts with 8 hex digits + hyphen)
                 throw { statusCode: 400, message: `Validation Error: Record ID '${rawInternalId}' is not a valid UUID format.` };
               }
             }
           }
         }
+
+        // In-CSV duplicate detection for external record ID.
+        // Runs AFTER the rawInternalId → rowExternalId promotion above so that promoted
+        // numeric/external IDs (e.g. HubSpot IDs in the 'id' field) are also detected.
+        if (rowExternalId) {
+          const normExt = rowExternalId.toLowerCase();
+          const prevRow = seenCsvExternalIdsMap.get(normExt);
+          if (prevRow !== undefined && prevRow !== rowNum) {
+            throw {
+              statusCode: 400,
+              message: `Validation Error: Duplicate Record ID '${rowExternalId}' found within the import payload (rows ${prevRow} and ${rowNum}).`
+            };
+          }
+          seenCsvExternalIdsMap.set(normExt, rowNum);
+        }
+
 
         // External-ID resolution for Segments if no direct UUID match was found
         const rowSegId = isSegmentObject ? String(payload.hubspot_segment_id ?? (payload.data && payload.data.hubspot_segment_id) ?? '').trim() : '';
