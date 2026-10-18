@@ -66,6 +66,11 @@ const getRecords = async (req, res, next) => {
       options.status = String(req.query.status).trim();
     }
 
+    if (req.query.related_to || req.query.related_id) {
+      options.related_to = String(req.query.related_to || req.query.related_id).trim();
+      options.related_type = req.query.related_type ? String(req.query.related_type).trim().toLowerCase() : null;
+    }
+
     const records = await objectService.listRecords(objectType, organizationId, options);
     return res.status(200).json(records);
   } catch (err) {
