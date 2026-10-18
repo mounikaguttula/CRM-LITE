@@ -158,6 +158,7 @@ export function mapHeaderToField(rawHeader, fields = []) {
     // Strictly block HubSpot Record ID, List ID, ILS Segment ID, Folder ID from ever mapping to internal id
     if (
       raw === 'record id' || raw === 'record_id' ||
+      raw === 'hubspot record id' || raw === 'hubspot_record_id' || raw === 'hubspot id' ||
       raw === 'list id' || raw === 'list_id' ||
       raw === 'ils segment id' || raw === 'ils_segment_id' ||
       raw === 'folder id' || raw === 'folder_id'
@@ -181,8 +182,14 @@ export function mapHeaderToField(rawHeader, fields = []) {
     if (idField) return idField;
   }
 
-  // Generic "Record ID" or "record_id" -> map to external Record ID field if present!
-  if (raw === 'record id' || raw === 'record_id') {
+  // Generic "Record ID" or "HubSpot Record ID" -> map to external Record ID field if present!
+  if (
+    raw === 'record id' ||
+    raw === 'record_id' ||
+    raw === 'hubspot record id' ||
+    raw === 'hubspot_record_id' ||
+    raw === 'hubspot id'
+  ) {
     const extField = fields.find(
       (f) =>
         f.key === 'record_id__c' ||

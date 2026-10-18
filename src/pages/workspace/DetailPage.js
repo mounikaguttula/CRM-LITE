@@ -991,6 +991,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [linkingForm, setLinkingForm] = useState(false);
   const [parentCompany, setParentCompany] = useState(null);
   const [primaryContact, setPrimaryContact] = useState(null);
+  const [relatedCompanies, setRelatedCompanies] = useState([]);
 
   /* Segment & Contact Relationship states */
   const [segmentContacts, setSegmentContacts] = useState([]);
@@ -1092,43 +1093,113 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
 
         const currentObjKey = String(objectTypeId).toLowerCase();
         const curId = recData?.id || recordId;
-        const compId = recData?.company_id || recData?.company || recData?.parent_id;
-        const contactId = recData?.contact_id || recData?.contact || recData?.secondary_parent_id;
+        const compId = recData?.company_id || recData?.company || recData?.parent_id || recData?.Company || recData?.Company_id;
+        const contactId = recData?.contact_id || recData?.contact || recData?.secondary_parent_id || recData?.Contact || recData?.Contact_id;
 
-        // Resolve Parent Company & Primary Contact for Deals / Contacts
-        if (compId && compMap[compId]) setParentCompany(compMap[compId]);
-        if (contactId && contMap[contactId]) setPrimaryContact(contMap[contactId]);
+        // Universal Relationship Extraction: extracts scalar IDs, multi-record arrays & delimited strings
+        const extractRelUuids = (record, keys) => {
+          const ids = [];
+          const collect = (val) => {
+            if (!val) return;
+            if (Array.isArray(val)) {
+              val.forEach(collect);
+            } else if (typeof val === 'string') {
+              if (val.includes(';') || val.includes(',')) {
+                val.split(/[;,]/).forEach(collect);
+              } else if (isUuid(val.trim())) {
+                ids.push(val.trim());
+              }
+            }
+          };
+          keys.forEach((k) => {
+            collect(record?.[k]);
+            collect(record?.data?.[k]);
+          });
+          return [...new Set(ids)];
+        };
+
+        const uniqueContactIds = extractRelUuids(recData, [
+          'secondary_parent_id', 'contact_id', 'Contact_id', 'contact', 'Contact',
+          'contact_ids', 'associated_contact_ids', 'contacts'
+        ]);
+
+        const uniqueCompanyIds = extractRelUuids(recData, [
+          'parent_id', 'company_id', 'Company_id', 'company', 'Company',
+          'company_ids', 'associated_company_ids', 'companies'
+        ]);
+
+        // Resolve Primary Contact & Parent Company
+        const primaryContObj = (contactId && contMap[contactId])
+          ? contMap[contactId]
+          : (uniqueContactIds.length > 0 && contMap[uniqueContactIds[0]] ? contMap[uniqueContactIds[0]] : null);
+        if (primaryContObj) setPrimaryContact(primaryContObj);
+
+        const parentCompObj = (compId && compMap[compId])
+          ? compMap[compId]
+          : (uniqueCompanyIds.length > 0 && compMap[uniqueCompanyIds[0]] ? compMap[uniqueCompanyIds[0]] : null);
+        if (parentCompObj) setParentCompany(parentCompObj);
+
+        // Pre-populate direct in-memory relationships for Deals and custom objects
+        const resolvedDirectContacts = uniqueContactIds.map((id) => contMap[id]).filter(Boolean);
+        const resolvedDirectCompanies = uniqueCompanyIds.map((id) => compMap[id]).filter(Boolean);
+
+        if (currentObjKey.includes('deal') || (!currentObjKey.includes('company') && !currentObjKey.includes('contact') && !currentObjKey.includes('segment'))) {
+          if (resolvedDirectContacts.length > 0) setRelatedContacts(resolvedDirectContacts);
+          if (resolvedDirectCompanies.length > 0) setRelatedCompanies(resolvedDirectCompanies);
+        }
 
         const prodList = Array.isArray(prodRes) ? prodRes : prodRes?.data || [];
         setCatalogProducts(prodList);
         const allLineItems = Array.isArray(lineItemRes) ? lineItemRes : lineItemRes?.data || [];
 
-        // Calculate Related Lists based on object type
         if (currentObjKey.includes('company') || currentObjKey.includes('account')) {
-          const matchedDeals = dealList.filter(
-            (d) =>
-              String(d.company_id) === String(curId) ||
-              String(d.company) === String(curId) ||
-              String(d.parent_id) === String(curId) ||
-              (recData?.name && String(d.company_name || d.company).toLowerCase() === String(recData.name).toLowerCase())
-          );
-          const matchedContacts = contactList.filter(
-            (ct) =>
-              String(ct.company_id) === String(curId) ||
-              String(ct.company) === String(curId) ||
-              String(ct.parent_id) === String(curId) ||
-              (recData?.name && String(ct.company_name || ct.company).toLowerCase() === String(recData.name).toLowerCase())
-          );
-          setRelatedDeals(matchedDeals);
-          setRelatedContacts(matchedContacts);
+          // Server-side, tenant-scoped reverse navigation query for related Contacts and Deals
+          apiGet(`/objects/contacts?related_to=${curId}&related_type=company`)
+            .then((res) => {
+              const list = Array.isArray(res) ? res : (res?.data || []);
+              if (isMounted) setRelatedContacts(list);
+            })
+            .catch((err) => {
+              console.error('Failed to fetch related contacts:', err);
+              if (isMounted) setRelatedContacts([]);
+            });
+
+          apiGet(`/objects/deals?related_to=${curId}&related_type=company`)
+            .then((res) => {
+              const list = Array.isArray(res) ? res : (res?.data || []);
+              if (isMounted) setRelatedDeals(list);
+            })
+            .catch((err) => {
+              console.error('Failed to fetch related deals:', err);
+              if (isMounted) setRelatedDeals([]);
+            });
         } else if (currentObjKey.includes('contact')) {
-          const matchedDeals = dealList.filter(
-            (d) =>
-              String(d.contact_id) === String(curId) ||
-              String(d.secondary_parent_id) === String(curId) ||
-              (compId && (String(d.company_id) === String(compId) || String(d.parent_id) === String(compId)))
-          );
-          setRelatedDeals(matchedDeals);
+          // Server-side, tenant-scoped query for all linked companies and deals
+          apiGet(`/objects/companies?related_to=${curId}&related_type=contact`)
+            .then((res) => {
+              const list = Array.isArray(res) ? res : (res?.data || []);
+              if (isMounted) {
+                setRelatedCompanies(list);
+                if (!parentCompany && list.length > 0) {
+                  const prim = list.find((c) => String(c.id) === String(compId || recData?.parent_id)) || list[0];
+                  setParentCompany(prim);
+                }
+              }
+            })
+            .catch((err) => {
+              console.error('Failed to fetch related companies:', err);
+              if (isMounted) setRelatedCompanies([]);
+            });
+
+          apiGet(`/objects/deals?related_to=${curId}&related_type=contact`)
+            .then((res) => {
+              const list = Array.isArray(res) ? res : (res?.data || []);
+              if (isMounted) setRelatedDeals(list);
+            })
+            .catch((err) => {
+              console.error('Failed to fetch related deals:', err);
+              if (isMounted) setRelatedDeals([]);
+            });
 
           apiGet(`/api/segments/by-contact/${curId}`)
             .then((res) => {
@@ -2060,6 +2131,138 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return <span style={{ color: C.dim }}>—</span>;
     }
 
+    /* Universal Multi-Record or Array Relationship Rendering */
+    let arrayCandidate = null;
+    if (Array.isArray(val)) {
+      arrayCandidate = val;
+    } else if (typeof val === 'string' && (val.includes(';') || (val.includes(',') && val.split(',').some(isUuid)))) {
+      arrayCandidate = val.split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+    }
+
+    if (arrayCandidate) {
+      if (arrayCandidate.length === 0) return <span style={{ color: C.dim }}>—</span>;
+      const isContactRel = fNameLower.includes('contact') || f.target === 'contact' || f.target === 'Contact';
+      const isCompanyRel = fNameLower.includes('company') || f.target === 'company' || f.target === 'Company';
+
+      return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {arrayCandidate.map((item, idx) => {
+            const strItem = String(item).trim();
+            if (isUuid(strItem)) {
+              if (isContactRel || lookupMap.contacts?.[strItem]) {
+                const contObj = lookupMap.contacts?.[strItem] || lookupMap.all?.[strItem];
+                const name = contObj?.name || `${contObj?.first_name || ''} ${contObj?.last_name || ''}`.trim() || formatLookupValue(f.name, strItem, record, currentUser, organization, company, lookupMap);
+                const isPrimary = String(strItem) === String(record?.secondary_parent_id || record?.contact_id || primaryContact?.id);
+                return (
+                  <Link
+                    key={idx}
+                    to={`/workspace/object/contact/${strItem}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 700,
+                      color: C.indigo,
+                      textDecoration: 'none',
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      background: isPrimary ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)',
+                      border: isPrimary ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                      fontSize: '0.85rem',
+                      transition: 'all .15s ease',
+                    }}
+                  >
+                    <User size={13} />
+                    {name && name !== '—' && !isUuid(name) ? name : strItem.slice(0, 8)}
+                    {isPrimary && (
+                      <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', fontWeight: 800 }}>
+                        Primary
+                      </span>
+                    )}
+                    <ExternalLink size={11} style={{ opacity: 0.7 }} />
+                  </Link>
+                );
+              }
+
+              if (isCompanyRel || lookupMap.companies?.[strItem]) {
+                const compObj = lookupMap.companies?.[strItem] || lookupMap.all?.[strItem];
+                const name = compObj?.name || compObj?.company_name || formatLookupValue(f.name, strItem, record, currentUser, organization, company, lookupMap);
+                const isPrimary = String(strItem) === String(record?.parent_id || record?.company_id || parentCompany?.id);
+                return (
+                  <Link
+                    key={idx}
+                    to={`/workspace/object/company/${strItem}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 700,
+                      color: C.indigo,
+                      textDecoration: 'none',
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      background: isPrimary ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)',
+                      border: isPrimary ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                      fontSize: '0.85rem',
+                      transition: 'all .15s ease',
+                    }}
+                  >
+                    <Building2 size={13} />
+                    {name && name !== '—' && !isUuid(name) ? name : strItem.slice(0, 8)}
+                    {isPrimary && (
+                      <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', fontWeight: 800 }}>
+                        Primary
+                      </span>
+                    )}
+                    <ExternalLink size={11} style={{ opacity: 0.7 }} />
+                  </Link>
+                );
+              }
+
+              const resolvedName = formatLookupValue(f.name, strItem, record, currentUser, organization, company, lookupMap);
+              return (
+                <span
+                  key={idx}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    background: '#f1f5f9',
+                    color: C.text,
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {resolvedName && resolvedName !== '—' && !isUuid(resolvedName) ? resolvedName : strItem.slice(0, 8)}
+                </span>
+              );
+            }
+
+            return (
+              <span
+                key={idx}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  background: '#f1f5f9',
+                  color: C.text,
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                }}
+              >
+                {strItem}
+              </span>
+            );
+          })}
+        </div>
+      );
+    }
+
     /* Company / Account Lookup Field (Strict Metadata Checks) */
     const isCompanyLookup = f.type === 'lookup' && (
       f.target === 'company' ||
@@ -2813,140 +3016,162 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
               )}
 
               {(currentObjKey.includes('company') || currentObjKey.includes('account')) && (
-                <>
-                  <section style={{
-                    borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
-                    boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
-                  }}>
-                    <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
-                          <Briefcase size={18} />
-                        </span>
-                        <div>
-                          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
-                            DEALS
-                          </h3>
-                          <span style={{ fontSize: 12, color: C.dim }}>Deals linked to {recordTitle}</span>
-                        </div>
-                        <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
-                          {relatedDeals.length}
-                        </span>
+                <section style={{
+                  borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                  boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                }}>
+                  <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        <Briefcase size={18} />
+                      </span>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                          DEALS
+                        </h3>
+                        <span style={{ fontSize: 12, color: C.dim }}>Deals linked to {recordTitle}</span>
                       </div>
+                      <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        {relatedDeals.length}
+                      </span>
+                    </div>
 
-                      <button
-                        onClick={() => navigate(`/workspace/object/deal/new?company_id=${recordId}`)}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-                          borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                          color: '#fff', background: C.primaryGrad, boxShadow: '0 8px 18px -8px rgba(99,102,241,.6)',
-                        }}
-                      >
-                        <Plus size={15} /> New Deal
-                      </button>
-                    </header>
+                    <button
+                      onClick={() => navigate(`/workspace/object/deal/new?company_id=${recordId}`)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                        color: '#fff', background: C.primaryGrad, boxShadow: '0 8px 18px -8px rgba(99,102,241,.6)',
+                      }}
+                    >
+                      <Plus size={15} /> New Deal
+                    </button>
+                  </header>
 
-                    {relatedDeals.length > 0 ? (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
-                          <thead>
-                            <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                              <th style={{ padding: '12px 20px' }}>Deal Name</th>
-                              <th style={{ padding: '12px 16px' }}>Stage</th>
-                              <th style={{ padding: '12px 16px' }}>Amount</th>
-                              <th style={{ padding: '12px 16px' }}>Primary Contact</th>
-                              <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {relatedDeals.map((deal) => (
-                              <tr key={deal.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                                <td style={{ padding: '14px 20px', fontWeight: 700 }}>
-                                  <Link to={`/workspace/object/deal/${deal.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                    <Briefcase size={14} />
-                                    {deal.name || deal.title || 'Untitled Deal'}
+                  {relatedDeals.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                            <th style={{ padding: '12px 20px' }}>Deal Name</th>
+                            <th style={{ padding: '12px 16px' }}>Stage</th>
+                            <th style={{ padding: '12px 16px' }}>Amount</th>
+                            <th style={{ padding: '12px 16px' }}>Primary Contact</th>
+                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatedDeals.map((deal) => (
+                            <tr key={deal.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '14px 20px', fontWeight: 700 }}>
+                                <Link to={`/workspace/object/deal/${deal.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <Briefcase size={14} />
+                                  {deal.name || deal.title || 'Untitled Deal'}
+                                </Link>
+                              </td>
+                              <td style={{ padding: '14px 16px' }}>{statusBadge(deal.stage || deal.status)}</td>
+                              <td style={{ padding: '14px 16px', fontWeight: 700, color: C.text }}>
+                                {deal.amount ? `$${Number(deal.amount).toLocaleString()}` : '—'}
+                              </td>
+                              <td style={{ padding: '14px 16px', color: C.dim }}>
+                                {deal.contact_id && lookupMap.contacts[deal.contact_id] ? (
+                                  <Link to={`/workspace/object/contact/${deal.contact_id}`} style={{ color: C.text, textDecoration: 'none', fontWeight: 600 }}>
+                                    {lookupMap.contacts[deal.contact_id].name}
                                   </Link>
-                                </td>
-                                <td style={{ padding: '14px 16px' }}>{statusBadge(deal.stage || deal.status)}</td>
-                                <td style={{ padding: '14px 16px', fontWeight: 700, color: C.text }}>
-                                  {deal.amount ? `$${Number(deal.amount).toLocaleString()}` : '—'}
-                                </td>
-                                <td style={{ padding: '14px 16px', color: C.dim }}>
-                                  {deal.contact_id && lookupMap.contacts[deal.contact_id] ? (
-                                    <Link to={`/workspace/object/contact/${deal.contact_id}`} style={{ color: C.text, textDecoration: 'none', fontWeight: 600 }}>
-                                      {lookupMap.contacts[deal.contact_id].name}
-                                    </Link>
-                                  ) : '—'}
-                                </td>
-                                <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                                  <Link to={`/workspace/object/deal/${deal.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
-                                    View <ChevronRight size={14} />
-                                  </Link>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
-                        No deals created for this company yet. Click <strong>"+ New Deal"</strong> above to add one.
-                      </div>
-                    )}
-                  </section>
-
-                  <section style={{
-                    borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
-                    boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
-                  }}>
-                    <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(34,211,238,.14)', color: C.cyan }}>
-                          <Users size={18} />
-                        </span>
-                        <div>
-                          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
-                            CONTACTS
-                          </h3>
-                          <span style={{ fontSize: 12, color: C.dim }}>People associated with {recordTitle}</span>
-                        </div>
-                        <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(34,211,238,.14)', color: '#0891b2' }}>
-                          {relatedContacts.length}
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={() => navigate(`/workspace/object/contact/new?company_id=${recordId}`)}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-                          borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                          color: '#fff', background: C.primaryGrad, boxShadow: '0 8px 18px -8px rgba(34,211,238,.6)',
-                        }}
-                      >
-                        <Plus size={15} /> New Contact
-                      </button>
-                    </header>
-
-                    {relatedContacts.length > 0 ? (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
-                          <thead>
-                            <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                              <th style={{ padding: '12px 20px' }}>Contact Name</th>
-                              <th style={{ padding: '12px 16px' }}>Email</th>
-                              <th style={{ padding: '12px 16px' }}>Phone</th>
-                              <th style={{ padding: '12px 16px' }}>Title</th>
-                              <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                                ) : '—'}
+                              </td>
+                              <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                <Link to={`/workspace/object/deal/${deal.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                  View <ChevronRight size={14} />
+                                </Link>
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {relatedContacts.map((ct) => (
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No deals created for this company yet. Click <strong>"+ New Deal"</strong> above to add one.
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {(currentObjKey.includes('company') || currentObjKey.includes('account') || currentObjKey.includes('deal') || (!currentObjKey.includes('contact') && !currentObjKey.includes('segment') && relatedContacts.length > 0)) && (
+                <section style={{
+                  borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                  boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                }}>
+                  <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(34,211,238,.14)', color: C.cyan }}>
+                        <Users size={18} />
+                      </span>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                          CONTACTS
+                        </h3>
+                        <span style={{ fontSize: 12, color: C.dim }}>People associated with {recordTitle}</span>
+                      </div>
+                      <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(34,211,238,.14)', color: '#0891b2' }}>
+                        {relatedContacts.length}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const targetQuery = currentObjKey.includes('company')
+                          ? `company_id=${recordId}`
+                          : (currentObjKey.includes('deal')
+                            ? `deal_id=${recordId}${record.company_id ? `&company_id=${record.company_id}` : ''}`
+                            : '');
+                        navigate(`/workspace/object/contact/new${targetQuery ? `?${targetQuery}` : ''}`);
+                      }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                        color: '#fff', background: C.primaryGrad, boxShadow: '0 8px 18px -8px rgba(34,211,238,.6)',
+                      }}
+                    >
+                      <Plus size={15} /> New Contact
+                    </button>
+                  </header>
+
+                  {relatedContacts.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                            <th style={{ padding: '12px 20px' }}>Contact Name</th>
+                            <th style={{ padding: '12px 16px' }}>Association</th>
+                            <th style={{ padding: '12px 16px' }}>Email</th>
+                            <th style={{ padding: '12px 16px' }}>Phone</th>
+                            <th style={{ padding: '12px 16px' }}>Title</th>
+                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatedContacts.map((ct) => {
+                            const isPrimary = String(ct.id) === String(record?.secondary_parent_id || record?.contact_id || primaryContact?.id);
+                            return (
                               <tr key={ct.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                                 <td style={{ padding: '14px 20px', fontWeight: 700 }}>
                                   <Link to={`/workspace/object/contact/${ct.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                                     {smallAvatar(ct.name || ct.first_name, 24)}
                                     {ct.name || `${ct.first_name || ''} ${ct.last_name || ''}`.trim() || 'Untitled Contact'}
                                   </Link>
+                                </td>
+                                <td style={{ padding: '14px 16px' }}>
+                                  {isPrimary ? (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: '#ede9fe', color: '#6d28d9', fontSize: 11, fontWeight: 700 }}>
+                                      Primary
+                                    </span>
+                                  ) : (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: '#f1f5f9', color: C.dim, fontSize: 11, fontWeight: 700 }}>
+                                      Associated
+                                    </span>
+                                  )}
                                 </td>
                                 <td style={{ padding: '14px 16px', color: C.dim }}>
                                   {ct.email ? <a href={`mailto:${ct.email}`} style={{ color: C.indigo, textDecoration: 'none' }}>{ct.email}</a> : '—'}
@@ -2959,50 +3184,118 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                                   </Link>
                                 </td>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No contacts associated with this record yet. Click <strong>"+ New Contact"</strong> above to add one.
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {(currentObjKey.includes('contact') || currentObjKey.includes('deal') || (!currentObjKey.includes('company') && !currentObjKey.includes('segment') && relatedCompanies.length > 0)) && (
+                <section style={{
+                  borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
+                  boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', overflow: 'hidden',
+                }}>
+                  <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: 'linear-gradient(90deg,rgba(99,102,241,.06),rgba(34,211,238,.03))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        <Building2 size={18} />
+                      </span>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: '.05em', color: C.text }}>
+                          LINKED COMPANIES
+                        </h3>
+                        <span style={{ fontSize: 12, color: C.dim }}>Companies associated with {recordTitle}</span>
                       </div>
-                    ) : (
-                      <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
-                        No contacts associated with this company yet. Click <strong>"+ New Contact"</strong> above to add one.
-                      </div>
-                    )}
-                  </section>
-                </>
+                      <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
+                        {relatedCompanies.length}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const targetQuery = currentObjKey.includes('contact')
+                          ? `contact_id=${recordId}`
+                          : (currentObjKey.includes('deal') ? `deal_id=${recordId}` : '');
+                        navigate(`/workspace/object/company/new${targetQuery ? `?${targetQuery}` : ''}`);
+                      }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                        color: '#fff', background: C.primaryGrad,
+                      }}
+                    >
+                      <Plus size={15} /> New Company
+                    </button>
+                  </header>
+
+                  {relatedCompanies.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                            <th style={{ padding: '12px 20px' }}>Company Name</th>
+                            <th style={{ padding: '12px 16px' }}>Association</th>
+                            <th style={{ padding: '12px 16px' }}>Domain / Website</th>
+                            <th style={{ padding: '12px 16px' }}>Phone / Location</th>
+                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatedCompanies.map((comp) => {
+                            const isPrimary = String(comp.id) === String(record?.parent_id || record?.company_id || parentCompany?.id);
+                            return (
+                              <tr key={comp.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                                <td style={{ padding: '14px 20px', fontWeight: 700 }}>
+                                  <Link to={`/workspace/object/company/${comp.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                    {smallAvatar(comp.name, 24)}
+                                    {comp.name || comp.company_name || 'Untitled Company'}
+                                  </Link>
+                                </td>
+                                <td style={{ padding: '14px 16px' }}>
+                                  {isPrimary ? (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: '#ede9fe', color: '#6d28d9', fontSize: 11, fontWeight: 700 }}>
+                                      Primary
+                                    </span>
+                                  ) : (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: '#f1f5f9', color: C.dim, fontSize: 11, fontWeight: 700 }}>
+                                      Associated
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '14px 16px', color: C.dim }}>
+                                  {comp.domain || comp.data?.domain || comp.data?.website || comp.website || '—'}
+                                </td>
+                                <td style={{ padding: '14px 16px', color: C.text }}>
+                                  {comp.phone || comp.data?.phone || comp.city || comp.data?.city || '—'}
+                                </td>
+                                <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                  <Link to={`/workspace/object/company/${comp.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                    View <ChevronRight size={14} />
+                                  </Link>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No companies associated with this record yet. Click <strong>"+ New Company"</strong> above to add one.
+                    </div>
+                  )}
+                </section>
               )}
 
               {currentObjKey.includes('contact') && (
                 <>
-                  {parentCompany ? (
-                    <section style={{
-                      borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
-                      boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', padding: 22,
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 14, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
-                          <Building2 size={22} />
-                        </span>
-                        <div>
-                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.12em', color: C.dim }}>LINKED COMPANY</span>
-                          <h4 style={{ margin: '2px 0 0', fontSize: 18, fontWeight: 800, color: C.text }}>
-                            {parentCompany.name || parentCompany.company_name}
-                          </h4>
-                        </div>
-                      </div>
-                      <Link
-                        to={`/workspace/object/company/${parentCompany.id}`}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px',
-                          borderRadius: 12, fontSize: 13, fontWeight: 700, color: '#fff',
-                          background: C.primaryGrad, textDecoration: 'none',
-                        }}
-                      >
-                        View Company Record <ExternalLink size={14} />
-                      </Link>
-                    </section>
-                  ) : null}
 
                   <section style={{
                     borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
@@ -3281,69 +3574,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </section>
               )}
 
-              {currentObjKey.includes('deal') && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
-                  <section style={{
-                    borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
-                    boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', padding: 24,
-                    display: 'flex', flexDirection: 'column', gap: 14,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 12, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
-                        <Building2 size={20} />
-                      </span>
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.12em', color: C.dim }}>LINKED COMPANY</span>
-                        <h4 style={{ margin: '2px 0 0', fontSize: 16, fontWeight: 800, color: C.text }}>
-                          {parentCompany ? parentCompany.name : (record.company_name || 'No Company Linked')}
-                        </h4>
-                      </div>
-                    </div>
-                    {parentCompany ? (
-                      <Link
-                        to={`/workspace/object/company/${parentCompany.id}`}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px',
-                          borderRadius: 12, fontSize: 13, fontWeight: 700, color: '#fff',
-                          background: C.primaryGrad, textDecoration: 'none', marginTop: 6, width: 'fit-content',
-                        }}
-                      >
-                        Open Company Page <ExternalLink size={14} />
-                      </Link>
-                    ) : null}
-                  </section>
 
-                  <section style={{
-                    borderRadius: 22, border: `1px solid ${C.border}`, background: C.card,
-                    boxShadow: '0 18px 40px -30px rgba(20,26,50,.35)', padding: 24,
-                    display: 'flex', flexDirection: 'column', gap: 14,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 12, background: 'rgba(34,211,238,.14)', color: C.cyan }}>
-                        <User size={20} />
-                      </span>
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.12em', color: C.dim }}>PRIMARY CONTACT</span>
-                        <h4 style={{ margin: '2px 0 0', fontSize: 16, fontWeight: 800, color: C.text }}>
-                          {primaryContact ? primaryContact.name : (record.contact_name || 'No Contact Linked')}
-                        </h4>
-                      </div>
-                    </div>
-                    {primaryContact ? (
-                      <Link
-                        to={`/workspace/object/contact/${primaryContact.id}`}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px',
-                          borderRadius: 12, fontSize: 13, fontWeight: 700, color: '#fff',
-                          background: C.primaryGrad, textDecoration: 'none', marginTop: 6, width: 'fit-content',
-                        }}
-                      >
-                        Open Contact Page <ExternalLink size={14} />
-                      </Link>
-                    ) : null}
-                  </section>
-                </div>
-              )}
 
               {currentObjKey.includes('segment') && (
                 <section style={{
@@ -3436,7 +3667,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                 </section>
               )}
 
-              {!currentObjKey.includes('company') && !currentObjKey.includes('account') && !currentObjKey.includes('contact') && !currentObjKey.includes('deal') && !currentObjKey.includes('campaign') && !currentObjKey.includes('form') && !currentObjKey.includes('segment') && (
+              {relatedDeals.length === 0 && relatedContacts.length === 0 && relatedCompanies.length === 0 && relatedForms.length === 0 && lineItems.length === 0 && segmentContacts.length === 0 && (
                 <section style={{
                   borderRadius: 22, border: `1px dashed ${C.border}`, background: 'rgba(255,255,255,.6)',
                   padding: '64px 26px', textAlign: 'center', color: C.dim, fontSize: 14,

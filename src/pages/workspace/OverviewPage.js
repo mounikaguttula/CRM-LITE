@@ -2616,12 +2616,12 @@ function ObjectListContent({ objectTypeId }) {
     // Required Fields (ALWAYS checked & locked in Column A and Column B)
     if (isCompany) {
       fieldsList.push({ key: 'name', label: 'Company Name', category: 'Required Fields', required: true });
-      fieldsList.push({ key: 'id', label: 'Company ID', category: 'Required Fields', required: true });
+      fieldsList.push({ key: 'id', label: 'CRM Record UUID', category: 'Required Fields', required: true });
     } else {
       const primaryTitleKey = meta.fields?.find((f) => f.isTitle)?.name || (isContact ? 'name' : (isDeal ? 'deal_name' : 'name'));
       const titleLabel = meta.fields?.find((f) => f.isTitle)?.label || (isContact ? 'Contact Name' : (isDeal ? 'Deal Name' : 'Record Title'));
       fieldsList.push({ key: primaryTitleKey, label: titleLabel, category: 'Required Fields', required: true });
-      fieldsList.push({ key: 'id', label: 'Record ID', category: 'Required Fields', required: true });
+      fieldsList.push({ key: 'id', label: 'CRM Record UUID', category: 'Required Fields', required: true });
     }
 
     // Ownership Fields
@@ -2633,9 +2633,13 @@ function ObjectListContent({ objectTypeId }) {
     const metaFields = backendFields && backendFields.length > 0 ? backendFields : (meta.fields || []);
     metaFields.forEach((f) => {
       const key = f.name || f.api_name;
-      const label = f.label || f.display_name || humanize(key);
+      let label = f.label || f.display_name || humanize(key);
       if (!key || ['id', 'is_deleted', 'organization_id'].includes(key)) return;
       if (fieldsList.some((item) => item.key === key)) return;
+
+      if (key === 'record_id__c' || key === 'hubspot_record_id' || key === 'hubspot_reference_id') {
+        label = 'HubSpot Record ID';
+      }
 
       fieldsList.push({
         key,
@@ -2644,6 +2648,17 @@ function ObjectListContent({ objectTypeId }) {
         required: false,
       });
     });
+
+    // Ensure HubSpot Record ID is available for modules where external source IDs are tracked
+    const hasExternalIdField = fieldsList.some((item) => ['record_id__c', 'hubspot_record_id', 'hubspot_reference_id'].includes(item.key));
+    if (!hasExternalIdField && (isContact || isCompany || isDeal)) {
+      fieldsList.push({
+        key: 'record_id__c',
+        label: 'HubSpot Record ID',
+        category: 'Custom Fields',
+        required: false,
+      });
+    }
 
     return fieldsList;
   }, [objectTypeId, meta, backendFields]);
@@ -2661,7 +2676,7 @@ function ObjectListContent({ objectTypeId }) {
     columns.forEach((c) => {
       if (availableExportFields.some((af) => af.key === c.key)) defaultKeys.add(c.key);
     });
-    ['owner_name', 'email', 'phone', 'industry', 'company_size__c', 'annual_revenue', 'status', 'created_at'].forEach((k) => {
+    ['owner_name', 'email', 'phone', 'industry', 'company_size__c', 'annual_revenue', 'status', 'created_at', 'record_id__c', 'hubspot_record_id'].forEach((k) => {
       if (availableExportFields.some((af) => af.key === k)) defaultKeys.add(k);
     });
 
@@ -2746,11 +2761,11 @@ function ObjectListContent({ objectTypeId }) {
 
     const getHeaderLabel = (k) => {
       if (k === 'name' && isCompany) return 'Company Name';
-      if (k === 'id' && isCompany) return 'Company ID';
+      if (k === 'id') return 'CRM Record UUID';
+      if (k === 'record_id__c' || k === 'hubspot_record_id' || k === 'hubspot_reference_id') return 'HubSpot Record ID';
       if (k === 'owner_id') return 'Owner ID';
       if (k === 'owner_email') return 'Owner Email';
       if (k === 'owner_name') return 'Owner Name';
-      if (k === 'id') return 'Record ID';
       const af = availableExportFields.find((f) => f.key === k);
       return af ? af.label : humanize(k);
     };
@@ -2793,6 +2808,8 @@ function ObjectListContent({ objectTypeId }) {
         let val;
         if (k === 'id') {
           val = rec.id;
+        } else if (k === 'record_id__c' || k === 'hubspot_record_id' || k === 'hubspot_reference_id') {
+          val = rec.data?.record_id__c ?? rec.data?.hubspot_record_id ?? rec.data?.hubspot_reference_id ?? rec[k] ?? '';
         } else if (k === 'owner_id') {
           val = rec.owner_id || rec.data?.owner_id || '';
         } else if (k === 'owner_email') {

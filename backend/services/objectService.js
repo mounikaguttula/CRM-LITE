@@ -217,6 +217,42 @@ const validateParentRelationship = async (parentId, expectedObjectKey, organizat
   return parentRow;
 };
 
+/**
+ * Helper to resolve company identifiers (UUIDs, external/HubSpot IDs) stored on a contact record.
+ */
+const resolveContactCompanyTokens = async (contactId, organizationId = null) => {
+  if (!isUuid(contactId)) return [];
+  try {
+    let q = supabase
+      .from('universal_table')
+      .select('parent_id, data')
+      .eq('id', contactId)
+      .eq('is_deleted', false);
+    if (organizationId) q = q.eq('organization_id', organizationId);
+    const { data: contactRow } = await q.maybeSingle();
+
+    if (!contactRow) return [];
+
+    const rawTokens = [
+      contactRow.parent_id,
+      ...(Array.isArray(contactRow.data?.company_ids) ? contactRow.data.company_ids : []),
+      ...(Array.isArray(contactRow.data?.associated_company_ids) ? contactRow.data.associated_company_ids : []),
+      ...(typeof contactRow.data?.associated_company_ids__c === 'string'
+        ? contactRow.data.associated_company_ids__c.split(';').map((s) => s.trim()).filter(Boolean)
+        : []),
+      ...(typeof contactRow.data?.associated_company_ids_primary__c === 'string'
+        ? contactRow.data.associated_company_ids_primary__c.split(';').map((s) => s.trim()).filter(Boolean)
+        : [])
+    ].filter(Boolean);
+
+    return [...new Set(rawTokens)];
+  } catch (err) {
+    console.warn('Could not resolve contact company tokens:', err.message);
+    return [];
+  }
+};
+
+
 // Helper to resolve parent by name within the current tenant, handling ambiguity
 const resolveParentByName = async (nameInput, targetObjectKey, organizationId, fieldLabel = 'Company') => {
   if (!nameInput || typeof nameInput !== 'string' || !nameInput.trim()) return null;
@@ -546,6 +582,7 @@ const objectService = {
       return isPaginated ? { success: true, data: [], meta: { page: reqPage, pageSize: reqPageSize, total: 0, totalPages: 0 } } : [];
     }
 
+    const cleanKey = String(objectKey || '').toLowerCase();
     const objDef = await metadataService.getObjectTypeByApiName(objectKey, organizationId).catch(() => null);
     const targetTypeId = objDef ? objDef.id : (isUuid(objectKey) ? objectKey : null);
     if (!targetTypeId) {
@@ -579,6 +616,39 @@ const objectService = {
       if (options.status && options.status !== 'ALL') {
         const cleanStatus = String(options.status).trim();
         query = query.or(`status.ilike.%${cleanStatus}%,data->>status.ilike.%${cleanStatus}%,data->>stage.ilike.%${cleanStatus}%`);
+      }
+
+      if (options.related_to && isUuid(options.related_to)) {
+        const relId = options.related_to;
+        const jsonFilter = JSON.stringify([relId]);
+        const relType = String(options.related_type || '').toLowerCase();
+        const isTargetCompany = cleanKey.includes('compan');
+
+        if (isTargetCompany && relType === 'contact') {
+          const compTokens = await resolveContactCompanyTokens(relId, organizationId);
+          const uuidTokens = compTokens.filter(isUuid);
+          const extTokens = compTokens.filter((t) => !isUuid(t) && typeof t === 'string' && t.trim() !== '');
+
+          const orParts = [
+            `data->contact_ids.cs.${jsonFilter}`,
+            `data->associated_contact_ids.cs.${jsonFilter}`
+          ];
+          if (uuidTokens.length > 0) {
+            orParts.push(`id.in.(${uuidTokens.join(',')})`);
+          }
+          if (extTokens.length > 0) {
+            const cleanExt = extTokens.map((t) => t.replace(/[,()]/g, '')).filter(Boolean);
+            if (cleanExt.length > 0) {
+              orParts.push(`data->>record_id__c.in.(${cleanExt.join(',')})`);
+              orParts.push(`data->>hubspot_id.in.(${cleanExt.join(',')})`);
+            }
+          }
+          query = query.or(orParts.join(','));
+        } else if (relType === 'contact') {
+          query = query.or(`secondary_parent_id.eq.${relId},data->contact_ids.cs.${jsonFilter},data->associated_contact_ids.cs.${jsonFilter}`);
+        } else {
+          query = query.or(`parent_id.eq.${relId},data->company_ids.cs.${jsonFilter},data->associated_company_ids.cs.${jsonFilter}`);
+        }
       }
 
       const sortCol = (options.sortBy === 'name' || options.sortBy === 'title')
@@ -682,6 +752,39 @@ const objectService = {
       if (options.status && options.status !== 'ALL') {
         const cleanStatus = String(options.status).trim();
         query = query.or(`status.ilike.%${cleanStatus}%,data->>status.ilike.%${cleanStatus}%,data->>stage.ilike.%${cleanStatus}%`);
+      }
+
+      if (options.related_to && isUuid(options.related_to)) {
+        const relId = options.related_to;
+        const jsonFilter = JSON.stringify([relId]);
+        const relType = String(options.related_type || '').toLowerCase();
+        const isTargetCompany = cleanKey.includes('compan');
+
+        if (isTargetCompany && relType === 'contact') {
+          const compTokens = await resolveContactCompanyTokens(relId, organizationId);
+          const uuidTokens = compTokens.filter(isUuid);
+          const extTokens = compTokens.filter((t) => !isUuid(t) && typeof t === 'string' && t.trim() !== '');
+
+          const orParts = [
+            `data->contact_ids.cs.${jsonFilter}`,
+            `data->associated_contact_ids.cs.${jsonFilter}`
+          ];
+          if (uuidTokens.length > 0) {
+            orParts.push(`id.in.(${uuidTokens.join(',')})`);
+          }
+          if (extTokens.length > 0) {
+            const cleanExt = extTokens.map((t) => t.replace(/[,()]/g, '')).filter(Boolean);
+            if (cleanExt.length > 0) {
+              orParts.push(`data->>record_id__c.in.(${cleanExt.join(',')})`);
+              orParts.push(`data->>hubspot_id.in.(${cleanExt.join(',')})`);
+            }
+          }
+          query = query.or(orParts.join(','));
+        } else if (relType === 'contact') {
+          query = query.or(`secondary_parent_id.eq.${relId},data->contact_ids.cs.${jsonFilter},data->associated_contact_ids.cs.${jsonFilter}`);
+        } else {
+          query = query.or(`parent_id.eq.${relId},data->company_ids.cs.${jsonFilter},data->associated_company_ids.cs.${jsonFilter}`);
+        }
       }
 
       query = query.range(page * pageSize, (page + 1) * pageSize - 1);
@@ -1392,7 +1495,7 @@ const objectService = {
     }
 
     // 2. Extract unique Company IDs/Names and Contact IDs/Names across all rows in recordsArray
-    const isCompanyObject = cleanKey.includes('company') || cleanKey.includes('account');
+    const isCompanyObject = cleanKey.includes('company') || cleanKey.includes('companies') || cleanKey.includes('account');
     const isContactObject = cleanKey.includes('contact') || cleanKey.includes('person');
 
     const companyIdsSet = new Set();
@@ -1406,63 +1509,45 @@ const objectService = {
       return PLACEHOLDERS.has(String(val).trim().toLowerCase());
     };
 
+    const extractMultiTokens = (val, delimiter = ';') => {
+      if (val === null || val === undefined) return [];
+      if (Array.isArray(val)) {
+        return val.map((v) => String(v).trim()).filter((v) => Boolean(v) && !isPlaceholder(v));
+      }
+      const str = String(val).trim();
+      if (!str || isPlaceholder(str)) return [];
+      if (str.includes(delimiter)) {
+        return str.split(delimiter).map((v) => v.trim()).filter((v) => Boolean(v) && !isPlaceholder(v));
+      }
+      return [str];
+    };
+
     const extractedInputs = recordsArray.map((rowPayload) => {
-      let companyIdInput = undefined;
-      let companyNameInput = undefined;
-      let contactIdInput = undefined;
-      let contactNameInput = undefined;
+      let companyTokens = [];
+      let contactTokens = [];
 
       if (!isCompanyObject) {
-        // Priority 1: Check if an internal UUID is already resolved in company, company_id, or parent_id
-        const resolvedCompanyKeys = ['company', 'company_id', 'parent_id', 'Company', 'Company_id'];
-        for (const k of resolvedCompanyKeys) {
-          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            const val = String(rowPayload[k]).trim();
-            if (isUuid(val)) {
-              companyIdInput = val;
+        const candidateCompanyKeys = [
+          'company_ids', 'Company IDs', 'associated_company_ids', 'Associated Company IDs', 'assoc_company_ids',
+          'company', 'company_id', 'parent_id', 'Company', 'Company_id', 'primary_company_id', 'Primary Company ID',
+          'Associated Company IDs (Primary)', 'associated_company_id', 'Associated Company ID', 'assoc_company_id'
+        ];
+        for (const k of candidateCompanyKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
+            const toks = extractMultiTokens(rowPayload[k]);
+            if (toks.length > 0) {
+              companyTokens = toks;
               break;
             }
           }
         }
-
-        // Priority 2: If not resolved yet, check other explicit company ID keys, ignoring placeholders
-        if (companyIdInput === undefined) {
-          const explicitCompanyIdKeys = [
-            'company_id', 'Company ID', 'CompanyId', 'Company_id', 'company_uuid', 'parent_id',
-            'primary_company_id', 'Primary Company ID', 'Primary Company IDs', 'Associated Company IDs (Primary)',
-            'associated_company_id', 'Associated Company ID', 'associated_company_ids', 'Associated Company IDs',
-            'assoc_company_id', 'assoc_company_ids'
-          ];
-          for (const k of explicitCompanyIdKeys) {
-            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-              const rawStr = String(rowPayload[k]).trim();
-              if (!isPlaceholder(rawStr)) {
-                companyIdInput = rawStr;
-                break;
-              }
-            }
-          }
-        }
-        if (companyIdInput === undefined) {
-          const rawComp = rowPayload.company !== undefined ? rowPayload.company : rowPayload.Company;
-          if (rawComp !== undefined && rawComp !== null && String(rawComp).trim() !== '') {
-            const compStr = String(rawComp).trim();
-            if (!isPlaceholder(compStr)) {
-              if (isUuid(compStr)) {
-                companyIdInput = compStr;
-              } else {
-                companyNameInput = compStr;
-              }
-            }
-          }
-        }
-        if (companyNameInput === undefined) {
+        if (companyTokens.length === 0) {
           const explicitCompanyNameKeys = ['company_name', 'Company Name', 'account_name', 'organization_name'];
           for (const k of explicitCompanyNameKeys) {
-            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-              const nameStr = String(rowPayload[k]).trim();
-              if (!isPlaceholder(nameStr) && !isUuid(nameStr)) {
-                companyNameInput = nameStr;
+            if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
+              const toks = extractMultiTokens(rowPayload[k]);
+              if (toks.length > 0) {
+                companyTokens = toks;
                 break;
               }
             }
@@ -1471,89 +1556,38 @@ const objectService = {
       } else {
         const parentCompanyIdKeys = ['parent_company_id', 'parent_id', 'parent_company_uuid', 'associated_company_id', 'Associated Company ID', 'Associated Company IDs'];
         for (const k of parentCompanyIdKeys) {
-          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            const pStr = String(rowPayload[k]).trim();
-            if (!isPlaceholder(pStr)) {
-              companyIdInput = pStr;
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
+            const toks = extractMultiTokens(rowPayload[k]);
+            if (toks.length > 0) {
+              companyTokens = toks;
               break;
-            }
-          }
-        }
-        if (companyIdInput === undefined) {
-          const rawParent = rowPayload.parent_company !== undefined ? rowPayload.parent_company : rowPayload.ParentCompany;
-          if (rawParent !== undefined && rawParent !== null && String(rawParent).trim() !== '') {
-            const parentStr = String(rawParent).trim();
-            if (!isPlaceholder(parentStr)) {
-              if (isUuid(parentStr)) {
-                companyIdInput = parentStr;
-              } else {
-                companyNameInput = parentStr;
-              }
             }
           }
         }
       }
 
       if (!isContactObject) {
-        // Priority 1: Check if an internal UUID is already resolved in contact, contact_id, or secondary_parent_id
-        const resolvedContactKeys = ['contact', 'contact_id', 'secondary_parent_id', 'Contact', 'Contact_id'];
-        for (const k of resolvedContactKeys) {
-          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            const val = String(rowPayload[k]).trim();
-            if (isUuid(val)) {
-              contactIdInput = val;
+        const candidateContactKeys = [
+          'contact_ids', 'Contact IDs', 'associated_contact_ids', 'Associated Contact IDs', 'assoc_contact_ids',
+          'contact', 'contact_id', 'secondary_parent_id', 'Contact', 'Contact_id', 'primary_contact_id', 'Primary Contact ID',
+          'associated_contact_id', 'Associated Contact ID', 'assoc_contact_id'
+        ];
+        for (const k of candidateContactKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
+            const toks = extractMultiTokens(rowPayload[k]);
+            if (toks.length > 0) {
+              contactTokens = toks;
               break;
             }
           }
         }
-
-        // Priority 2: If not resolved yet, check explicit contact ID keys.
-        // Only accept a value from these keys as a CRM UUID (contactIdInput) when the value
-        // IS a UUID. Non-UUID display values (e.g. "Andrew Carl (andrew@example.com)") are
-        // redirected to contactNameInput for name-based resolution rather than being
-        // validated as UUIDs and thrown as errors.
-        if (contactIdInput === undefined) {
-          const explicitContactIdKeys = [
-            'contact_id', 'Contact ID', 'ContactId', 'Contact_id', 'contact_uuid', 'secondary_parent_id',
-            'primary_contact_id', 'Primary Contact ID', 'associated_contact_id', 'Associated Contact ID',
-            'associated_contact_ids', 'Associated Contact IDs', 'assoc_contact_id', 'assoc_contact_ids'
-          ];
-          for (const k of explicitContactIdKeys) {
-            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-              const cStr = String(rowPayload[k]).trim();
-              if (!isPlaceholder(cStr)) {
-                if (isUuid(cStr)) {
-                  // Confirmed CRM UUID — use it directly for the ID-based lookup
-                  contactIdInput = cStr;
-                } else if (contactNameInput === undefined) {
-                  // Display value (name, email-label, etc.) — route to name-based lookup
-                  contactNameInput = cStr;
-                }
-                break;
-              }
-            }
-          }
-        }
-        if (contactIdInput === undefined) {
-          const rawCont = rowPayload.contact !== undefined ? rowPayload.contact : rowPayload.Contact;
-          if (rawCont !== undefined && rawCont !== null && String(rawCont).trim() !== '') {
-            const contStr = String(rawCont).trim();
-            if (!isPlaceholder(contStr)) {
-              if (isUuid(contStr)) {
-                contactIdInput = contStr;
-              } else {
-                contactNameInput = contStr;
-              }
-            }
-          }
-        }
-        if (contactNameInput === undefined) {
+        if (contactTokens.length === 0) {
           const explicitContactNameKeys = ['contact_name', 'Contact Name', 'person_name'];
           for (const k of explicitContactNameKeys) {
-            if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-              const nameStr = String(rowPayload[k]).trim();
-              if (!isPlaceholder(nameStr) && !isUuid(nameStr)) {
-                contactNameInput = nameStr;
+            if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
+              const toks = extractMultiTokens(rowPayload[k]);
+              if (toks.length > 0) {
+                contactTokens = toks;
                 break;
               }
             }
@@ -1562,22 +1596,43 @@ const objectService = {
       } else {
         const secondaryContactIdKeys = ['secondary_contact_id', 'secondary_parent_id'];
         for (const k of secondaryContactIdKeys) {
-          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
-            const secStr = String(rowPayload[k]).trim();
-            if (!isPlaceholder(secStr)) {
-              contactIdInput = secStr;
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
+            const toks = extractMultiTokens(rowPayload[k]);
+            if (toks.length > 0) {
+              contactTokens = toks;
               break;
             }
           }
         }
       }
 
-      if (companyIdInput && !isPlaceholder(companyIdInput)) companyIdsSet.add(companyIdInput);
-      if (contactIdInput && !isPlaceholder(contactIdInput)) contactIdsSet.add(contactIdInput);
-      if (companyNameInput && !isPlaceholder(companyNameInput)) companyNamesSet.add(companyNameInput.trim().toLowerCase());
-      if (contactNameInput && !isPlaceholder(contactNameInput)) contactNamesSet.add(contactNameInput.trim().toLowerCase());
+      companyTokens.forEach((t) => {
+        if (!isPlaceholder(t)) {
+          if (isUuid(t)) companyIdsSet.add(t);
+          else companyNamesSet.add(t.trim().toLowerCase());
+        }
+      });
+
+      contactTokens.forEach((t) => {
+        if (!isPlaceholder(t)) {
+          if (isUuid(t)) contactIdsSet.add(t);
+          else contactNamesSet.add(t.trim().toLowerCase());
+        }
+      });
+
+      const firstComp = companyTokens[0];
+      const isCompUuid = isUuid(firstComp);
+      const companyIdInput = isCompUuid ? firstComp : (firstComp && !isPlaceholder(firstComp) ? firstComp : undefined);
+      const companyNameInput = !isCompUuid && firstComp && !isPlaceholder(firstComp) ? firstComp : undefined;
+
+      const firstCont = contactTokens[0];
+      const isContUuid = isUuid(firstCont);
+      const contactIdInput = isContUuid ? firstCont : (firstCont && !isPlaceholder(firstCont) ? firstCont : undefined);
+      const contactNameInput = !isContUuid && firstCont && !isPlaceholder(firstCont) ? firstCont : undefined;
 
       return {
+        companyTokens,
+        contactTokens,
         companyIdInput,
         companyNameInput,
         contactIdInput,
@@ -1682,11 +1737,12 @@ const objectService = {
     // Execute all relationship lookups concurrently
     await Promise.all(relationshipPromises);
 
-    // 4. Candidate Existing Record Identification (for Upsert / Update)
+    // 4. Candidate Existing Record Identification & Cache (for Upsert / Update / Duplicate checks)
     const isSegmentObject = cleanKey.includes('segment');
-    const INTERNAL_ID_KEYS = ['id', 'ID', 'record_uuid', 'crm_record_id', 'crm_record_uuid'];
+    const INTERNAL_ID_KEYS = ['id', 'ID', 'record_uuid', 'crm_record_id', 'crm_record_uuid', 'CRM Record UUID', 'crm record uuid'];
     const EXTERNAL_ID_KEYS = [
       'record_id__c', 'external_id', 'hubspot_record_id', 'hubspot_reference_id',
+      'HubSpot Record ID', 'hubspot record id', 'hubspot_id',
       'record_id', 'Record ID', 'Record Id', 'recordId'
     ];
 
@@ -1745,147 +1801,98 @@ const objectService = {
       return null;
     };
 
-    const candidateRecordIds = [];
-    for (const r of recordsArray) {
-      const recId = getRowInternalId(r);
-      if (recId) candidateRecordIds.push(recId);
-    }
+    const getExistingRecordExternalId = (rec) => {
+      if (!rec) return '';
+      const recData = rec.data && typeof rec.data === 'object' ? rec.data : {};
+      for (const k of ['record_id__c', 'external_id', 'hubspot_record_id', 'hubspot_reference_id']) {
+        const val = recData[k];
+        if (val !== undefined && val !== null && String(val).trim() !== '' && !isPlaceholder(String(val))) {
+          return String(val).trim();
+        }
+      }
+      return '';
+    };
+
+    // Load existing records for duplicate checking and candidate matching
+    const { data: allExistingObjRows } = await dbClient
+      .from('universal_table')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .eq('object_type_id', objDef.id)
+      .eq('is_deleted', false);
 
     const existingRecordsByIdMap = new Map();
-    if (candidateRecordIds.length > 0) {
-      const { data: foundCandidateRows } = await dbClient
-        .from('universal_table')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .eq('object_type_id', objDef.id)
-        .eq('is_deleted', false)
-        .in('id', candidateRecordIds);
-
-      (foundCandidateRows || []).forEach(r => existingRecordsByIdMap.set(r.id, r));
-    }
-
-    // External-ID resolution cache for non-segments (record_id__c / external_id / hubspot_reference_id)
     const existingByExternalIdMap = new Map(); // normExtId -> Array<record>
-    const candidateExtIdsSet = new Set();
-    for (const r of recordsArray) {
-      const extId = getRowExternalId(r);
-      if (extId) candidateExtIdsSet.add(extId.toLowerCase());
-      const rawInt = getRawRowInternalId(r);
-      // Only treat rawInt as an external-ID candidate if it is a plain numeric string or
-      // an alphanumeric external reference that cannot possibly be mistaken for a UUID.
-      // Display names (contain spaces, @, etc.) are skipped here; they are not valid
-      // external ID keys and should not pollute the lookup cache.
-      if (rawInt && !isUuid(rawInt) && /^[a-z0-9_\-.:]+$/i.test(rawInt) && !/@|\s/.test(rawInt)) {
-        candidateExtIdsSet.add(rawInt.toLowerCase());
-      }
-    }
+    const existingBySegmentIdMap = new Map();  // normSegmentId -> Array<record>
+    const existingByListIdMap = new Map();     // normListId -> Array<record>
+    const existingByNameMap = new Map();       // normName -> Array<record>
+    const existingDbValuesMap = new Map();     // fieldName -> Map<normVal, recordId>
+    const existingDbRecordsByFieldMap = new Map(); // fieldName -> Map<normVal, Array<record>>
 
-    if (candidateExtIdsSet.size > 0 && !isSegmentObject) {
-      const { data: extMatchedRows } = await dbClient
-        .from('universal_table')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .eq('object_type_id', objDef.id)
-        .eq('is_deleted', false);
-
-      (extMatchedRows || []).forEach((row) => {
-        const extVals = [
-          row.data?.record_id__c,
-          row.data?.external_id,
-          row.data?.hubspot_reference_id,
-          row.data?.hubspot_record_id,
-        ];
-        extVals.forEach((val) => {
-          if (val !== undefined && val !== null && String(val).trim() !== '') {
-            const norm = String(val).trim().toLowerCase();
-            if (candidateExtIdsSet.has(norm)) {
-              if (!existingByExternalIdMap.has(norm)) existingByExternalIdMap.set(norm, []);
-              const list = existingByExternalIdMap.get(norm);
-              if (!list.some((e) => e.id === row.id)) list.push(row);
-            }
-          }
-        });
-      });
-    }
-
-    // External-ID resolution cache for Segments (HubSpot Segment ID / List ID)
-    const existingBySegmentIdMap = new Map(); // normSegmentId -> Array<record>
-    const existingByListIdMap = new Map();    // normListId -> Array<record>
-
-    if (isSegmentObject) {
-      const segmentIdsSet = new Set();
-      const listIdsSet = new Set();
-
-      for (const r of recordsArray) {
-        const segId = String(r.hubspot_segment_id ?? (r.data && r.data.hubspot_segment_id) ?? '').trim();
-        const listId = String(r.hubspot_list_id ?? (r.data && r.data.hubspot_list_id) ?? '').trim();
-        if (segId) segmentIdsSet.add(segId.toLowerCase());
-        if (listId) listIdsSet.add(listId.toLowerCase());
-      }
-
-      if (segmentIdsSet.size > 0 || listIdsSet.size > 0) {
-        const { data: extMatchedRows } = await dbClient
-          .from('universal_table')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .eq('object_type_id', objDef.id)
-          .eq('is_deleted', false);
-
-        (extMatchedRows || []).forEach((row) => {
-          const rSegId = String(row.data?.hubspot_segment_id ?? '').trim().toLowerCase();
-          const rListId = String(row.data?.hubspot_list_id ?? '').trim().toLowerCase();
-          if (rSegId && segmentIdsSet.has(rSegId)) {
-            if (!existingBySegmentIdMap.has(rSegId)) existingBySegmentIdMap.set(rSegId, []);
-            existingBySegmentIdMap.get(rSegId).push(row);
-          }
-          if (rListId && listIdsSet.has(rListId)) {
-            if (!existingByListIdMap.has(rListId)) existingByListIdMap.set(rListId, []);
-            existingByListIdMap.get(rListId).push(row);
-          }
-        });
-      }
-    }
-
-    // 5. Duplicate checks (in-CSV + existing DB)
     const uniqueFields = (fields || []).filter(f => f.unique || f.name === 'email' || f.name === 'code');
+    uniqueFields.forEach(f => {
+      existingDbValuesMap.set(f.name, new Map());
+      existingDbRecordsByFieldMap.set(f.name, new Map());
+    });
+
+    (allExistingObjRows || []).forEach(row => {
+      existingRecordsByIdMap.set(row.id, row);
+
+      const extVals = [
+        row.data?.record_id__c,
+        row.data?.external_id,
+        row.data?.hubspot_reference_id,
+        row.data?.hubspot_record_id,
+      ];
+      extVals.forEach(val => {
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+          const norm = String(val).trim().toLowerCase();
+          if (!existingByExternalIdMap.has(norm)) existingByExternalIdMap.set(norm, []);
+          const list = existingByExternalIdMap.get(norm);
+          if (!list.some(e => e.id === row.id)) list.push(row);
+        }
+      });
+
+      if (isSegmentObject) {
+        const rSegId = String(row.data?.hubspot_segment_id ?? '').trim().toLowerCase();
+        const rListId = String(row.data?.hubspot_list_id ?? '').trim().toLowerCase();
+        if (rSegId) {
+          if (!existingBySegmentIdMap.has(rSegId)) existingBySegmentIdMap.set(rSegId, []);
+          existingBySegmentIdMap.get(rSegId).push(row);
+        }
+        if (rListId) {
+          if (!existingByListIdMap.has(rListId)) existingByListIdMap.set(rListId, []);
+          existingByListIdMap.get(rListId).push(row);
+        }
+      }
+
+      if (isSegmentObject || isCompanyObject) {
+        const rName = String(row.name || row.data?.name || row.data?.company_name || row.data?.segment_name || '').trim().toLowerCase();
+        if (rName) {
+          if (!existingByNameMap.has(rName)) existingByNameMap.set(rName, []);
+          existingByNameMap.get(rName).push(row);
+        }
+      }
+
+      uniqueFields.forEach(f => {
+        const dbVal = row.data && row.data[f.name];
+        if (dbVal !== undefined && dbVal !== null && String(dbVal).trim()) {
+          const normVal = String(dbVal).trim().toLowerCase();
+          existingDbValuesMap.get(f.name).set(normVal, row.id);
+          if (!existingDbRecordsByFieldMap.get(f.name).has(normVal)) {
+            existingDbRecordsByFieldMap.get(f.name).set(normVal, []);
+          }
+          existingDbRecordsByFieldMap.get(f.name).get(normVal).push(row);
+        }
+      });
+    });
+
+    // 5. In-CSV Duplicate detection maps
     const seenCsvValuesMap = new Map();
     uniqueFields.forEach(f => seenCsvValuesMap.set(f.name, new Map())); // Map<normVal, rowNum>
     const seenCsvSegmentIdsMap = new Map(); // Map<normVal, rowNum>
     const seenCsvListIdsMap = new Map();    // Map<normVal, rowNum>
     const seenCsvExternalIdsMap = new Map(); // Map<normVal, rowNum>
-
-    const existingDbValuesMap = new Map();
-    uniqueFields.forEach(f => existingDbValuesMap.set(f.name, new Map())); // Map<normVal, recordId>
-
-    if (uniqueFields.length > 0) {
-      const anyBatchHasValues = uniqueFields.some(f => {
-        return recordsArray.some(r => {
-          const v = r[f.name] !== undefined ? r[f.name] : (r.data && r.data[f.name]);
-          return v !== undefined && v !== null && String(v).trim() !== '';
-        });
-      });
-
-      if (anyBatchHasValues) {
-        const { data: allExistingRows } = await dbClient
-          .from('universal_table')
-          .select('id, data')
-          .eq('organization_id', organizationId)
-          .eq('object_type_id', objDef.id)
-          .eq('is_deleted', false);
-
-        if (allExistingRows && allExistingRows.length > 0) {
-          for (const f of uniqueFields) {
-            const dbMap = existingDbValuesMap.get(f.name);
-            allExistingRows.forEach(d => {
-              const dbVal = d.data && d.data[f.name];
-              if (dbVal && String(dbVal).trim()) {
-                dbMap.set(String(dbVal).trim().toLowerCase(), d.id);
-              }
-            });
-          }
-        }
-      }
-    }
 
     // 6. In-Memory Validation & Payload Construction Loop
     const validNewRows = [];
@@ -1918,38 +1925,23 @@ const objectService = {
             if (importMode === 'update_only') {
               throw { statusCode: 400, message: `Validation Error: Record ID '${rawInternalId}' is not a valid UUID format.` };
             } else if (importMode === 'create_only') {
-              // In Create Only: preserve numeric/alphanumeric external source IDs (e.g. HubSpot IDs).
-              // Silently skip display names (contain whitespace or '@') — they are not valid
-              // external IDs and should not be stored as record_id__c.
               const looksLikeUuidAttemptCO = /^[0-9a-f]{8}-/i.test(rawInternalId);
               const isDisplayName = /[@\s]/.test(rawInternalId);
               if (!looksLikeUuidAttemptCO && !isDisplayName && !rowExternalId) {
                 rowExternalId = rawInternalId;
               }
             } else {
-              // In Upsert (Create & Update):
-              // Treat the value as an external/source ID if it is:
-              //   a) a pure numeric string (e.g. HubSpot record IDs like 20498359428), OR
-              //   b) a plain alphanumeric external reference with no whitespace or @ symbols.
-              // Reject only values that look like a genuine UUID attempt (hex chars + hyphens
-              // in roughly the 8-4-4-4-12 pattern) but fail full UUID validation.
-              // Display names and email-label values (which may contain hyphens in domains)
-              // are treated as external IDs rather than rejected.
               const looksLikeUuidAttempt = /^[0-9a-f]{8}-/i.test(rawInternalId);
               if (!looksLikeUuidAttempt) {
-                // Not a UUID attempt — treat as external / source ID
                 if (!rowExternalId) rowExternalId = rawInternalId;
               } else {
-                // Genuinely looks like a malformed UUID (starts with 8 hex digits + hyphen)
                 throw { statusCode: 400, message: `Validation Error: Record ID '${rawInternalId}' is not a valid UUID format.` };
               }
             }
           }
         }
 
-        // In-CSV duplicate detection for external record ID.
-        // Runs AFTER the rawInternalId → rowExternalId promotion above so that promoted
-        // numeric/external IDs (e.g. HubSpot IDs in the 'id' field) are also detected.
+        // In-CSV duplicate detection for external record ID
         if (rowExternalId) {
           const normExt = rowExternalId.toLowerCase();
           const prevRow = seenCsvExternalIdsMap.get(normExt);
@@ -1962,7 +1954,6 @@ const objectService = {
           seenCsvExternalIdsMap.set(normExt, rowNum);
         }
 
-
         // External-ID resolution for Segments if no direct UUID match was found
         const rowSegId = isSegmentObject ? String(payload.hubspot_segment_id ?? (payload.data && payload.data.hubspot_segment_id) ?? '').trim() : '';
         const rowListId = isSegmentObject ? String(payload.hubspot_list_id ?? (payload.data && payload.data.hubspot_list_id) ?? '').trim() : '';
@@ -1971,29 +1962,22 @@ const objectService = {
           let segMatch = null;
           let listMatch = null;
 
-          // 1. Primary external matching key: hubspot_segment_id (ILS Segment ID)
           if (rowSegId) {
             const matches = existingBySegmentIdMap.get(rowSegId.toLowerCase()) || [];
             if (matches.length > 1) {
               throw { statusCode: 400, message: `Ambiguity Error: Multiple segments found with HubSpot Segment ID '${rowSegId}'.` };
             }
-            if (matches.length === 1) {
-              segMatch = matches[0];
-            }
+            if (matches.length === 1) segMatch = matches[0];
           }
 
-          // 2. Secondary fallback matching key: hubspot_list_id (Legacy List ID)
           if (rowListId) {
             const matches = existingByListIdMap.get(rowListId.toLowerCase()) || [];
             if (matches.length > 1) {
               throw { statusCode: 400, message: `Ambiguity Error: Multiple segments found with HubSpot List ID '${rowListId}'.` };
             }
-            if (matches.length === 1) {
-              listMatch = matches[0];
-            }
+            if (matches.length === 1) listMatch = matches[0];
           }
 
-          // 3. Detect conflicting identifiers: both keys provide a match but point to different records
           if (segMatch && listMatch && segMatch.id !== listMatch.id) {
             throw {
               statusCode: 400,
@@ -2002,6 +1986,17 @@ const objectService = {
           }
 
           existingRecord = segMatch || listMatch;
+        }
+
+        // Check candidateId/segment match against rowExternalId if both present
+        if (existingRecord && rowExternalId) {
+          const existingExtId = getExistingRecordExternalId(existingRecord);
+          if (existingExtId && existingExtId.toLowerCase() !== rowExternalId.toLowerCase()) {
+            throw {
+              statusCode: 409,
+              message: `Conflict Error: Incoming Record ID '${rowExternalId}' conflicts with existing record '${existingRecord.id}' which has Record ID '${existingExtId}'.`
+            };
+          }
         }
 
         // External-ID resolution for non-segments
@@ -2015,18 +2010,67 @@ const objectService = {
           }
         }
 
+        // Unique fields lookup (e.g. email for contacts, or unique fields)
+        if (!existingRecord) {
+          for (const f of uniqueFields) {
+            const rawVal = payload[f.name] !== undefined ? payload[f.name] : (payload.data && payload.data[f.name]);
+            if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '') {
+              const normVal = String(rawVal).trim().toLowerCase();
+              const matches = existingDbRecordsByFieldMap.get(f.name)?.get(normVal) || [];
+              if (matches.length > 1) {
+                throw { statusCode: 400, message: `Ambiguity Error: Multiple records found matching ${f.label || f.name} '${rawVal}'.` };
+              }
+              if (matches.length === 1) {
+                const candidateRecord = matches[0];
+                const existingExtId = getExistingRecordExternalId(candidateRecord);
+                if (rowExternalId && existingExtId && existingExtId.toLowerCase() !== rowExternalId.toLowerCase()) {
+                  throw {
+                    statusCode: 409,
+                    message: `Conflict Error: Incoming Record ID '${rowExternalId}' conflicts with existing record '${candidateRecord.id}' which has Record ID '${existingExtId}' for ${f.label || f.name} '${rawVal}'.`
+                  };
+                }
+                existingRecord = candidateRecord;
+                break;
+              }
+            }
+          }
+        }
+
+        // Name lookup for Segments and Companies ONLY when in update / upsert mode.
+        // Contacts and other objects must NEVER be matched by name.
+        if (!existingRecord && (importMode === 'update_only' || importMode === 'upsert') && (isSegmentObject || isCompanyObject)) {
+          const rawName = String(payload.name || payload.company_name || payload.segment_name || (payload.data && payload.data.name) || '').trim().toLowerCase();
+          if (rawName && existingByNameMap.has(rawName)) {
+            const matches = existingByNameMap.get(rawName) || [];
+            if (matches.length > 1) {
+              throw { statusCode: 400, message: `Ambiguity Error: Multiple records found with name '${rawName}'.` };
+            }
+            if (matches.length === 1) {
+              const candidateRecord = matches[0];
+              const existingExtId = getExistingRecordExternalId(candidateRecord);
+              if (rowExternalId && existingExtId && existingExtId.toLowerCase() !== rowExternalId.toLowerCase()) {
+                throw {
+                  statusCode: 409,
+                  message: `Conflict Error: Incoming Record ID '${rowExternalId}' conflicts with existing record '${candidateRecord.id}' which has Record ID '${existingExtId}' for name '${rawName}'.`
+                };
+              }
+              existingRecord = candidateRecord;
+            }
+          }
+        }
+
+        const naturalIdentifier = candidateId || rowSegId || rowListId || rowExternalId || payload.email || payload.name;
+
         if (importMode === 'update_only') {
-          if (!candidateId && !rowSegId && !rowListId && !rowExternalId) {
-            throw { statusCode: 400, message: 'Record ID or external identifier (HubSpot Segment ID / List ID) is required when import mode is set to Update Only.' };
+          if (!candidateId && !rowSegId && !rowListId && !rowExternalId && !existingRecord && !payload.email && !payload.name) {
+            throw { statusCode: 400, message: 'Record ID, email, name, or external identifier is required when import mode is set to Update Only.' };
           }
           if (!existingRecord) {
-            const missingId = candidateId || rowSegId || rowListId || rowExternalId;
-            throw { statusCode: 404, message: `Record '${missingId}' was not found in ${objectKey}.` };
+            throw { statusCode: 404, message: `Record '${naturalIdentifier}' was not found in ${objectKey}.` };
           }
         } else if (importMode === 'create_only') {
           if (existingRecord) {
-            const foundId = candidateId || rowSegId || rowListId || rowExternalId;
-            throw { statusCode: 400, message: `Record with identifier '${foundId}' already exists. Import mode is set to Create Only.` };
+            throw { statusCode: 400, message: `Record with identifier '${naturalIdentifier}' already exists. Import mode is set to Create Only.` };
           }
         }
 
@@ -2228,8 +2272,9 @@ const objectService = {
               throw { statusCode: 400, message: `Validation Error: Duplicate ${f.label || f.name} '${rawVal}' found within the import payload (rows ${prevSeenRow} and ${rowNum}).` };
             }
 
-            const dbOwnerId = dbMap.get(normVal);
-            if (dbOwnerId && (!isUpdateRow || dbOwnerId !== existingRecord.id)) {
+            const dbMatches = existingDbRecordsByFieldMap.get(f.name)?.get(normVal) || [];
+            const hasOtherDbOwner = dbMatches.some(r => !isUpdateRow || r.id !== existingRecord?.id);
+            if (hasOtherDbOwner) {
               throw { statusCode: 400, message: `Validation Error: ${f.label || f.name} '${rawVal}' already exists.` };
             }
 
@@ -2283,99 +2328,97 @@ const objectService = {
         const sourceVal = (cleanPayload.lead_source || cleanPayload.source || '').trim();
         if (sourceVal) { customData.lead_source = sourceVal; customData.source = sourceVal; }
 
-        // Company Relationship Resolution
+        // Company Relationship Resolution (supports single and multi-record associations)
         let resolvedParent = null;
         let resolvedParentName = null;
+        let resolvedCompanyIds = [];
 
         const companyField = (fields || []).find(
           (f) => (f.name === 'company' || f.name === 'parent_id' || f.name === 'company_id') && f.type === 'lookup'
         );
         const isCompanyRequired = !!companyField?.required;
 
-        if (relInputs.companyIdInput !== undefined && relInputs.companyIdInput && relInputs.companyIdInput !== 'null') {
-          const inputVal = relInputs.companyIdInput;
-          if (isPlaceholder(inputVal)) {
-            if (isCompanyRequired) {
-              throw { statusCode: 400, message: `Validation Error: Field '${companyField?.label || 'Company'}' is required for ${objectKey}.` };
-            }
-            resolvedParent = null;
-            resolvedParentName = null;
-          } else if (isUuid(inputVal)) {
-            const parentRow = companyByIdMap.get(inputVal);
-            if (!parentRow || parentRow.is_deleted) {
-              throw { statusCode: 400, message: `Validation Error: Company ID '${inputVal}' was not found.` };
-            }
-            if (parentRow.organization_id !== organizationId) {
-              throw { statusCode: 403, message: `Validation Error: Company ID '${inputVal}' does not belong to the current organization.` };
-            }
-            if (companyObjectType && parentRow.object_type_id !== companyObjectType.id) {
-              throw { statusCode: 400, message: `Validation Error: The referenced record '${inputVal}' is not a Company object type.` };
-            }
-            resolvedParent = parentRow.id;
-            resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || 'Company';
-          } else {
-            let extMatches = [];
-            for (const k of getNormalizedKeys(inputVal)) {
-              if (companyByExternalIdMap.has(k)) {
-                extMatches = companyByExternalIdMap.get(k);
-                break;
+        const compTokens = (relInputs.companyTokens && relInputs.companyTokens.length > 0)
+          ? relInputs.companyTokens
+          : (relInputs.companyIdInput ? [relInputs.companyIdInput] : (relInputs.companyNameInput ? [relInputs.companyNameInput] : []));
+
+        if (compTokens.length > 0) {
+          for (const token of compTokens) {
+            if (isPlaceholder(token)) continue;
+            if (isUuid(token)) {
+              const parentRow = companyByIdMap.get(token);
+              if (!parentRow || parentRow.is_deleted) {
+                throw { statusCode: 400, message: `Validation Error: Company ID '${token}' was not found.` };
               }
-            }
-            if (extMatches.length > 1) {
-              throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${inputVal}'.` };
-            }
-            if (extMatches.length === 1) {
-              resolvedParent = extMatches[0].id;
-              resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || inputVal;
-            } else {
-              throw { statusCode: 400, message: `Validation Error: Company ID '${inputVal}' was not found.` };
-            }
-          }
-        } else if (relInputs.companyNameInput) {
-          if (isPlaceholder(relInputs.companyNameInput)) {
-            if (isCompanyRequired) {
-              throw { statusCode: 400, message: `Validation Error: Field '${companyField?.label || 'Company'}' is required for ${objectKey}.` };
-            }
-            resolvedParent = null;
-            resolvedParentName = null;
-          } else {
-            let extMatches = [];
-            for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
-              if (companyByExternalIdMap.has(k)) {
-                extMatches = companyByExternalIdMap.get(k);
-                break;
+              if (parentRow.organization_id !== organizationId) {
+                throw { statusCode: 403, message: `Validation Error: Company ID '${token}' does not belong to the current organization.` };
               }
-            }
-            if (extMatches.length === 1) {
-              resolvedParent = extMatches[0].id;
-              resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || relInputs.companyNameInput;
-            } else if (extMatches.length > 1) {
-              throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${relInputs.companyNameInput}'.` };
+              if (companyObjectType && parentRow.object_type_id !== companyObjectType.id) {
+                throw { statusCode: 400, message: `Validation Error: The referenced record '${token}' is not a Company object type.` };
+              }
+              resolvedCompanyIds.push(parentRow.id);
+              if (!resolvedParentName) {
+                resolvedParentName = parentRow.name || parentRow.data?.name || parentRow.data?.company_name || 'Company';
+              }
             } else {
-              let matches = [];
-              for (const k of getNormalizedKeys(relInputs.companyNameInput)) {
-                if (companyByNameMap.has(k)) {
-                  matches = companyByNameMap.get(k);
+              let extMatches = [];
+              for (const k of getNormalizedKeys(token)) {
+                if (companyByExternalIdMap.has(k)) {
+                  extMatches = companyByExternalIdMap.get(k);
                   break;
                 }
               }
-              if (matches.length > 1) {
-                throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${relInputs.companyNameInput}'. Please provide Company ID.` };
+              if (extMatches.length > 1) {
+                throw { statusCode: 400, message: `Validation Error: Multiple Companies found with external ID '${token}'.` };
               }
-              if (matches.length === 1) {
-                resolvedParent = matches[0].id;
-                resolvedParentName = matches[0].name || matches[0].data?.name || matches[0].data?.company_name || relInputs.companyNameInput;
+              if (extMatches.length === 1) {
+                resolvedCompanyIds.push(extMatches[0].id);
+                if (!resolvedParentName) {
+                  resolvedParentName = extMatches[0].name || extMatches[0].data?.name || extMatches[0].data?.company_name || token;
+                }
               } else {
-                throw { statusCode: 400, message: `Validation Error: Company '${relInputs.companyNameInput}' was not found. Please provide a valid Company Name or Company ID.` };
+                let nameMatches = [];
+                for (const k of getNormalizedKeys(token)) {
+                  if (companyByNameMap.has(k)) {
+                    nameMatches = companyByNameMap.get(k);
+                    break;
+                  }
+                }
+                if (nameMatches.length > 1) {
+                  throw { statusCode: 400, message: `Validation Error: Multiple Companies found with the name '${token}'. Please provide Company ID.` };
+                }
+                if (nameMatches.length === 1) {
+                  resolvedCompanyIds.push(nameMatches[0].id);
+                  if (!resolvedParentName) {
+                    resolvedParentName = nameMatches[0].name || nameMatches[0].data?.name || nameMatches[0].data?.company_name || token;
+                  }
+                } else {
+                  throw { statusCode: 400, message: `Validation Error: Company reference '${token}' was not found.` };
+                }
               }
             }
+          }
+          resolvedCompanyIds = [...new Set(resolvedCompanyIds)];
+          if (resolvedCompanyIds.length > 0) {
+            resolvedParent = resolvedCompanyIds[0];
+          } else if (isCompanyRequired) {
+            throw { statusCode: 400, message: `Validation Error: Field '${companyField?.label || 'Company'}' is required for ${objectKey}.` };
           }
         } else if (isUpdateRow) {
           resolvedParent = existingRecord.parent_id;
           resolvedParentName = existingRecord.data?.company_name || null;
+          resolvedCompanyIds = Array.isArray(existingRecord.data?.company_ids)
+            ? existingRecord.data.company_ids
+            : (Array.isArray(existingRecord.data?.associated_company_ids)
+              ? existingRecord.data.associated_company_ids
+              : (existingRecord.parent_id ? [existingRecord.parent_id] : []));
+        } else if (isCompanyRequired) {
+          throw { statusCode: 400, message: `Validation Error: Field '${companyField?.label || 'Company'}' is required for ${objectKey}.` };
         }
 
-        if (resolvedParent) {
+        if (resolvedCompanyIds.length > 0) {
+          customData.company_ids = resolvedCompanyIds;
+          customData.associated_company_ids = resolvedCompanyIds;
           customData.company = resolvedParent;
           customData.company_id = resolvedParent;
           customData.Company = resolvedParent;
@@ -2384,6 +2427,8 @@ const objectService = {
         } else if (!isCompanyObject) {
           if (!isUpdateRow) {
             customData.company = null; customData.company_id = null; customData.Company = null; customData.Company_id = null;
+            customData.company_ids = [];
+            customData.associated_company_ids = [];
             if (relInputs.companyIdInput !== undefined) customData.company_name = null;
             else customData.company_name = resolvedParentName || null;
           }
@@ -2391,51 +2436,70 @@ const objectService = {
           customData.company_name = resolvedName;
         }
 
-        // Contact Relationship Resolution
+        // Contact Relationship Resolution (supports single and multi-record associations)
         let resolvedSecondary = null;
         let resolvedSecondaryName = null;
+        let resolvedContactIds = [];
 
-        if (relInputs.contactIdInput !== undefined) {
-          if (relInputs.contactIdInput && relInputs.contactIdInput !== 'null') {
-            if (!isUuid(relInputs.contactIdInput)) {
-              throw { statusCode: 400, message: `Validation Error: Contact ID '${relInputs.contactIdInput}' is not a valid UUID format.` };
-            }
-            const secRow = contactByIdMap.get(relInputs.contactIdInput);
-            if (!secRow || secRow.is_deleted) {
-              throw { statusCode: 400, message: `Validation Error: Contact ID '${relInputs.contactIdInput}' was not found.` };
-            }
-            if (secRow.organization_id !== organizationId) {
-              throw { statusCode: 403, message: `Validation Error: Contact ID '${relInputs.contactIdInput}' does not belong to the current organization.` };
-            }
-            if (contactObjectType && secRow.object_type_id !== contactObjectType.id) {
-              throw { statusCode: 400, message: `Validation Error: The referenced record '${relInputs.contactIdInput}' is not a Contact object type.` };
-            }
-            resolvedSecondary = secRow.id;
-            resolvedSecondaryName = secRow.name || secRow.data?.name || secRow.data?.contact_name || 'Contact';
-          }
-        } else if (relInputs.contactNameInput) {
-          const cleanContactName = relInputs.contactNameInput.trim().toLowerCase();
-          const matches = contactByNameMap.get(cleanContactName) || [];
-          if (matches.length > 1) {
-            throw { statusCode: 400, message: `Validation Error: Multiple Contacts found with the name '${relInputs.contactNameInput}'. Please provide Contact ID.` };
-          }
-          if (matches.length === 1) {
-            resolvedSecondary = matches[0].id;
-            resolvedSecondaryName = matches[0].name || matches[0].data?.name || matches[0].data?.contact_name || relInputs.contactNameInput;
-          } else {
-            if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
-              throw { statusCode: 400, message: `Validation Error: Contact '${relInputs.contactNameInput}' was not found. Please provide a valid Contact Name or Contact ID.` };
+        const contTokens = (relInputs.contactTokens && relInputs.contactTokens.length > 0)
+          ? relInputs.contactTokens
+          : (relInputs.contactIdInput ? [relInputs.contactIdInput] : (relInputs.contactNameInput ? [relInputs.contactNameInput] : []));
+
+        if (contTokens.length > 0) {
+          for (const token of contTokens) {
+            if (isPlaceholder(token)) continue;
+            if (isUuid(token)) {
+              const secRow = contactByIdMap.get(token);
+              if (!secRow || secRow.is_deleted) {
+                throw { statusCode: 400, message: `Validation Error: Contact ID '${token}' was not found.` };
+              }
+              if (secRow.organization_id !== organizationId) {
+                throw { statusCode: 403, message: `Validation Error: Contact ID '${token}' does not belong to the current organization.` };
+              }
+              if (contactObjectType && secRow.object_type_id !== contactObjectType.id) {
+                throw { statusCode: 400, message: `Validation Error: The referenced record '${token}' is not a Contact object type.` };
+              }
+              resolvedContactIds.push(secRow.id);
+              if (!resolvedSecondaryName) {
+                resolvedSecondaryName = secRow.name || secRow.data?.name || secRow.data?.contact_name || 'Contact';
+              }
             } else {
-              resolvedSecondary = null;
-              resolvedSecondaryName = relInputs.contactNameInput;
+              const cleanContactName = token.trim().toLowerCase();
+              const matches = contactByNameMap.get(cleanContactName) || [];
+              if (matches.length > 1) {
+                throw { statusCode: 400, message: `Validation Error: Multiple Contacts found with the name '${token}'. Please provide Contact ID.` };
+              }
+              if (matches.length === 1) {
+                resolvedContactIds.push(matches[0].id);
+                if (!resolvedSecondaryName) {
+                  resolvedSecondaryName = matches[0].name || matches[0].data?.name || matches[0].data?.contact_name || token;
+                }
+              } else {
+                if (cleanKey.includes('deal') || cleanKey.includes('opportunity')) {
+                  throw { statusCode: 400, message: `Validation Error: Contact '${token}' was not found. Please provide a valid Contact Name or Contact ID.` };
+                } else {
+                  resolvedSecondaryName = token;
+                }
+              }
             }
+          }
+          resolvedContactIds = [...new Set(resolvedContactIds)];
+          if (resolvedContactIds.length > 0) {
+            resolvedSecondary = resolvedContactIds[0];
           }
         } else if (isUpdateRow) {
           resolvedSecondary = existingRecord.secondary_parent_id;
           resolvedSecondaryName = existingRecord.data?.contact_name || null;
+          resolvedContactIds = Array.isArray(existingRecord.data?.contact_ids)
+            ? existingRecord.data.contact_ids
+            : (Array.isArray(existingRecord.data?.associated_contact_ids)
+              ? existingRecord.data.associated_contact_ids
+              : (existingRecord.secondary_parent_id ? [existingRecord.secondary_parent_id] : []));
         }
 
-        if (resolvedSecondary) {
+        if (resolvedContactIds.length > 0) {
+          customData.contact_ids = resolvedContactIds;
+          customData.associated_contact_ids = resolvedContactIds;
           customData.contact = resolvedSecondary;
           customData.contact_id = resolvedSecondary;
           customData.Contact = resolvedSecondary;
@@ -2444,6 +2508,8 @@ const objectService = {
         } else if (!isContactObject) {
           if (!isUpdateRow) {
             customData.contact = null; customData.contact_id = null; customData.Contact = null; customData.Contact_id = null;
+            customData.contact_ids = [];
+            customData.associated_contact_ids = [];
             if (relInputs.contactIdInput !== undefined) customData.contact_name = null;
             else customData.contact_name = resolvedSecondaryName || null;
           }
@@ -2458,24 +2524,83 @@ const objectService = {
 
           // Only merge non-blank values so empty cells in CSV don't overwrite existing values
           for (const [k, v] of Object.entries(customData)) {
-            if (v !== undefined && v !== null && String(v).trim() !== '') {
+            if (k.startsWith('__strategy_')) continue;
+            if (Array.isArray(v)) {
+              if (v.length > 0) {
+                const strat = cleanPayload[`__strategy_${k}`] || 'merge';
+                if (strat === 'replace') {
+                  mergedCustomData[k] = [...new Set(v)];
+                } else {
+                  const existingArr = Array.isArray(existingData[k]) ? existingData[k] : (existingData[k] ? [existingData[k]] : []);
+                  mergedCustomData[k] = [...new Set([...existingArr, ...v])];
+                }
+              }
+            } else if (v !== undefined && v !== null && String(v).trim() !== '') {
               mergedCustomData[k] = v;
             }
           }
 
+          // Ensure incoming external ID is never silently discarded if the record didn't have one
+          if (rowExternalId && (!mergedCustomData.record_id__c || String(mergedCustomData.record_id__c).trim() === '')) {
+            mergedCustomData.record_id__c = rowExternalId;
+          }
+
           // Ensure relationship contact_ids and _version are preserved and cannot be overwritten by CSV import
           if (cleanKey.includes('segment')) {
-            delete customData.contact_ids;
             delete customData._version;
-            if (existingData.contact_ids && Array.isArray(existingData.contact_ids)) {
-              mergedCustomData.contact_ids = existingData.contact_ids;
+            mergedCustomData._version = existingData._version !== undefined ? existingData._version : 1;
+
+            const segContactTokens = extractMultiTokens(cleanPayload.contact_ids || cleanPayload.contact_id || cleanPayload['Associated Contact IDs']);
+            const validIncomingUuids = segContactTokens.filter(isUuid);
+
+            if (validIncomingUuids.length > 0) {
+              const strat = cleanPayload.__strategy_contact_ids || 'merge';
+              const existingIds = Array.isArray(existingData.contact_ids) ? existingData.contact_ids : [];
+              if (strat === 'replace') {
+                mergedCustomData.contact_ids = [...new Set(validIncomingUuids)];
+              } else {
+                mergedCustomData.contact_ids = [...new Set([...existingIds, ...validIncomingUuids])];
+              }
             } else {
-              mergedCustomData.contact_ids = [];
+              mergedCustomData.contact_ids = Array.isArray(existingData.contact_ids) ? existingData.contact_ids : [];
             }
-            if (existingData._version !== undefined) {
-              mergedCustomData._version = existingData._version;
+          }
+
+          if (resolvedCompanyIds.length > 0) {
+            const compStrat = cleanPayload.__strategy_company_ids || cleanPayload.__strategy_company || cleanPayload.__strategy_parent_id || 'merge';
+            const existingCompIds = Array.isArray(existingData.company_ids)
+              ? existingData.company_ids
+              : (Array.isArray(existingData.associated_company_ids)
+                ? existingData.associated_company_ids
+                : (existingRecord.parent_id ? [existingRecord.parent_id] : []));
+            if (compStrat === 'replace') {
+              mergedCustomData.company_ids = resolvedCompanyIds;
+              mergedCustomData.associated_company_ids = resolvedCompanyIds;
+              resolvedParent = resolvedCompanyIds[0] || existingRecord.parent_id;
             } else {
-              mergedCustomData._version = 1;
+              const unionList = [...new Set([...existingCompIds, ...resolvedCompanyIds])];
+              mergedCustomData.company_ids = unionList;
+              mergedCustomData.associated_company_ids = unionList;
+              resolvedParent = existingRecord.parent_id || resolvedCompanyIds[0];
+            }
+          }
+
+          if (resolvedContactIds.length > 0) {
+            const contStrat = cleanPayload.__strategy_contact_ids || cleanPayload.__strategy_contact || cleanPayload.__strategy_secondary_parent_id || 'merge';
+            const existingContIds = Array.isArray(existingData.contact_ids)
+              ? existingData.contact_ids
+              : (Array.isArray(existingData.associated_contact_ids)
+                ? existingData.associated_contact_ids
+                : (existingRecord.secondary_parent_id ? [existingRecord.secondary_parent_id] : []));
+            if (contStrat === 'replace') {
+              mergedCustomData.contact_ids = resolvedContactIds;
+              mergedCustomData.associated_contact_ids = resolvedContactIds;
+              resolvedSecondary = resolvedContactIds[0] || existingRecord.secondary_parent_id;
+            } else {
+              const unionList = [...new Set([...existingContIds, ...resolvedContactIds])];
+              mergedCustomData.contact_ids = unionList;
+              mergedCustomData.associated_contact_ids = unionList;
+              resolvedSecondary = existingRecord.secondary_parent_id || resolvedContactIds[0];
             }
           }
 
@@ -2557,10 +2682,11 @@ const objectService = {
         }
 
         if (cleanKey.includes('segment')) {
-          delete customData.contact_ids;
           delete customData._version;
-          customData.contact_ids = [];
           customData._version = 1;
+          const segContactTokens = extractMultiTokens(cleanPayload.contact_ids || cleanPayload.contact_id || cleanPayload['Associated Contact IDs']);
+          const validIncomingUuids = segContactTokens.filter(isUuid);
+          customData.contact_ids = [...new Set(validIncomingUuids)];
         }
 
         const newRow = {
@@ -2582,7 +2708,7 @@ const objectService = {
       } catch (err) {
         failedCount++;
         const errMsg = err.message || err.error || `Failed to process ${objectKey} record.`;
-        errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg });
+        errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg, error: errMsg });
         rowResults.push({ rowNumber: rowNum, identifier: String(rowIdentifier).trim(), status: 'failed', recordId: null, error: errMsg });
       }
     }
@@ -2618,7 +2744,7 @@ const objectService = {
               const collidingKey = (rSeg && latestSegMap.has(rSeg)) ? r.data.hubspot_segment_id : r.data.hubspot_list_id;
               failedCount++;
               const errMsg = `Unique Constraint Violation: Segment with external identifier '${collidingKey}' was already created concurrently.`;
-              errorDetails.push({ rowNum: r.__rowNum, identifier: String(r.__rowIdentifier).trim(), reason: errMsg });
+              errorDetails.push({ rowNum: r.__rowNum, identifier: String(r.__rowIdentifier).trim(), reason: errMsg, error: errMsg });
               rowResults.push({
                 rowNumber: r.__rowNum,
                 identifier: String(r.__rowIdentifier).trim(),
@@ -2697,7 +2823,7 @@ const objectService = {
           } else {
             failedCount++;
             const errMsg = singleErr?.message || 'Database Insertion Error';
-            errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg });
+            errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg, error: errMsg });
             rowResults.push({
               rowNumber: rowNum,
               identifier: String(rowIdentifier).trim(),

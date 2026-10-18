@@ -125,6 +125,9 @@ const mappingFor = (f) => ({
   targetObjectType: f?.targetObject || null,
   matchField: null,
   priority: 1,
+  isMultiValue: !!(f?.cardinality === 'many' || f?.isMultiLookup || f?.is_multi),
+  delimiter: ';',
+  updateStrategy: 'merge',
 });
 
 const targetLabel = (key, objectTypes) =>
@@ -369,6 +372,12 @@ function FieldMappingRow({
     onMappingChange(header, { ...currentMapping, targetObjectType: e.target.value || null, matchField: null });
   const handlePriorityChange = (e) =>
     onMappingChange(header, { ...currentMapping, priority: parseInt(e.target.value, 10) || 1 });
+  const handleMultiValueChange = (e) =>
+    onMappingChange(header, { ...currentMapping, isMultiValue: e.target.checked });
+  const handleDelimiterChange = (e) =>
+    onMappingChange(header, { ...currentMapping, delimiter: e.target.value || ';' });
+  const handleUpdateStrategyChange = (e) =>
+    onMappingChange(header, { ...currentMapping, updateStrategy: e.target.value || 'merge' });
 
   // Resolve lookup opts by trying the raw targetObjectType, then its canonical api_name.
   // This handles cases where targetObject is stored as 'company' but cache was keyed as 'companies' or vice-versa.
@@ -515,6 +524,52 @@ function FieldMappingRow({
                   style={purpleSelect}
                   title="Several CSV columns feed this field. The lowest number that has a value is used."
                 />
+              </div>
+            )}
+          </div>
+
+          {/* Multi-record relationship controls */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, paddingTop: 8, borderTop: '1px dashed #ddd6fe' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.74rem', fontWeight: 600, color: '#4c1d95', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={!!currentMapping.isMultiValue}
+                  onChange={handleMultiValueChange}
+                  disabled={isDisabled}
+                  style={{ cursor: 'pointer', accentColor: '#7c3aed' }}
+                />
+                Multi-value (Multiple records per cell)
+              </label>
+            </div>
+
+            {currentMapping.isMultiValue && (
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10, alignItems: 'center', marginTop: 4 }}>
+                <div>
+                  <label style={labelStyle}>Delimiter</label>
+                  <input
+                    type="text"
+                    value={currentMapping.delimiter || ';'}
+                    onChange={handleDelimiterChange}
+                    disabled={isDisabled}
+                    maxLength={5}
+                    style={{ ...purpleSelect, width: '100%', textAlign: 'center', fontWeight: 700 }}
+                    placeholder=";"
+                    title="Delimiter used to separate multiple values (default: ;)"
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>On Update</label>
+                  <select
+                    value={currentMapping.updateStrategy || 'merge'}
+                    onChange={handleUpdateStrategyChange}
+                    disabled={isDisabled}
+                    style={purpleSelect}
+                  >
+                    <option value="merge">Merge (Union with existing)</option>
+                    <option value="replace">Replace (Overwrite existing)</option>
+                  </select>
+                </div>
               </div>
             )}
           </div>
@@ -875,7 +930,22 @@ export default function CSVFieldMappingModal({
       groupMap[gKey].headers.add(h);
       allRows.forEach((row) => {
         const val = cellValue(row[h]);
-        if (val) groupMap[gKey].valueSet.add(val);
+        if (val) {
+          if (cfg.isMultiValue) {
+            const delim = cfg.delimiter || ';';
+            const tokens = String(val)
+              .split(delim)
+              .map((t) => t.trim())
+              .filter(Boolean);
+            tokens.forEach((tok) => {
+              if (!isPlaceholder(tok)) {
+                groupMap[gKey].valueSet.add(tok);
+              }
+            });
+          } else {
+            groupMap[gKey].valueSet.add(val);
+          }
+        }
       });
     });
 
@@ -951,6 +1021,50 @@ export default function CSVFieldMappingModal({
           }
           const targetMeta = fieldMetadataList.find((f) => f.key === targetField);
           const isRequired = !!targetMeta?.isRequired;
+
+          if (cfg.isMultiValue) {
+            const delim = cfg.delimiter || ';';
+            const rawTokens = String(val)
+              .split(delim)
+              .map((t) => t.trim())
+              .filter(Boolean);
+            const tokens = [...new Set(rawTokens)];
+
+            if (tokens.length === 0 || tokens.every(isPlaceholder)) {
+              if (isRequired) {
+                relErrors.set(record.__rowNum, `${targetField}: Field is required`);
+              } else {
+                record[targetField] = [];
+              }
+              break;
+            }
+
+            const resolvedIds = [];
+            const unresolvedTokens = [];
+
+            for (const tok of tokens) {
+              if (isPlaceholder(tok)) continue;
+              const r = relationshipPreviews[header]?.[tok];
+              if (r?.status === 'resolved' && r.resolvedId) {
+                if (!resolvedIds.includes(r.resolvedId)) {
+                  resolvedIds.push(r.resolvedId);
+                }
+              } else {
+                unresolvedTokens.push({ token: tok, reason: r?.reason || r?.status || 'not found' });
+              }
+            }
+
+            if (unresolvedTokens.length > 0) {
+              const errDetails = unresolvedTokens.map((u) => `"${u.token}" (${u.reason})`).join(', ');
+              relErrors.set(record.__rowNum, `${targetField}: Unresolved reference(s): ${errDetails}`);
+              break;
+            }
+
+            record[targetField] = resolvedIds;
+            record[`__strategy_${targetField}`] = cfg.updateStrategy || 'merge';
+            break;
+          }
+
           const isPl = isPlaceholder(val);
 
           if (isPl) {
@@ -1758,6 +1872,11 @@ export default function CSVFieldMappingModal({
                         <div style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: '0.76rem', fontWeight: 700, color: '#334155', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                           <span>
                             {header} → {fieldMetadataList.find((f) => f.key === mappings[header]?.targetField)?.label} (match by {matchLabel})
+                            {mappings[header]?.isMultiValue && (
+                              <span style={{ marginLeft: 6, fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', fontWeight: 700 }}>
+                                Multi-value ({mappings[header]?.delimiter || ';'})
+                              </span>
+                            )}
                           </span>
                           <span style={{ color: ok === entries.length ? '#16a34a' : '#d97706' }}>{ok} / {entries.length} valid</span>
                         </div>
