@@ -170,7 +170,8 @@ const createRecord = async (req, res, next) => {
 
     if (Array.isArray(req.body)) {
       const importMode = req.query.importMode || req.headers['x-import-mode'] || 'upsert';
-      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId, null, { importMode });
+      const targetSegment = req.query.target_segment || req.query.targetSegmentId || req.query.target_segment_id || req.headers['x-target-segment'];
+      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId, null, { importMode, targetSegmentId: targetSegment });
 
       const isSuccess = (bulkResult.createdCount > 0 || bulkResult.updatedCount > 0);
 

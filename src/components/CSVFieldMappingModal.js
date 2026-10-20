@@ -593,6 +593,8 @@ export default function CSVFieldMappingModal({
 
   // ── Segment Mode: 'associate_only' | 'create_and_associate' ────────────────
   const [segmentImportMode, setSegmentImportMode] = useState('associate_only');
+  const [targetSegmentId, setTargetSegmentId] = useState('');
+  const [availableSegments, setAvailableSegments] = useState([]);
 
   // ── Upload state ───────────────────────────────────────────────────────────
   const [isDragging, setIsDragging] = useState(false);
@@ -652,6 +654,7 @@ export default function CSVFieldMappingModal({
     setFoundSavedMapping(null);
     setSaveMappingName('');
     setShowSaveInput(false);
+    setTargetSegmentId('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
@@ -663,6 +666,18 @@ export default function CSVFieldMappingModal({
   useEffect(() => {
     if (open) setSavedMappings(listSavedMappings(orgId, objectTypeId));
   }, [open, orgId, objectTypeId]);
+
+  // Load available segments for Contact import Target Segment dropdown
+  useEffect(() => {
+    if (open && !segmentContext && (String(objectTypeId).toLowerCase().includes('contact') || String(objectDisplayName || '').toLowerCase().includes('contact'))) {
+      apiGet('/api/segments')
+        .then((res) => {
+          const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+          setAvailableSegments(list);
+        })
+        .catch(() => setAvailableSegments([]));
+    }
+  }, [open, objectTypeId, objectDisplayName, segmentContext]);
 
   // ── Load field metadata ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1199,7 +1214,11 @@ export default function CSVFieldMappingModal({
       setImportProgress(`Processing batch ${batchIndex + 1} of ${totalBatches} (${Math.min(i + batch.length, sendRows.length)} / ${sendRows.length} records)…`);
 
       try {
-        const res = await apiPost(`/objects/${objectTypeId}?importMode=${importMode}`, batch, { isUserActivity: true });
+        const queryParams = [`importMode=${importMode}`];
+        if (targetSegmentId) {
+          queryParams.push(`target_segment=${encodeURIComponent(targetSegmentId)}`);
+        }
+        const res = await apiPost(`/objects/${objectTypeId}?${queryParams.join('&')}`, batch, { isUserActivity: true });
         const bulkData = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
         if (Array.isArray(res?.results)) {
           res.results.forEach((r) => {
@@ -1671,6 +1690,40 @@ export default function CSVFieldMappingModal({
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {!segmentContext && (String(objectTypeId).toLowerCase().includes('contact') || String(objectDisplayName || '').toLowerCase().includes('contact')) && (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155' }}>
+                        Target Segment (Optional)
+                      </label>
+                      <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                        Assign imported contacts to this segment if CSV has no Segment column
+                      </span>
+                    </div>
+                    <select
+                      value={targetSegmentId}
+                      onChange={(e) => setTargetSegmentId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        fontSize: '0.82rem',
+                        color: targetSegmentId ? '#1e293b' : '#64748b',
+                        outline: 'none',
+                      }}
+                    >
+                      <option value="">— No target segment (use CSV Segment column if present) —</option>
+                      {availableSegments.map((seg) => (
+                        <option key={seg.id} value={seg.id}>
+                          {seg.name || seg.data?.name || 'Untitled Segment'}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
               </div>

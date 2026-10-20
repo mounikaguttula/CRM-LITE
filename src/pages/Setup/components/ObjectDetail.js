@@ -146,7 +146,9 @@ function DataTypeIcon({ type }) {
     dropdown: { Icon: List, label: 'Picklist' },
     checkbox: { Icon: CheckSquare, label: 'checkbox' },
     url: { Icon: Link2, label: 'url' },
-    lookup: { Icon: Type, label: 'lookup' },
+    lookup: { Icon: Link2, label: 'Lookup' },
+    'multi-lookup': { Icon: Layers, label: 'Multi-Select Lookup' },
+    'multi-select lookup': { Icon: Layers, label: 'Multi-Select Lookup' },
   };
   const { Icon, label } = map[t] || { Icon: Type, label: t };
   return (
@@ -918,7 +920,9 @@ function FieldsTab({ objectKey, displayName, fields, loading, deleteLoading, can
                 const fieldId = field.id || field.name;
                 const fieldLabel = field.label || field.display_name || field.name;
                 const apiName = field.name || field.api_name || '—';
-                const dataType = field.type || field.field_type || 'text';
+                const isLookup = field.type === 'lookup' || field.field_type === 'lookup' || Boolean(field.lookup_target_object_type_id) || field.name === 'segment_ids';
+                const isMulti = field.is_multi || field.name === 'segment_ids';
+                const dataType = isLookup ? (isMulti ? 'multi-select lookup' : 'lookup') : (field.type || field.field_type || 'text');
                 const isRequired = field.required || false;
                 const isSystem = field.is_system || false;
                 const isDeleting = deleteLoading === fieldId;
@@ -2341,10 +2345,19 @@ function EditFieldModal({ objectKey, displayName, field, onClose, onSuccess, onE
                     padding: '9px 12px', borderRadius: 10,
                     background: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569',
                   }}>
-                    <DataTypeIcon type={field.type || field.field_type} />
-                    <span style={{ fontSize: '0.82rem', fontWeight: 600, textTransform: 'capitalize' }}>
-                      {field.type || field.field_type}
-                    </span>
+                    {(() => {
+                      const isLookup = field.type === 'lookup' || field.field_type === 'lookup' || Boolean(field.lookup_target_object_type_id) || field.name === 'segment_ids';
+                      const isMulti = field.is_multi || field.name === 'segment_ids';
+                      const effectiveDataType = isLookup ? (isMulti ? 'multi-select lookup' : 'lookup') : (field.type || field.field_type || 'text');
+                      return (
+                        <>
+                          <DataTypeIcon type={effectiveDataType} />
+                          <span style={{ fontSize: '0.82rem', fontWeight: 600, textTransform: 'capitalize' }}>
+                            {effectiveDataType}
+                          </span>
+                        </>
+                      );
+                    })()}
                     <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>Preserved</span>
                   </div>
                 </div>

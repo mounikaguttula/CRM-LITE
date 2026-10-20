@@ -32,7 +32,7 @@ const OWNER_FIELD_NAMES = new Set(['owner_id', 'owner', 'created_by', 'updated_b
  * returns an object describing which lookup data sources must be fetched.
  *
  * @param {Array} fields - Array of field definition objects
- * @returns {{ users: boolean, companies: boolean, contacts: boolean, deals: boolean, products: boolean }}
+ * @returns {{ users: boolean, companies: boolean, contacts: boolean, deals: boolean, products: boolean, segments: boolean }}
  */
 export function deriveLookupRequirements(fields) {
   const needs = {
@@ -41,6 +41,7 @@ export function deriveLookupRequirements(fields) {
     contacts: false,
     deals: false,
     products: false,
+    segments: false,
   };
 
   for (const f of (fields || [])) {
@@ -56,6 +57,7 @@ export function deriveLookupRequirements(fields) {
     const isContactName = name.includes('contact');
     const isDealName = name.includes('deal');
     const isProductName = name.includes('product');
+    const isSegmentName = name.includes('segment') || f.target === 'segment' || f.target === 'segments';
 
     // Users: needed when a lookup field is an owner/user field (primary + fallback both trigger this)
     // The owner_id platform field is always present with type:'lookup', so users is always true.
@@ -71,6 +73,7 @@ export function deriveLookupRequirements(fields) {
     if (isLookup && isContactName) needs.contacts = true;
     if (isLookup && isDealName) needs.deals = true;
     if (isLookup && isProductName) needs.products = true;
+    if (isLookup && isSegmentName) needs.segments = true;
   }
 
   return needs;
