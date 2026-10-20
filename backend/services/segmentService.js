@@ -472,6 +472,13 @@ const segmentService = {
       const { data: updated, error: updateErr } = await query.select('id').maybeSingle();
 
       if (!updateErr && updated) {
+        // Reciprocally synchronize Contact-side data.segment_ids and external IDs
+        try {
+          await segmentService.syncContactsSegmentIds(requestedIds, segmentId, 'add', organizationId, userId);
+        } catch (syncErr) {
+          console.warn('[SegmentService] Partial failure syncing Contact.data.segment_ids:', syncErr.message);
+        }
+
         return {
           success: true,
           message: `Successfully associated ${requestedIds.length} contact(s).`,
@@ -559,6 +566,13 @@ const segmentService = {
       const { data: updated, error: updateErr } = await query.select('id').maybeSingle();
 
       if (!updateErr && updated) {
+        // Reciprocally synchronize Contact-side data.segment_ids on removal
+        try {
+          await segmentService.syncContactsSegmentIds([contactId], segmentId, 'remove', organizationId, userId);
+        } catch (syncErr) {
+          console.warn('[SegmentService] Partial failure syncing Contact.data.segment_ids on removal:', syncErr.message);
+        }
+
         return {
           success: true,
           message: 'Contact removed from segment successfully.',
@@ -578,7 +592,81 @@ const segmentService = {
   },
 
   /**
+   * Helper: Synchronize Contact-side data.segment_ids and external HubSpot IDs
+   * Handles partial errors safely without crashing the primary operation.
+   */
+  syncContactsSegmentIds: async (contactIds, segmentId, action, organizationId, userId) => {
+    if (!Array.isArray(contactIds) || contactIds.length === 0 || !isUuid(segmentId)) return;
+
+    // Fetch the segment to know its external ID (record_id__c / hubspot_record_id) if available
+    let segmentExtId = null;
+    try {
+      const { data: segRow } = await dbClient
+        .from('universal_table')
+        .select('data')
+        .eq('id', segmentId)
+        .maybeSingle();
+      segmentExtId = segRow?.data?.record_id__c || segRow?.data?.hubspot_record_id || null;
+    } catch (e) {}
+
+    // Fetch the target contacts
+    const { data: contacts, error } = await dbClient
+      .from('universal_table')
+      .select('id, data')
+      .in('id', contactIds)
+      .eq('organization_id', organizationId)
+      .eq('is_deleted', false);
+
+    if (error || !contacts) return;
+
+    for (const c of contacts) {
+      try {
+        const cData = c.data || {};
+        const currentSegmentIds = Array.isArray(cData.segment_ids) ? cData.segment_ids : [];
+        let updatedSegmentIds = [];
+
+        const currentExtIds = String(cData.associated_segment_ids__c || '')
+          .split(';')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        let updatedExtIds = [...currentExtIds];
+
+        if (action === 'add') {
+          updatedSegmentIds = Array.from(new Set([...currentSegmentIds, segmentId]));
+          if (segmentExtId && !updatedExtIds.includes(String(segmentExtId))) {
+            updatedExtIds.push(String(segmentExtId));
+          }
+        } else if (action === 'remove') {
+          updatedSegmentIds = currentSegmentIds.filter((id) => id !== segmentId);
+          if (segmentExtId) {
+            updatedExtIds = updatedExtIds.filter((ext) => ext !== String(segmentExtId));
+          }
+        }
+
+        const nextData = {
+          ...cData,
+          segment_ids: updatedSegmentIds,
+          associated_segment_ids__c: updatedExtIds.join(';'),
+        };
+
+        await dbClient
+          .from('universal_table')
+          .update({
+            data: nextData,
+            updated_at: new Date().toISOString(),
+            updated_by: userId || null,
+          })
+          .eq('id', c.id)
+          .eq('organization_id', organizationId);
+      } catch (err) {
+        console.warn(`[SegmentService] Failed to sync segment ${segmentId} for contact ${c.id}:`, err.message);
+      }
+    }
+  },
+
+  /**
    * Reverse Lookup: Get all Segments containing a given Contact
+   * Checks both Segment.data.contact_ids and Contact.data.segment_ids to return the unified deduplicated set.
    */
   getSegmentsForContact: async (contactId, organizationId) => {
     if (!isUuid(contactId)) {
@@ -590,7 +678,7 @@ const segmentService = {
     // Verify contact exists in the authenticated tenant and is active
     const { data: contactRow, error: cErr } = await dbClient
       .from('universal_table')
-      .select('id')
+      .select('id, data')
       .eq('id', contactId)
       .eq('organization_id', organizationId)
       .eq('object_type_id', contactDefId)
@@ -603,22 +691,46 @@ const segmentService = {
 
     const segmentDefId = await segmentService.resolveSegmentObjectType(organizationId);
 
-    // Query segments belonging to this organization containing contactId in contact_ids
-    const { data: segmentRows, error: sErr } = await dbClient
+    // 1. Query segments containing contactId in Segment.data.contact_ids
+    const { data: segmentRowsFromContacts, error: sErr } = await dbClient
       .from('universal_table')
       .select('*')
       .eq('organization_id', organizationId)
       .eq('object_type_id', segmentDefId)
       .eq('is_deleted', false)
-      .contains('data', { contact_ids: [contactId] })
-      .order('created_at', { ascending: false });
+      .contains('data', { contact_ids: [contactId] });
 
     if (sErr) {
       console.error('[SegmentService] getSegmentsForContact error:', sErr.message);
       throw { statusCode: 500, message: `Failed to fetch associated segments: ${sErr.message}` };
     }
 
-    return (segmentRows || []).map((row) => {
+    // 2. Query segments directly referenced in Contact.data.segment_ids
+    const contactSegIds = Array.isArray(contactRow.data?.segment_ids)
+      ? contactRow.data.segment_ids.filter(isUuid)
+      : [];
+
+    let segmentRowsFromContactData = [];
+    if (contactSegIds.length > 0) {
+      const { data: directSegs } = await dbClient
+        .from('universal_table')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('object_type_id', segmentDefId)
+        .eq('is_deleted', false)
+        .in('id', contactSegIds);
+      segmentRowsFromContactData = directSegs || [];
+    }
+
+    // Merge and deduplicate by segment ID
+    const segMap = new Map();
+    (segmentRowsFromContacts || []).forEach((row) => segMap.set(row.id, row));
+    (segmentRowsFromContactData || []).forEach((row) => segMap.set(row.id, row));
+
+    const combinedRows = Array.from(segMap.values());
+    combinedRows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return combinedRows.map((row) => {
       const rawContactIds = Array.isArray(row.data?.contact_ids) ? row.data.contact_ids : [];
       return {
         id: row.id,

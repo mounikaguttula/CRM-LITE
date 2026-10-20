@@ -633,11 +633,19 @@ const metadataService = {
             fieldName = 'alternate_email';
             fieldLabel = 'Alternate Email ID';
           }
+          const isSegField = fieldName === 'segment_ids';
+          let computedType = f.field_type === 'dropdown' ? 'picklist' : f.field_type;
+          if (isSegField) {
+            computedType = 'lookup';
+          }
           return {
             id: f.id,
             name: fieldName,
             label: fieldLabel,
-            type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
+            type: computedType,
+            field_type: computedType,
+            target: isSegField ? 'segment' : undefined,
+            is_multi: isSegField ? true : (f.is_multi || false),
             description: f.description || '',
             help_text: f.help_text || null,
             placeholder: f.placeholder || null,
@@ -662,6 +670,7 @@ const metadataService = {
           { id: 'f_email', name: 'email', label: 'Email', type: 'email', isTitle: false },
           { id: 'f_phone', name: 'phone', label: 'Phone', type: 'phone', isTitle: false },
           { id: 'f_company', name: 'company_id', label: 'Company / Account', type: 'lookup', target: 'company', isTitle: false },
+          { id: 'f_segments', name: 'segment_ids', label: 'Segments', type: 'lookup', target: 'segment', isTitle: false },
           { id: 'f_title', name: 'title', label: 'Title', type: 'text', isTitle: false },
         ];
       } else if (lowerKey.includes('lead')) {

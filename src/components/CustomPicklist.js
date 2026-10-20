@@ -11,6 +11,7 @@ export default function CustomPicklist({
   searchable = true,
   disabled = false,
   style = {},
+  isMulti = false,
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -22,20 +23,36 @@ export default function CustomPicklist({
   const rawNormalized = (options || []).map((opt) => {
     if (typeof opt === 'object' && opt !== null) {
       const val = opt.id || opt.user_id || opt.value || opt.name || opt.label || '';
-      const lbl = opt.name || opt.displayName || opt.label || opt.email || opt.title || String(val);
+      const lbl = opt.name || opt.displayName || opt.display_name || opt.label || opt.email || opt.title || String(val);
       return { value: String(val), label: String(lbl) };
     }
     return { value: String(opt), label: String(opt) };
   });
 
-  const isValueConfigured = Boolean(
+  // Multi-select normalized selected value list
+  const selectedValues = isMulti
+    ? (Array.isArray(value)
+        ? value.map(String)
+        : (value && typeof value === 'string'
+            ? value.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
+            : []))
+    : [];
+
+  const selectedMultiOpts = isMulti
+    ? selectedValues.map((v) => {
+        const found = rawNormalized.find((o) => o.value === v);
+        return found || { value: v, label: v };
+      })
+    : [];
+
+  const isValueConfigured = !isMulti && Boolean(
     value !== undefined &&
     value !== null &&
     String(value).trim() !== '' &&
     rawNormalized.some((o) => o.value === String(value))
   );
 
-  const isLegacyValue = Boolean(
+  const isLegacyValue = !isMulti && Boolean(
     value !== undefined &&
     value !== null &&
     String(value).trim() !== '' &&
@@ -112,7 +129,7 @@ export default function CustomPicklist({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 14px',
+          padding: '4px 14px',
           borderRadius: 12,
           border: open
             ? '1.5px solid #6366f1'
@@ -120,9 +137,9 @@ export default function CustomPicklist({
             ? '1.5px solid #ef4444'
             : '1px solid #cbd5e1',
           background: disabled ? '#f1f5f9' : '#ffffff',
-          color: selectedOpt ? '#0f172a' : isLegacyValue ? '#b45309' : '#94a3b8',
+          color: (selectedOpt || selectedMultiOpts.length > 0) ? '#0f172a' : isLegacyValue ? '#b45309' : '#94a3b8',
           fontSize: '0.88rem',
-          fontWeight: (selectedOpt || isLegacyValue) ? 600 : 400,
+          fontWeight: (selectedOpt || selectedMultiOpts.length > 0 || isLegacyValue) ? 600 : 400,
           cursor: disabled ? 'not-allowed' : 'pointer',
           boxShadow: open
             ? '0 0 0 3.5px rgba(99, 102, 241, 0.15)'
@@ -131,22 +148,60 @@ export default function CustomPicklist({
           ...style,
         }}
       >
-        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {selectedOpt ? (
-            selectedOpt.label
-          ) : isLegacyValue ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span>{String(value)}</span>
-              <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>Legacy</span>
-            </span>
+        {isMulti ? (
+          selectedMultiOpts.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '2px 0' }}>
+              {selectedMultiOpts.map((opt) => (
+                <span
+                  key={opt.value}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    background: 'rgba(99,102,241,0.1)',
+                    border: '1px solid rgba(99,102,241,0.25)',
+                    color: '#4338ca',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!disabled && onChange) {
+                      const next = selectedValues.filter((v) => v !== opt.value);
+                      onChange(next);
+                    }
+                  }}
+                >
+                  <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {opt.label}
+                  </span>
+                  {!disabled && <X size={12} style={{ cursor: 'pointer', opacity: 0.7 }} />}
+                </span>
+              ))}
+            </div>
           ) : (
-            placeholder
-          )}
-        </span>
-        {open ? (
-          <ChevronUp size={16} style={{ color: '#6366f1', flexShrink: 0 }} />
+            <span style={{ color: '#94a3b8', fontWeight: 400 }}>{placeholder}</span>
+          )
         ) : (
-          <ChevronDown size={16} style={{ color: '#94a3b8', flexShrink: 0 }} />
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {selectedOpt ? (
+              selectedOpt.label
+            ) : isLegacyValue ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span>{String(value)}</span>
+                <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>Legacy</span>
+              </span>
+            ) : (
+              placeholder
+            )}
+          </span>
+        )}
+        {open ? (
+          <ChevronUp size={16} style={{ color: '#6366f1', flexShrink: 0, marginLeft: 6 }} />
+        ) : (
+          <ChevronDown size={16} style={{ color: '#94a3b8', flexShrink: 0, marginLeft: 6 }} />
         )}
       </button>
 
@@ -167,8 +222,8 @@ export default function CustomPicklist({
               overflow: 'hidden',
             }}
           >
-            {/* Search Input Bar (if enabled and options > 5) */}
-            {searchable && rawNormalized.length > 5 && (
+            {/* Search Input Bar (if enabled) */}
+            {searchable && (
               <div style={{ padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <Search size={13} style={{ position: 'absolute', left: 10, color: '#94a3b8' }} />
@@ -200,6 +255,22 @@ export default function CustomPicklist({
               </div>
             )}
 
+            {/* Multi-select Header (Clear all & count) */}
+            {isMulti && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 14px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', fontSize: 11.5 }}>
+                <span style={{ color: '#64748b', fontWeight: 600 }}>{selectedValues.length} selected</span>
+                {selectedValues.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onChange([])}
+                    style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: 0 }}
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Non-selectable legacy notice if current value is unconfigured */}
             {isLegacyValue && (
               <div
@@ -220,26 +291,28 @@ export default function CustomPicklist({
 
             {/* Options List */}
             <div className="orbit-scrollbar" style={{ maxHeight: coords.maxHeight || 210, overflowY: 'auto', padding: '4px 0' }}>
-              {/* Optional Placeholder / Clear Selection option */}
-              <div
-                onClick={() => {
-                  onChange('');
-                  setOpen(false);
-                  setSearch('');
-                }}
-                style={{
-                  padding: '9px 14px',
-                  fontSize: 12.5,
-                  color: '#94a3b8',
-                  cursor: 'pointer',
-                  fontStyle: 'italic',
-                  background: 'transparent',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                {placeholder}
-              </div>
+              {/* Optional Placeholder / Clear Selection option for single-select */}
+              {!isMulti && (
+                <div
+                  onClick={() => {
+                    onChange('');
+                    setOpen(false);
+                    setSearch('');
+                  }}
+                  style={{
+                    padding: '9px 14px',
+                    fontSize: 12.5,
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontStyle: 'italic',
+                    background: 'transparent',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  {placeholder}
+                </div>
+              )}
 
               {filteredOptions.length === 0 ? (
                 <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, color: '#94a3b8' }}>
@@ -247,14 +320,21 @@ export default function CustomPicklist({
                 </div>
               ) : (
                 filteredOptions.map((o) => {
-                  const isSelected = o.value === String(value);
+                  const isSelected = isMulti ? selectedValues.includes(o.value) : o.value === String(value);
                   return (
                     <div
                       key={o.value}
                       onClick={() => {
-                        onChange(o.value);
-                        setOpen(false);
-                        setSearch('');
+                        if (isMulti) {
+                          const next = isSelected
+                            ? selectedValues.filter((v) => v !== o.value)
+                            : [...selectedValues, o.value];
+                          onChange(next);
+                        } else {
+                          onChange(o.value);
+                          setOpen(false);
+                          setSearch('');
+                        }
                       }}
                       style={{
                         padding: '9px 14px',
@@ -278,7 +358,13 @@ export default function CustomPicklist({
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {o.label}
                       </span>
-                      {isSelected && <Check size={15} style={{ color: '#4338ca', flexShrink: 0 }} />}
+                      {isSelected ? (
+                        <div style={{ width: 16, height: 16, borderRadius: 4, background: '#4338ca', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Check size={12} color="#fff" strokeWidth={3} />
+                        </div>
+                      ) : isMulti ? (
+                        <div style={{ width: 16, height: 16, borderRadius: 4, border: '1.5px solid #cbd5e1' }} />
+                      ) : null}
                     </div>
                   );
                 })

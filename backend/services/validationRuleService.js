@@ -229,22 +229,53 @@ function evaluateRule(rule, recordData) {
 // ---------------------------------------------------------------------------
 async function fetchResolvedRules(organizationId, { objectName, activeOnly = false } = {}) {
   // Build the system-rule query (organization_id IS NULL)
+  // Do NOT filter by is_active in SQL — inactive org overrides must be merged first
   let systemQuery = supabase
     .from('validation_rules')
     .select('*')
     .is('organization_id', null);
 
-  if (objectName) systemQuery = systemQuery.eq('object_name', objectName);
-  if (activeOnly) systemQuery = systemQuery.eq('is_active', true);
+  if (objectName) {
+    const clean = String(objectName).trim().toLowerCase();
+    const singular = clean.endsWith('ies') ? `${clean.slice(0, -3)}y` : (clean.endsWith('s') && !clean.endsWith('ss') ? clean.slice(0, -1) : clean);
+    const plural = singular.endsWith('y') ? `${singular.slice(0, -1)}ies` : `${singular}s`;
+    const names = Array.from(new Set([objectName, clean, singular, plural]));
+    if (names.length === 1) {
+      systemQuery = systemQuery.eq('object_name', objectName);
+    } else {
+      systemQuery = systemQuery.in('object_name', names);
+    }
+  }
+
+  // If no organizationId provided, evaluate system rules only
+  if (!organizationId) {
+    const { data: systemRules, error: systemError } = await systemQuery;
+    if (systemError) throw systemError;
+    let resolved = systemRules || [];
+    if (activeOnly) {
+      resolved = resolved.filter((rule) => rule.is_active === true);
+    }
+    return resolved;
+  }
 
   // Build the org-specific query (scoped strictly to this organization)
+  // Do NOT filter by is_active in SQL — allows deactivated overrides (is_active = false) to be fetched
   let orgQuery = supabase
     .from('validation_rules')
     .select('*')
     .eq('organization_id', organizationId);
 
-  if (objectName) orgQuery = orgQuery.eq('object_name', objectName);
-  if (activeOnly) orgQuery = orgQuery.eq('is_active', true);
+  if (objectName) {
+    const clean = String(objectName).trim().toLowerCase();
+    const singular = clean.endsWith('ies') ? `${clean.slice(0, -3)}y` : (clean.endsWith('s') && !clean.endsWith('ss') ? clean.slice(0, -1) : clean);
+    const plural = singular.endsWith('y') ? `${singular.slice(0, -1)}ies` : `${singular}s`;
+    const names = Array.from(new Set([objectName, clean, singular, plural]));
+    if (names.length === 1) {
+      orgQuery = orgQuery.eq('object_name', objectName);
+    } else {
+      orgQuery = orgQuery.in('object_name', names);
+    }
+  }
 
   // Run both queries in parallel
   const [{ data: systemRules, error: systemError }, { data: orgRules, error: orgError }] =
@@ -257,17 +288,24 @@ async function fetchResolvedRules(organizationId, { objectName, activeOnly = fal
   const ruleMap = new Map();
 
   (systemRules || []).forEach((rule) => {
-    const key = rule.rule_key;
+    const key = (rule.rule_key && String(rule.rule_key).trim()) ? String(rule.rule_key).trim() : rule.id;
     ruleMap.set(key, rule);
   });
 
   (orgRules || []).forEach((rule) => {
-    const key = rule.rule_key;
+    const key = (rule.rule_key && String(rule.rule_key).trim()) ? String(rule.rule_key).trim() : rule.id;
     // Org rule overwrites system rule at the same key (higher precedence)
     ruleMap.set(key, rule);
   });
 
-  return Array.from(ruleMap.values());
+  let resolved = Array.from(ruleMap.values());
+
+  // Apply activeOnly filter only AFTER resolving the merged rules
+  if (activeOnly) {
+    resolved = resolved.filter((rule) => rule.is_active === true);
+  }
+
+  return resolved;
 }
 
 // ---------------------------------------------------------------------------

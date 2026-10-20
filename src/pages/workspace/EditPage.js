@@ -80,7 +80,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
   const [formData, setFormData] = useState({});
   const [fields, setFields] = useState([]);
-  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [], deals: [], products: [] });
+  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [], deals: [], products: [], segments: [] });
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -125,6 +125,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       if (needs.contacts)  reqEntries.push(['contacts',  apiGet('/objects/contacts?page=1&pageSize=25').catch(() => apiGet('/objects/contact?page=1&pageSize=25')).catch(() => apiGet('/contacts?page=1&pageSize=25')).catch(() => apiGet('/contact?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
       if (needs.deals)     reqEntries.push(['deals',     apiGet('/objects/deals?page=1&pageSize=25').catch(() => apiGet('/deals?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
       if (needs.products)  reqEntries.push(['products',  apiGet('/objects/product?page=1&pageSize=25').catch(() => apiGet('/objects/products?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.segments)  reqEntries.push(['segments',  apiGet('/api/segments').catch(() => apiGet('/segments')).catch(() => ({ data: [] }))]);
 
       const keys    = reqEntries.map(([k]) => k);
       const results = await Promise.all(reqEntries.map(([, p]) => p));
@@ -141,6 +142,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       let   contactList  = resolved.contacts   || [];
       const dealsList    = resolved.deals      || [];
       const productsList = resolved.products   || [];
+      const segmentsList = resolved.segments   || [];
 
       // ── Selected-value safety net ─────────────────────────────────────────
       // If the record has an existing company or contact relationship whose ID is
@@ -183,6 +185,12 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         : recData.name;
 
       const initialForm = recData ? { ...recData, ...(humanName ? { name: humanName } : {}) } : {};
+      if (recData && (cleanObjKey.includes('contact') || cleanObjKey.includes('person'))) {
+        const rawSegs = Array.isArray(recData.segment_ids)
+          ? recData.segment_ids
+          : (Array.isArray(recData.data?.segment_ids) ? recData.data.segment_ids : []);
+        initialForm.segment_ids = rawSegs;
+      }
 
       // Inspect product line items for Deal / Opportunity objects
       let dealItems = [];
@@ -446,7 +454,15 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       (meta.fields || []).forEach((field) => {
         const fieldName = field.name;
         const val = payload[fieldName];
-        if (field.type === 'lookup' || fieldName?.toLowerCase().includes('company') || fieldName?.toLowerCase().includes('owner')) {
+        if (field.target === 'segment' || field.target === 'segments' || fieldName?.toLowerCase().includes('segment')) {
+          if (Array.isArray(val)) {
+            payload[fieldName] = val.filter(isUuid);
+          } else if (typeof val === 'string' && isUuid(val)) {
+            payload[fieldName] = [val];
+          } else if (!val) {
+            payload[fieldName] = [];
+          }
+        } else if (field.type === 'lookup' || fieldName?.toLowerCase().includes('company') || fieldName?.toLowerCase().includes('owner')) {
           if (!val || val === '—' || val === 'Select company…') {
             payload[fieldName] = null;
           } else if (fieldName?.toLowerCase().includes('company')) {
@@ -615,6 +631,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
     const isContact = fieldName.includes('contact');
     const isDeal = fieldName.includes('deal');
     const isProduct = fieldName.includes('product');
+    const isSegment = f.target === 'segment' || f.target === 'segments' || fieldName.includes('segment');
     const isNotes = fieldName.includes('notes') || fieldName.includes('description') || f.type === 'textarea' || fieldName.includes('address') || fieldName.includes('street');
 
     const isAmountField = fieldName === 'amount' || fieldName === 'deal_amount' || fieldName === 'value' || fieldName === 'deal_value';
@@ -628,7 +645,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
 
     const isExplicitLookup = f.type === 'lookup';
     const isExplicitNonLookup = Boolean(f.type && f.type !== 'lookup');
-    const isLookupField = isExplicitLookup || (!isExplicitNonLookup && (isOwner || isCompany || isContact || isDeal || isProduct));
+    const isLookupField = isExplicitLookup || (!isExplicitNonLookup && (isOwner || isCompany || isContact || isDeal || isProduct || isSegment));
 
     if (f.type === 'picklist' || f.type === 'dropdown') {
       const rawOptions = (Array.isArray(f.options) && f.options.length > 0)
@@ -662,6 +679,8 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
         ? (lookupData.deals || [])
         : isProduct
         ? (lookupData.products || [])
+        : isSegment
+        ? (lookupData.segments || [])
         : [];
 
       let rawFieldVal = formData[f.name];
@@ -716,6 +735,7 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
       fieldEl = (
         <CustomPicklist
           disabled={effectiveReadOnly}
+          isMulti={isSegment}
           options={options.map((opt, idx) => {
             const optVal = opt && typeof opt === 'object'
               ? opt.id || opt._id || opt.user_id || opt.company_name || opt.organization_name || opt.account_name || opt.company || opt.organization || opt.display_name || opt.displayName || `${opt.first_name || ''} ${opt.last_name || ''}`.trim() || opt.email || opt.title
@@ -726,9 +746,15 @@ function EditPage({ objectTypeId: propObjectTypeId, recordId: propRecordId, onSu
               : String(opt || '');
             return { value: String(safeOptVal), label: String(optLabel) };
           })}
-          value={currentSelectedVal || ''}
+          value={isSegment
+            ? (Array.isArray(formData[f.name])
+                ? formData[f.name]
+                : (Array.isArray(formData.segment_ids)
+                    ? formData.segment_ids
+                    : (formData[f.name] ? [formData[f.name]] : [])))
+            : (currentSelectedVal || '')}
           onChange={(val) => handleChange(f.name, val)}
-          placeholder={`Select ${f.label.toLowerCase()}…`}
+          placeholder={isSegment ? '-- Select Segments --' : `Select ${f.label.toLowerCase()}…`}
           hasError={hasError}
         />
       );

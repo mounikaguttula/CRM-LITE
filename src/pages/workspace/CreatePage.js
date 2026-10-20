@@ -34,7 +34,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
 
   const [formData, setFormData] = useState({});
   const [fields, setFields] = useState([]);
-  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [], deals: [], products: [] });
+  const [lookupData, setLookupData] = useState({ users: [], companies: [], contacts: [], deals: [], products: [], segments: [] });
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -72,6 +72,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
       if (needs.contacts)  reqEntries.push(['contacts',  apiGet('/objects/contacts?page=1&pageSize=25').catch(() => apiGet('/contacts?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
       if (needs.deals)     reqEntries.push(['deals',     apiGet('/objects/deals?page=1&pageSize=25').catch(() => ({ data: [] }))]);
       if (needs.products)  reqEntries.push(['products',  apiGet('/objects/product?page=1&pageSize=25').catch(() => apiGet('/objects/products?page=1&pageSize=25')).catch(() => ({ data: [] }))]);
+      if (needs.segments)  reqEntries.push(['segments',  apiGet('/api/segments').catch(() => apiGet('/segments')).catch(() => ({ data: [] }))]);
 
       const keys    = reqEntries.map(([k]) => k);
       const results = await Promise.all(reqEntries.map(([, p]) => p));
@@ -89,6 +90,7 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
         contacts:  resolved.contacts  || [],
         deals:     resolved.deals     || [],
         products:  resolved.products  || [],
+        segments:  resolved.segments  || [],
       });
 
       // Parse query params for pre-filled lookup values
@@ -327,13 +329,14 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
     const isContact = f.name?.toLowerCase().includes('contact');
     const isDeal = f.name?.toLowerCase().includes('deal');
     const isProduct = f.name?.toLowerCase().includes('product');
+    const isSegment = f.target === 'segment' || f.target === 'segments' || f.name?.toLowerCase().includes('segment');
     const isNotes = f.name?.toLowerCase().includes('notes') || f.name?.toLowerCase().includes('description') || f.type === 'textarea' || f.type === 'address' || (f.name || '').toLowerCase().includes('address') || (f.name || '').toLowerCase().includes('street');
 
     let fieldEl;
 
     const isExplicitLookup = f.type === 'lookup';
     const isExplicitNonLookup = Boolean(f.type && f.type !== 'lookup');
-    const isLookupField = isExplicitLookup || (!isExplicitNonLookup && (isOwner || isCompany || isContact || isDeal || isProduct));
+    const isLookupField = isExplicitLookup || (!isExplicitNonLookup && (isOwner || isCompany || isContact || isDeal || isProduct || isSegment));
 
     if (f.type === 'picklist' || f.type === 'dropdown') {
       const rawOptions = (Array.isArray(f.options) && f.options.length > 0)
@@ -366,14 +369,19 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
         ? lookupData.deals
         : isProduct
         ? lookupData.products
+        : isSegment
+        ? lookupData.segments
         : [];
 
       fieldEl = (
         <CustomPicklist
+          isMulti={isSegment}
           options={options}
-          value={formData[f.name] || ''}
+          value={isSegment
+            ? (Array.isArray(formData[f.name]) ? formData[f.name] : (formData[f.name] ? [formData[f.name]] : []))
+            : (formData[f.name] || '')}
           onChange={(val) => handleChange(f.name, val)}
-          placeholder={`-- Select ${f.label} --`}
+          placeholder={isSegment ? '-- Select Segments --' : `-- Select ${f.label} --`}
           hasError={hasError}
         />
       );

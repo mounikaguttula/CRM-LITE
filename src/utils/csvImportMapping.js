@@ -173,9 +173,14 @@ export function mapHeaderToField(rawHeader, fields = []) {
     raw === 'id' ||
     raw === 'crm record id' ||
     raw === 'crm_record_id' ||
+    raw === 'crm contact id' ||
+    raw === 'crm_contact_id' ||
     raw === 'crm id' ||
     raw === 'crm record uuid' ||
+    raw === 'crm contact uuid' ||
+    raw === 'crm_contact_uuid' ||
     raw === 'record_uuid' ||
+    raw === 'contact_uuid' ||
     raw === 'record id (crm internal uuid)'
   ) {
     const idField = fields.find((f) => f.key === 'id');

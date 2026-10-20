@@ -304,6 +304,14 @@ const extractPayloadAliasValue = (payload, aliases) => {
       return payload[key];
     }
   }
+
+  // If an alias was explicitly provided as empty or null, return null so update flows can clear the relationship
+  for (const key of candidateKeys) {
+    if (payload[key] !== undefined && (payload[key] === null || String(payload[key]).trim() === '' || payload[key] === 'null')) {
+      return null;
+    }
+  }
+
   return undefined;
 };
 
@@ -925,6 +933,21 @@ const objectService = {
       if (isDealKey) customData.type = dealTypeCreateVal;
     }
 
+    // Handle Segment-Contact multi-association on create
+    let createdContactSegmentIds = [];
+    if (cleanKey === 'contact' || cleanKey === 'person' || cleanKey === 'contacts' || cleanKey === 'people') {
+      const rawSegIds = customData.segment_ids !== undefined
+        ? customData.segment_ids
+        : (customData.segments !== undefined ? customData.segments : undefined);
+      if (rawSegIds !== undefined) {
+        const segArray = Array.isArray(rawSegIds)
+          ? rawSegIds
+          : (typeof rawSegIds === 'string' ? rawSegIds.split(/[;,]/).map((s) => s.trim()) : []);
+        createdContactSegmentIds = [...new Set(segArray.filter(isUuid))];
+        customData.segment_ids = createdContactSegmentIds;
+      }
+    }
+
     const relRes = await resolveRecordRelationships(payload, cleanObjKey, organizationId);
     let resolvedParent = relRes.resolvedParent;
     let resolvedSecondary = relRes.resolvedSecondary;
@@ -1007,6 +1030,18 @@ const objectService = {
       throw { statusCode: 400, message: `Failed to create ${objectKey} record: ${error.message}` };
     }
 
+    // Synchronize Segment memberships for newly created Contact
+    if (createdContactSegmentIds.length > 0 && row && row.id) {
+      const segmentService = require('./segmentService');
+      for (const segId of createdContactSegmentIds) {
+        try {
+          await segmentService.addContactsToSegment(segId, [row.id], organizationId, userId);
+        } catch (syncErr) {
+          console.warn(`[ObjectService] Failed to sync segment ${segId} on contact create:`, syncErr.message);
+        }
+      }
+    }
+
     return objectService.normalizeRecord(row);
   },
 
@@ -1052,6 +1087,32 @@ const objectService = {
       }
       if (latestSeg?.data?._version !== undefined) {
         customData._version = latestSeg.data._version;
+      }
+    }
+
+    // Handle Segment-Contact multi-association on update
+    let addedSegIds = [];
+    let removedSegIds = [];
+    const targetKeyLower = String(objectKey || '').toLowerCase();
+    if (targetKeyLower.includes('contact') || targetKeyLower.includes('person')) {
+      const rawIncomingSegs = payload.segment_ids !== undefined
+        ? payload.segment_ids
+        : (payload.segments !== undefined ? payload.segments : undefined);
+
+      if (rawIncomingSegs !== undefined) {
+        const incomingArray = Array.isArray(rawIncomingSegs)
+          ? rawIncomingSegs
+          : (typeof rawIncomingSegs === 'string' ? rawIncomingSegs.split(/[;,]/).map((s) => s.trim()) : []);
+        const newSegIds = [...new Set(incomingArray.filter(isUuid))];
+
+        const existingSegIds = Array.isArray(existing.segment_ids)
+          ? existing.segment_ids.filter(isUuid)
+          : (Array.isArray(existing.data?.segment_ids) ? existing.data.segment_ids.filter(isUuid) : []);
+
+        addedSegIds = newSegIds.filter((sid) => !existingSegIds.includes(sid));
+        removedSegIds = existingSegIds.filter((sid) => !newSegIds.includes(sid));
+
+        customData.segment_ids = newSegIds;
       }
     }
 
@@ -1252,6 +1313,25 @@ const objectService = {
 
     if (error) {
       throw { statusCode: 400, message: `Failed to update ${objectKey} record: ${error.message}` };
+    }
+
+    // Synchronize Segment memberships on Contact update
+    if (addedSegIds.length > 0 || removedSegIds.length > 0) {
+      const segmentService = require('./segmentService');
+      for (const segId of addedSegIds) {
+        try {
+          await segmentService.addContactsToSegment(segId, [id], organizationId, userId);
+        } catch (syncErr) {
+          console.warn(`[ObjectService] Failed to add contact ${id} to segment ${segId}:`, syncErr.message);
+        }
+      }
+      for (const segId of removedSegIds) {
+        try {
+          await segmentService.removeContactFromSegment(segId, id, organizationId, userId);
+        } catch (syncErr) {
+          console.warn(`[ObjectService] Failed to remove contact ${id} from segment ${segId}:`, syncErr.message);
+        }
+      }
     }
 
     return objectService.normalizeRecord(row);
@@ -1455,6 +1535,7 @@ const objectService = {
     }
     const dryRun = resolvedOptions.dryRun === true;
     const importMode = String(resolvedOptions.importMode || resolvedOptions.mode || 'upsert').toLowerCase().trim();
+    const targetSegment = resolvedOptions.targetSegmentId || resolvedOptions.target_segment_id || resolvedOptions.target_segment || resolvedOptions.targetSegment || null;
     if (!Array.isArray(recordsArray) || recordsArray.length === 0) {
       return {
         success: true,
@@ -1472,7 +1553,7 @@ const objectService = {
     const cleanKey = String(objectKey || '').toLowerCase();
 
     // 1. Pre-fetch metadata, field definitions, object types, and validation rules (or use cacheContext)
-    let objDef, fields, validationRules, companyObjectType, contactObjectType;
+    let objDef, fields, validationRules, companyObjectType, contactObjectType, segmentObjectType;
 
     if (cacheContext) {
       objDef = cacheContext.objDef;
@@ -1480,6 +1561,7 @@ const objectService = {
       validationRules = cacheContext.validationRules;
       companyObjectType = cacheContext.companyObjectType;
       contactObjectType = cacheContext.contactObjectType;
+      segmentObjectType = cacheContext.segmentObjectType;
     } else {
       const defRes = await metadataService.getObjectDefinition(objectKey, organizationId);
       objDef = defRes.definition;
@@ -1492,9 +1574,12 @@ const objectService = {
 
       companyObjectType = await metadataService.getObjectTypeByApiName('companies', organizationId).catch(() => null);
       contactObjectType = await metadataService.getObjectTypeByApiName('contacts', organizationId).catch(() => null);
+      segmentObjectType = await metadataService.getObjectTypeByApiName('segments', organizationId)
+        .catch(() => metadataService.getObjectTypeByApiName('segment', organizationId))
+        .catch(() => null);
     }
 
-    // 2. Extract unique Company IDs/Names and Contact IDs/Names across all rows in recordsArray
+    // 2. Extract unique Company IDs/Names, Contact IDs/Names, and Segment IDs/Names across all rows in recordsArray
     const isCompanyObject = cleanKey.includes('company') || cleanKey.includes('companies') || cleanKey.includes('account');
     const isContactObject = cleanKey.includes('contact') || cleanKey.includes('person');
 
@@ -1502,6 +1587,8 @@ const objectService = {
     const contactIdsSet = new Set();
     const companyNamesSet = new Set();
     const contactNamesSet = new Set();
+    const segmentIdsSet = new Set();
+    const segmentNamesSet = new Set();
 
     const PLACEHOLDERS = new Set(['not found', 'n/a', 'na', 'none', 'null', '-', '--', 'undefined', 'nil']);
     const isPlaceholder = (val) => {
@@ -1606,6 +1693,36 @@ const objectService = {
         }
       }
 
+      let segmentTokens = [];
+      if (isContactObject) {
+        const candidateSegmentKeys = [
+          'segment_ids', 'Segment IDs', 'Segment_ids', 'segment_id', 'Segment ID', 'Segment_id',
+          'associated_segment_ids', 'Associated Segment IDs', 'associated_segment_ids__c', 'Associated_segment_ids__c',
+          'segment', 'Segment', 'segments', 'Segments',
+          'hubspot_segment_ids', 'hubspot_list_ids', 'List ID', 'List IDs', 'list_id', 'list_ids',
+          'target_segment', 'Target Segment'
+        ];
+        for (const k of candidateSegmentKeys) {
+          if (rowPayload[k] !== undefined && rowPayload[k] !== null && String(rowPayload[k]).trim() !== '') {
+            const toks = extractMultiTokens(rowPayload[k]);
+            if (toks.length > 0) {
+              segmentTokens = toks;
+              break;
+            }
+          }
+        }
+        if (segmentTokens.length === 0 && targetSegment && !isPlaceholder(targetSegment)) {
+          segmentTokens = extractMultiTokens(targetSegment);
+        }
+
+        segmentTokens.forEach((t) => {
+          if (!isPlaceholder(t)) {
+            if (isUuid(t)) segmentIdsSet.add(t);
+            else segmentNamesSet.add(t.trim().toLowerCase());
+          }
+        });
+      }
+
       companyTokens.forEach((t) => {
         if (!isPlaceholder(t)) {
           if (isUuid(t)) companyIdsSet.add(t);
@@ -1633,6 +1750,7 @@ const objectService = {
       return {
         companyTokens,
         contactTokens,
+        segmentTokens,
         companyIdInput,
         companyNameInput,
         contactIdInput,
@@ -1646,6 +1764,9 @@ const objectService = {
     const companyByNameMap = new Map();
     const companyByExternalIdMap = new Map();
     const contactByNameMap = new Map();
+    const segmentByIdMap = new Map();
+    const segmentByNameMap = new Map();
+    const segmentByExternalIdMap = new Map();
 
     // Build all relationship lookup promises upfront, then execute in parallel
     const relationshipPromises = [];
@@ -1677,6 +1798,22 @@ const objectService = {
             .in('id', validUuids)
             .then(({ data: rows }) => {
               (rows || []).forEach(r => contactByIdMap.set(r.id, r));
+            })
+        );
+      }
+    }
+
+    // Segment ID lookup
+    if (segmentIdsSet.size > 0) {
+      const validUuids = Array.from(segmentIdsSet).filter(id => isUuid(id));
+      if (validUuids.length > 0) {
+        relationshipPromises.push(
+          supabase
+            .from('universal_table')
+            .select('id, organization_id, object_type_id, name, data, is_deleted')
+            .in('id', validUuids)
+            .then(({ data: rows }) => {
+              (rows || []).forEach(r => segmentByIdMap.set(r.id, r));
             })
         );
       }
@@ -1734,12 +1871,55 @@ const objectService = {
       );
     }
 
+    // Segment Name and External ID lookup
+    if ((segmentNamesSet.size > 0 || segmentIdsSet.size > 0) && segmentObjectType) {
+      relationshipPromises.push(
+        supabase
+          .from('universal_table')
+          .select('id, organization_id, object_type_id, name, data, is_deleted')
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', segmentObjectType.id)
+          .eq('is_deleted', false)
+          .then(({ data: rows }) => {
+            (rows || []).forEach(r => {
+              segmentByIdMap.set(r.id, r);
+
+              const nameVal = r.name || r.data?.name || '';
+              getNormalizedKeys(nameVal).forEach(k => {
+                if (!segmentByNameMap.has(k)) segmentByNameMap.set(k, []);
+                const list = segmentByNameMap.get(k);
+                if (!list.some(e => e.id === r.id)) list.push(r);
+              });
+
+              const extIds = [
+                r.data?.record_id__c,
+                r.data?.external_id,
+                r.data?.hubspot_segment_id,
+                r.data?.hubspot_list_id
+              ].filter(Boolean);
+              extIds.forEach(extIdVal => {
+                getNormalizedKeys(extIdVal).forEach(k => {
+                  if (!segmentByExternalIdMap.has(k)) segmentByExternalIdMap.set(k, []);
+                  const list = segmentByExternalIdMap.get(k);
+                  if (!list.some(e => e.id === r.id)) list.push(r);
+                });
+              });
+            });
+          })
+      );
+    }
+
     // Execute all relationship lookups concurrently
     await Promise.all(relationshipPromises);
 
     // 4. Candidate Existing Record Identification & Cache (for Upsert / Update / Duplicate checks)
     const isSegmentObject = cleanKey.includes('segment');
-    const INTERNAL_ID_KEYS = ['id', 'ID', 'record_uuid', 'crm_record_id', 'crm_record_uuid', 'CRM Record UUID', 'crm record uuid'];
+    const INTERNAL_ID_KEYS = [
+      'id', 'ID', 'record_uuid', 'contact_uuid',
+      'crm_record_id', 'crm_record_uuid', 'CRM Record UUID', 'crm record uuid',
+      'crm_contact_id', 'CRM Contact ID', 'crm contact id',
+      'crm_contact_uuid', 'CRM Contact UUID', 'crm contact uuid'
+    ];
     const EXTERNAL_ID_KEYS = [
       'record_id__c', 'external_id', 'hubspot_record_id', 'hubspot_reference_id',
       'HubSpot Record ID', 'hubspot record id', 'hubspot_id',
@@ -1813,13 +1993,62 @@ const objectService = {
       return '';
     };
 
-    // Load existing records for duplicate checking and candidate matching
-    const { data: allExistingObjRows } = await dbClient
-      .from('universal_table')
-      .select('*')
-      .eq('organization_id', organizationId)
-      .eq('object_type_id', objDef.id)
-      .eq('is_deleted', false);
+    // Load existing records for duplicate checking and candidate matching.
+    // PostgREST/Supabase defaults to a max of 1000 rows. In organizations with thousands of records,
+    // we also explicitly query for any UUIDs and external IDs present in the incoming import batch
+    // to guarantee they are never missed due to pagination limits.
+    const incomingInternalUuids = Array.from(new Set(
+      recordsArray.map(r => getRawRowInternalId(r)).filter(id => id && isUuid(id))
+    ));
+    const incomingExternalIds = Array.from(new Set(
+      recordsArray.map(r => getRowExternalId(r)).filter(id => id && String(id).trim() !== '' && !isPlaceholder(String(id)))
+    ));
+
+    const [allExistingRes, targetedIdRes, targetedExtRes] = await Promise.all([
+      dbClient
+        .from('universal_table')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('object_type_id', objDef.id)
+        .eq('is_deleted', false),
+      incomingInternalUuids.length > 0
+        ? dbClient
+            .from('universal_table')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .eq('object_type_id', objDef.id)
+            .eq('is_deleted', false)
+            .in('id', incomingInternalUuids)
+        : Promise.resolve({ data: [] }),
+      incomingExternalIds.length > 0
+        ? dbClient
+            .from('universal_table')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .eq('object_type_id', objDef.id)
+            .eq('is_deleted', false)
+            .or(
+              incomingExternalIds
+                .map(ext => `data->>record_id__c.eq."${ext}",data->>external_id.eq."${ext}",data->>hubspot_record_id.eq."${ext}",data->>hubspot_reference_id.eq."${ext}"`)
+                .join(',')
+            )
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const existingRowsCombined = [
+      ...(allExistingRes.data || []),
+      ...(targetedIdRes.data || []),
+      ...(targetedExtRes.data || []),
+    ];
+    // Deduplicate combined rows by id
+    const seenRowIds = new Set();
+    const allExistingObjRows = [];
+    for (const r of existingRowsCombined) {
+      if (r && r.id && !seenRowIds.has(r.id)) {
+        seenRowIds.add(r.id);
+        allExistingObjRows.push(r);
+      }
+    }
 
     const existingRecordsByIdMap = new Map();
     const existingByExternalIdMap = new Map(); // normExtId -> Array<record>
@@ -1902,6 +2131,7 @@ const objectService = {
     let createdCount = 0;
     let updatedCount = 0;
     let failedCount = 0;
+    const segmentToContactMap = new Map();
 
     for (let i = 0; i < recordsArray.length; i++) {
       const payload = recordsArray[i];
@@ -2517,6 +2747,69 @@ const objectService = {
           customData.contact_name = resolvedName;
         }
 
+        // Contact Segment Relationship Resolution
+        let resolvedSegmentIds = [];
+        let incomingAssociatedSegmentIds = [];
+
+        if (isContactObject) {
+          const segTokens = (relInputs.segmentTokens && relInputs.segmentTokens.length > 0)
+            ? relInputs.segmentTokens
+            : [];
+
+          if (segTokens.length > 0) {
+            for (const token of segTokens) {
+              if (isPlaceholder(token)) continue;
+              if (isUuid(token)) {
+                const segRow = segmentByIdMap.get(token);
+                if (!segRow || segRow.is_deleted) {
+                  throw { statusCode: 400, message: `Validation Error: Segment ID '${token}' was not found.` };
+                }
+                if (segRow.organization_id !== organizationId) {
+                  throw { statusCode: 403, message: `Validation Error: Segment ID '${token}' does not belong to the current organization.` };
+                }
+                resolvedSegmentIds.push(segRow.id);
+                const extId = segRow.data?.record_id__c || segRow.data?.hubspot_segment_id || segRow.data?.hubspot_list_id || segRow.data?.external_id;
+                if (extId) incomingAssociatedSegmentIds.push(String(extId).trim());
+              } else {
+                let extMatches = [];
+                for (const k of getNormalizedKeys(token)) {
+                  if (segmentByExternalIdMap.has(k)) {
+                    extMatches = segmentByExternalIdMap.get(k);
+                    break;
+                  }
+                }
+                if (extMatches.length > 1) {
+                  throw { statusCode: 400, message: `Validation Error: Multiple Segments found with external ID '${token}'.` };
+                }
+                if (extMatches.length === 1) {
+                  resolvedSegmentIds.push(extMatches[0].id);
+                  incomingAssociatedSegmentIds.push(String(token).trim());
+                } else {
+                  let nameMatches = [];
+                  for (const k of getNormalizedKeys(token)) {
+                    if (segmentByNameMap.has(k)) {
+                      nameMatches = segmentByNameMap.get(k);
+                      break;
+                    }
+                  }
+                  if (nameMatches.length > 1) {
+                    throw { statusCode: 400, message: `Validation Error: Multiple Segments found with the name '${token}'. Please provide Segment ID.` };
+                  }
+                  if (nameMatches.length === 1) {
+                    resolvedSegmentIds.push(nameMatches[0].id);
+                    const extId = nameMatches[0].data?.record_id__c || nameMatches[0].data?.hubspot_segment_id || nameMatches[0].data?.hubspot_list_id || nameMatches[0].data?.external_id;
+                    if (extId) incomingAssociatedSegmentIds.push(String(extId).trim());
+                  } else {
+                    throw { statusCode: 400, message: `Validation Error: Segment reference '${token}' was not found.` };
+                  }
+                }
+              }
+            }
+            resolvedSegmentIds = [...new Set(resolvedSegmentIds)];
+            incomingAssociatedSegmentIds = [...new Set(incomingAssociatedSegmentIds.filter(Boolean))];
+          }
+        }
+
         // UPDATE BRANCH: Merge non-blank values into existing record and persist
         if (isUpdateRow) {
           const existingData = (existingRecord.data && typeof existingRecord.data === 'object') ? { ...existingRecord.data } : {};
@@ -2604,6 +2897,23 @@ const objectService = {
             }
           }
 
+          if (isContactObject && resolvedSegmentIds.length > 0) {
+            const segStrat = cleanPayload.__strategy_segment_ids || cleanPayload.__strategy_segment || 'merge';
+            const existingSegIds = Array.isArray(existingData.segment_ids) ? existingData.segment_ids : [];
+            if (segStrat === 'replace') {
+              mergedCustomData.segment_ids = resolvedSegmentIds;
+            } else {
+              mergedCustomData.segment_ids = [...new Set([...existingSegIds, ...resolvedSegmentIds])];
+            }
+            if (incomingAssociatedSegmentIds.length > 0) {
+              const existingExt = String(existingData.associated_segment_ids__c || '')
+                .split(';')
+                .map(s => s.trim())
+                .filter(Boolean);
+              mergedCustomData.associated_segment_ids__c = [...new Set([...existingExt, ...incomingAssociatedSegmentIds])].join(';');
+            }
+          }
+
           let finalName = existingRecord.name;
           if (cleanPayload.name && String(cleanPayload.name).trim() !== '') {
             finalName = String(cleanPayload.name).trim();
@@ -2651,7 +2961,7 @@ const objectService = {
               parent_id: resolvedParent,
               secondary_parent_id: resolvedSecondary,
               data: mergedCustomData,
-              updated_by: userId || null,
+              updated_by: resolvedUserId || null,
               updated_at: new Date().toISOString()
             };
 
@@ -2668,6 +2978,12 @@ const objectService = {
             }
 
             const normRecord = objectService.normalizeRecord(updatedRow);
+            if (isContactObject && resolvedSegmentIds.length > 0) {
+              for (const sId of resolvedSegmentIds) {
+                if (!segmentToContactMap.has(sId)) segmentToContactMap.set(sId, new Set());
+                segmentToContactMap.get(sId).add(existingRecord.id);
+              }
+            }
             updatedCount++;
             validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
             rowResults.push({
@@ -2689,19 +3005,29 @@ const objectService = {
           customData.contact_ids = [...new Set(validIncomingUuids)];
         }
 
+        if (isContactObject) {
+          if (resolvedSegmentIds.length > 0) {
+            customData.segment_ids = resolvedSegmentIds;
+          }
+          if (incomingAssociatedSegmentIds.length > 0) {
+            customData.associated_segment_ids__c = incomingAssociatedSegmentIds.join(';');
+          }
+        }
+
         const newRow = {
           organization_id: organizationId,
           object_type_id: objDef.id,
           name: resolvedName,
           status: status || 'Active',
-          owner_id: owner_id || userId || null,
+          owner_id: owner_id || resolvedUserId || null,
           parent_id: resolvedParent,
           secondary_parent_id: resolvedSecondary,
           data: customData,
-          created_by: userId || null,
+          created_by: resolvedUserId || null,
           created_at: new Date().toISOString(),
           __rowNum: rowNum,
-          __rowIdentifier: rowIdentifier
+          __rowIdentifier: rowIdentifier,
+          __resolvedSegmentIds: resolvedSegmentIds
         };
 
         validNewRows.push(newRow);
@@ -2765,6 +3091,7 @@ const objectService = {
         const copy = { ...r };
         delete copy.__rowNum;
         delete copy.__rowIdentifier;
+        delete copy.__resolvedSegmentIds;
         return copy;
       });
 
@@ -2779,6 +3106,14 @@ const objectService = {
           const origRow = validNewRows[idx];
           const rowNum = origRow.__rowNum;
           const rowIdentifier = origRow.__rowIdentifier;
+
+          const sIds = origRow.__resolvedSegmentIds || [];
+          if (sIds.length > 0) {
+            for (const sId of sIds) {
+              if (!segmentToContactMap.has(sId)) segmentToContactMap.set(sId, new Set());
+              segmentToContactMap.get(sId).add(normRecord.id);
+            }
+          }
 
           createdCount++;
           validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
@@ -2802,6 +3137,7 @@ const objectService = {
           const rowIdentifier = singlePayload.__rowIdentifier;
           delete singlePayload.__rowNum;
           delete singlePayload.__rowIdentifier;
+          delete singlePayload.__resolvedSegmentIds;
 
           const { data: singleInserted, error: singleErr } = await supabase
             .from('universal_table')
@@ -2811,6 +3147,13 @@ const objectService = {
 
           if (!singleErr && singleInserted) {
             const normRecord = objectService.normalizeRecord(singleInserted);
+            const sIds = origRow.__resolvedSegmentIds || [];
+            if (sIds.length > 0) {
+              for (const sId of sIds) {
+                if (!segmentToContactMap.has(sId)) segmentToContactMap.set(sId, new Set());
+                segmentToContactMap.get(sId).add(normRecord.id);
+              }
+            }
             createdCount++;
             validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
             rowResults.push({
@@ -2848,6 +3191,20 @@ const objectService = {
           error: null
         });
       });
+    }
+
+    if (!dryRun && segmentToContactMap.size > 0) {
+      const segmentService = require('./segmentService');
+      for (const [segId, contactIdSet] of segmentToContactMap.entries()) {
+        const contactIdsToSync = Array.from(contactIdSet).filter(isUuid);
+        if (contactIdsToSync.length > 0) {
+          try {
+            await segmentService.addContactsToSegment(segId, contactIdsToSync, organizationId, resolvedUserId);
+          } catch (segSyncErr) {
+            console.warn(`[ObjectService] Partial failure syncing contacts to segment '${segId}':`, segSyncErr.message);
+          }
+        }
+      }
     }
 
     rowResults.sort((a, b) => a.rowNumber - b.rowNumber);

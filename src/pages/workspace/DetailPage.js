@@ -998,7 +998,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [associatedSegments, setAssociatedSegments] = useState([]);
   const [allOrgContacts, setAllOrgContacts] = useState([]);
   const [showAddSegmentContactModal, setShowAddSegmentContactModal] = useState(false);
+  const [showSegmentImportModal, setShowSegmentImportModal] = useState(false);
   const [addingContacts, setAddingContacts] = useState(false);
+  const [contactToRemoveFromSegment, setContactToRemoveFromSegment] = useState(null);
+  const [removingSegmentContact, setRemovingSegmentContact] = useState(false);
 
   /* Products & Line Items state */
   const [lineItems, setLineItems] = useState([]);
@@ -1422,7 +1425,12 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         contact_ids: contactIds,
       });
       const updatedContacts = res?.data?.contacts || res?.contacts || [];
-      setSegmentContacts(updatedContacts);
+      if (updatedContacts.length > 0) {
+        setSegmentContacts(updatedContacts);
+      } else {
+        const fresh = await apiGet(`/api/segments/${recordId}/contacts`).catch(() => null);
+        if (fresh?.contacts) setSegmentContacts(fresh.contacts);
+      }
       if (res?.data?.segment) {
         setRecord((prev) => ({
           ...prev,
@@ -1443,8 +1451,14 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
     }
   };
 
-  const handleRemoveSegmentContact = async (contactId) => {
-    if (!window.confirm('Are you sure you want to remove this contact from the segment?')) return;
+  const handleOpenRemoveSegmentContactModal = (contact) => {
+    setContactToRemoveFromSegment(contact);
+  };
+
+  const handleConfirmRemoveSegmentContact = async () => {
+    if (!contactToRemoveFromSegment) return;
+    const contactId = contactToRemoveFromSegment.id;
+    setRemovingSegmentContact(true);
     try {
       const res = await apiDelete(`/api/segments/${recordId}/contacts/${contactId}`);
       setSegmentContacts((prev) => prev.filter((c) => String(c.id) !== String(contactId)));
@@ -1458,10 +1472,13 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           },
         }));
       }
+      setContactToRemoveFromSegment(null);
       showToast('Contact removed from segment.', 'success');
     } catch (err) {
       console.error('Failed to remove contact from segment:', err);
       showToast(err.response?.data?.message || err.message || 'Failed to remove contact from segment.', 'error');
+    } finally {
+      setRemovingSegmentContact(false);
     }
   };
 
@@ -2143,6 +2160,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       if (arrayCandidate.length === 0) return <span style={{ color: C.dim }}>—</span>;
       const isContactRel = fNameLower.includes('contact') || f.target === 'contact' || f.target === 'Contact';
       const isCompanyRel = fNameLower.includes('company') || f.target === 'company' || f.target === 'Company';
+      const isSegmentRel = fNameLower.includes('segment') || f.target === 'segment' || f.target === 'Segment';
 
       return (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -2214,6 +2232,35 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                         Primary
                       </span>
                     )}
+                    <ExternalLink size={11} style={{ opacity: 0.7 }} />
+                  </Link>
+                );
+              }
+
+              if (isSegmentRel || lookupMap.segments?.[strItem]) {
+                const segObj = lookupMap.segments?.[strItem] || lookupMap.all?.[strItem] || (associatedSegments || []).find((s) => s.id === strItem);
+                const name = segObj?.name || segObj?.display_name || strItem.slice(0, 8);
+                return (
+                  <Link
+                    key={idx}
+                    to={`/workspace/object/segment/${strItem}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 700,
+                      color: C.indigo,
+                      textDecoration: 'none',
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      background: 'rgba(99,102,241,0.08)',
+                      border: '1px solid rgba(99,102,241,0.2)',
+                      fontSize: '0.85rem',
+                      transition: 'all .15s ease',
+                    }}
+                  >
+                    <Layers size={13} />
+                    {name && name !== '—' && !isUuid(name) ? name : strItem.slice(0, 8)}
                     <ExternalLink size={11} style={{ opacity: 0.7 }} />
                   </Link>
                 );
@@ -3594,16 +3641,28 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                       </span>
                     </div>
 
-                    <button
-                      onClick={handleOpenAddSegmentContactsModal}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-                        borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                        color: '#fff', background: C.primaryGrad,
-                      }}
-                    >
-                      <Plus size={15} /> Add Contacts
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        onClick={() => setShowSegmentImportModal(true)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                          borderRadius: 10, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                          color: C.text, background: '#fff',
+                        }}
+                      >
+                        <UploadCloud size={15} /> Import Contacts
+                      </button>
+                      <button
+                        onClick={handleOpenAddSegmentContactsModal}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                          borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                          color: '#fff', background: C.primaryGrad,
+                        }}
+                      >
+                        <Plus size={15} /> Add Contacts
+                      </button>
+                    </div>
                   </header>
 
                   {segmentContacts.length > 0 ? (
@@ -3642,12 +3701,21 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                                     View <ChevronRight size={14} />
                                   </Link>
                                   <button
-                                    onClick={() => handleRemoveSegmentContact(ct.id)}
+                                    onClick={() => handleOpenRemoveSegmentContactModal(ct)}
                                     title="Remove from Segment"
                                     style={{
                                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                       padding: '6px 10px', borderRadius: 8, border: '1px solid #fee2e2',
                                       background: '#fff1f2', color: '#e11d48', cursor: 'pointer',
+                                      transition: 'all 0.15s ease',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#ffe4e6';
+                                      e.currentTarget.style.borderColor = '#fca5a5';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = '#fff1f2';
+                                      e.currentTarget.style.borderColor = '#fee2e2';
                                     }}
                                   >
                                     <Trash2 size={13} />
@@ -4401,6 +4469,358 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
         adding={addingContacts}
         primaryGrad={C.primaryGrad}
       />
+
+      {/* ── Import Contacts to Segment Modal ── */}
+      <CSVFieldMappingModal
+        open={showSegmentImportModal}
+        onClose={() => setShowSegmentImportModal(false)}
+        objectTypeId="contacts"
+        objectDisplayName="Contact"
+        orgId={currentUser?.organization_id || currentUser?.organizationId || organization?.id || company?.id}
+        segmentContext={{
+          segmentId: recordId,
+          segmentName: record?.name || 'this segment',
+        }}
+        onImportComplete={() => {
+          setShowSegmentImportModal(false);
+          apiGet(`/api/segments/${recordId}/contacts`)
+            .then((cts) => setSegmentContacts(Array.isArray(cts?.contacts) ? cts.contacts : (Array.isArray(cts) ? cts : [])))
+            .catch(() => {});
+          apiGet(`/api/segments/${recordId}`)
+            .then((seg) => {
+              if (seg) {
+                setRecord((prev) => ({
+                  ...prev,
+                  ...seg,
+                  data: {
+                    ...(prev?.data || {}),
+                    ...(seg?.data || {}),
+                  },
+                }));
+              }
+            })
+            .catch(() => {});
+        }}
+      />
+
+      {/* ── Remove Contact from Segment Confirmation Modal ── */}
+      {contactToRemoveFromSegment && ReactDOM.createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="remove-segment-contact-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fadeIn 0.15s ease-out',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !removingSegmentContact) {
+              setContactToRemoveFromSegment(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '24px',
+              padding: '32px 28px 24px',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+              position: 'relative',
+              textAlign: 'center',
+            }}
+          >
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!removingSegmentContact) setContactToRemoveFromSegment(null);
+              }}
+              disabled={removingSegmentContact}
+              aria-label="Close dialog"
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: removingSegmentContact ? 'not-allowed' : 'pointer',
+                padding: 6,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                if (!removingSegmentContact) e.currentTarget.style.backgroundColor = '#f1f5f9';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            {/* Glowing Icon */}
+            <div
+              style={{
+                width: 62,
+                height: 62,
+                borderRadius: '50%',
+                backgroundColor: '#fff1f2',
+                color: '#e11d48',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+                border: '1px solid #fecdd3',
+                boxShadow: '0 0 0 8px #ffe4e6',
+              }}
+            >
+              <UserMinus size={28} />
+            </div>
+
+            {/* Title */}
+            <h3
+              id="remove-segment-contact-title"
+              style={{
+                margin: '0 0 8px 0',
+                fontSize: '1.25rem',
+                fontWeight: 800,
+                color: '#0f172a',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              Remove Contact from Segment?
+            </h3>
+
+            {/* Description */}
+            <p
+              style={{
+                margin: '0 0 20px 0',
+                fontSize: '0.92rem',
+                color: '#475569',
+                lineHeight: 1.5,
+                fontWeight: 500,
+              }}
+            >
+              Are you sure you want to remove this contact from{' '}
+              <strong style={{ color: '#0f172a', fontWeight: 700 }}>
+                {record?.name || record?.data?.name || 'this segment'}
+              </strong>?
+            </p>
+
+            {/* Contact Preview Card */}
+            <div
+              style={{
+                backgroundColor: '#f8fafc',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '16px',
+                padding: '14px 18px',
+                marginBottom: 18,
+                textAlign: 'left',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+              }}
+            >
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 15,
+                  fontWeight: 800,
+                  flexShrink: 0,
+                  boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
+                }}
+              >
+                {(() => {
+                  const name = contactToRemoveFromSegment?.name || `${contactToRemoveFromSegment?.first_name || ''} ${contactToRemoveFromSegment?.last_name || ''}`.trim() || 'C';
+                  return name.split(' ').map((p) => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+                })()}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: '0.95rem',
+                    color: '#0f172a',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {contactToRemoveFromSegment?.name || `${contactToRemoveFromSegment?.first_name || ''} ${contactToRemoveFromSegment?.last_name || ''}`.trim() || 'Unnamed Contact'}
+                </div>
+                {(contactToRemoveFromSegment?.email || contactToRemoveFromSegment?.data?.email) && (
+                  <div
+                    style={{
+                      fontSize: '0.82rem',
+                      color: '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      marginTop: 2,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    <Mail size={12} />
+                    {contactToRemoveFromSegment.email || contactToRemoveFromSegment.data?.email}
+                  </div>
+                )}
+                {(contactToRemoveFromSegment?.company_name || contactToRemoveFromSegment?.data?.company_name) && (
+                  <div
+                    style={{
+                      fontSize: '0.8rem',
+                      color: '#475569',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      marginTop: 2,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Building2 size={12} />
+                    {contactToRemoveFromSegment.company_name || contactToRemoveFromSegment.data?.company_name}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Note banner */}
+            <div
+              style={{
+                backgroundColor: '#eff6ff',
+                border: '1px solid #dbeafe',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                marginBottom: 24,
+                textAlign: 'left',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                fontSize: '0.8rem',
+                color: '#1e40af',
+                lineHeight: 1.45,
+              }}
+            >
+              <div style={{ marginTop: 1, flexShrink: 0 }}>
+                <AlertTriangle size={15} color="#3b82f6" />
+              </div>
+              <div>
+                This contact will only be unlinked from this segment. The contact record itself will remain intact in your CRM.
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setContactToRemoveFromSegment(null)}
+                disabled={removingSegmentContact}
+                style={{
+                  flex: 1,
+                  padding: '12px 18px',
+                  borderRadius: '12px',
+                  border: '1.5px solid #e2e8f0',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '0.9rem',
+                  fontWeight: 700,
+                  cursor: removingSegmentContact ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (!removingSegmentContact) {
+                    e.currentTarget.style.backgroundColor = '#f8fafc';
+                    e.currentTarget.style.borderColor = '#cbd5e1';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#ffffff';
+                  e.currentTarget.style.borderColor = '#e2e8f0';
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmRemoveSegmentContact}
+                disabled={removingSegmentContact}
+                style={{
+                  flex: 1.25,
+                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+                  color: '#ffffff',
+                  fontSize: '0.9rem',
+                  fontWeight: 700,
+                  cursor: removingSegmentContact ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 8px 18px -4px rgba(225, 29, 72, 0.45)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (!removingSegmentContact) {
+                    e.currentTarget.style.filter = 'brightness(1.08)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.filter = 'none';
+                  e.currentTarget.style.transform = 'none';
+                }}
+              >
+                {removingSegmentContact ? (
+                  <>
+                    <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                    Removing...
+                  </>
+                ) : (
+                  <>
+                    <UserMinus size={16} />
+                    Remove Contact
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 }
