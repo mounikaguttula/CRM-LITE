@@ -613,6 +613,7 @@ export default function CSVFieldMappingModal({
   const [metaError, setMetaError] = useState(null);
   const objectTypesRef = useRef([]);        // latest object list, safe to read inside callbacks
   const matchOptionsCache = useRef({});     // targetObject → Match By options
+  const activeImportSessionRef = useRef(0); // Cancellation token for async import batches
 
   // ── Mapping state ──────────────────────────────────────────────────────────
   // mappings: { [csvHeader]: { targetField, isRelationship, targetObjectType, matchField, priority } }
@@ -635,6 +636,7 @@ export default function CSVFieldMappingModal({
 
   // ── Reset ──────────────────────────────────────────────────────────────────
   const reset = useCallback(() => {
+    activeImportSessionRef.current += 1;
     setStep(0);
     setImportMode('upsert');
     setSegmentImportMode('associate_only');
@@ -661,6 +663,13 @@ export default function CSVFieldMappingModal({
   useEffect(() => {
     if (!open) reset();
   }, [open, reset]);
+
+  // Invalidate any active background import on unmount
+  useEffect(() => {
+    return () => {
+      activeImportSessionRef.current += 1;
+    };
+  }, []);
 
   // Saved mappings list is available on the upload step, before any file is parsed
   useEffect(() => {
@@ -997,6 +1006,9 @@ export default function CSVFieldMappingModal({
 
   // ── Import ─────────────────────────────────────────────────────────────────
   const handleImport = useCallback(async () => {
+    activeImportSessionRef.current += 1;
+    const currentSessionId = activeImportSessionRef.current;
+
     setStep(3);
     setImportProgress('Preparing records…');
 
@@ -1131,6 +1143,8 @@ export default function CSVFieldMappingModal({
             records: sendRows,
           }, { isUserActivity: true });
 
+          if (activeImportSessionRef.current !== currentSessionId) return;
+
           const results = Array.isArray(res?.results) ? res.results : [];
           const rows = results.map((r, idx) => ({
             rowNum: idx + 1,
@@ -1157,6 +1171,7 @@ export default function CSVFieldMappingModal({
           if (onImportComplete) onImportComplete(report);
           return;
         } catch (err) {
+          if (activeImportSessionRef.current !== currentSessionId) return;
           setImportProgress('');
           alert(err?.message || 'Association failed.');
           return;
@@ -1168,6 +1183,8 @@ export default function CSVFieldMappingModal({
           const res = await apiPost(`/api/segments/${segmentContext.segmentId}/members/create-and-associate`, {
             records: sendRows,
           }, { isUserActivity: true });
+
+          if (activeImportSessionRef.current !== currentSessionId) return;
 
           const results = Array.isArray(res?.results) ? res.results : [];
           const rows = results.map((r, idx) => ({
@@ -1196,6 +1213,7 @@ export default function CSVFieldMappingModal({
           if (onImportComplete) onImportComplete(report);
           return;
         } catch (err) {
+          if (activeImportSessionRef.current !== currentSessionId) return;
           setImportProgress('');
           alert(err?.message || 'Import failed.');
           return;
@@ -1209,6 +1227,8 @@ export default function CSVFieldMappingModal({
     const totalBatches = Math.ceil(sendRows.length / BATCH_SIZE);
 
     for (let i = 0; i < sendRows.length; i += BATCH_SIZE) {
+      if (activeImportSessionRef.current !== currentSessionId) return;
+
       const batchIndex = Math.floor(i / BATCH_SIZE);
       const batch = sendRows.slice(i, i + BATCH_SIZE);
       setImportProgress(`Processing batch ${batchIndex + 1} of ${totalBatches} (${Math.min(i + batch.length, sendRows.length)} / ${sendRows.length} records)…`);
@@ -1219,6 +1239,8 @@ export default function CSVFieldMappingModal({
           queryParams.push(`target_segment=${encodeURIComponent(targetSegmentId)}`);
         }
         const res = await apiPost(`/objects/${objectTypeId}?${queryParams.join('&')}`, batch, { isUserActivity: true });
+        if (activeImportSessionRef.current !== currentSessionId) return;
+
         const bulkData = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
         if (Array.isArray(res?.results)) {
           res.results.forEach((r) => {
@@ -1245,6 +1267,7 @@ export default function CSVFieldMappingModal({
           });
         }
       } catch (err) {
+        if (activeImportSessionRef.current !== currentSessionId) return;
         if (err?.status === 401) break;
         const errData = err?.data || {};
         if (Array.isArray(errData?.results)) {
@@ -1262,6 +1285,8 @@ export default function CSVFieldMappingModal({
         });
       }
     }
+
+    if (activeImportSessionRef.current !== currentSessionId) return;
 
     const rows = validRows.map((r, i) => {
       const isCreated = createdRowNums.has(r.__rowNum);
