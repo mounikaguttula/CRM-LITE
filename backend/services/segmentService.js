@@ -498,15 +498,18 @@ const segmentService = {
   },
 
   /**
-   * Remove a Contact association from a Segment using OCC compare-and-swap with retry backoff
+   * Remove multiple Contact associations from a Segment using OCC compare-and-swap with retry backoff
    */
-  removeContactFromSegment: async (segmentId, contactId, organizationId, userId) => {
+  removeContactsFromSegment: async (segmentId, contactIds, organizationId, userId) => {
     if (!isUuid(segmentId)) {
       throw { statusCode: 400, message: 'Invalid segment ID format.' };
     }
-    if (!isUuid(contactId)) {
-      throw { statusCode: 400, message: 'Invalid contact ID format.' };
+    const rawIds = Array.isArray(contactIds) ? contactIds : (contactIds ? [contactIds] : []);
+    const validContactIds = rawIds.filter(isUuid);
+    if (validContactIds.length === 0) {
+      throw { statusCode: 400, message: 'No valid contact ID(s) provided.' };
     }
+    const removeSet = new Set(validContactIds);
 
     const MAX_RETRIES = 5;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -523,15 +526,17 @@ const segmentService = {
       }
 
       const existingIds = Array.isArray(current.data?.contact_ids) ? current.data.contact_ids : [];
-      const updatedIds = existingIds.filter(id => id !== contactId);
+      const updatedIds = existingIds.filter((id) => !removeSet.has(id));
+      const removedCount = existingIds.length - updatedIds.length;
 
-      // Idempotency: Contact was not associated
-      if (existingIds.length === updatedIds.length) {
+      // Idempotency: none of the contacts were associated
+      if (removedCount === 0) {
         return {
           success: true,
-          message: 'Contact is not associated with this segment.',
+          message: 'Contact(s) not associated with this segment.',
           removedCount: 0,
           totalAssociated: updatedIds.length,
+          segment: current,
         };
       }
 
@@ -563,21 +568,22 @@ const segmentService = {
         query = query.is('data->_version', null);
       }
 
-      const { data: updated, error: updateErr } = await query.select('id').maybeSingle();
+      const { data: updated, error: updateErr } = await query.select('*').maybeSingle();
 
       if (!updateErr && updated) {
         // Reciprocally synchronize Contact-side data.segment_ids on removal
         try {
-          await segmentService.syncContactsSegmentIds([contactId], segmentId, 'remove', organizationId, userId);
+          await segmentService.syncContactsSegmentIds(validContactIds, segmentId, 'remove', organizationId, userId);
         } catch (syncErr) {
           console.warn('[SegmentService] Partial failure syncing Contact.data.segment_ids on removal:', syncErr.message);
         }
 
         return {
           success: true,
-          message: 'Contact removed from segment successfully.',
-          removedCount: 1,
+          message: removedCount === 1 ? 'Contact removed from segment successfully.' : `Successfully removed ${removedCount} contacts from segment.`,
+          removedCount,
           totalAssociated: updatedIds.length,
+          segment: updated,
         };
       }
 
@@ -589,6 +595,13 @@ const segmentService = {
       statusCode: 409,
       message: 'Concurrent modification conflict while updating segment associations. Please retry.',
     };
+  },
+
+  /**
+   * Remove a Contact association from a Segment using OCC compare-and-swap with retry backoff
+   */
+  removeContactFromSegment: async (segmentId, contactId, organizationId, userId) => {
+    return segmentService.removeContactsFromSegment(segmentId, [contactId], organizationId, userId);
   },
 
   /**

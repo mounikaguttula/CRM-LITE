@@ -13,6 +13,8 @@ router.get(['/api/segments/by-contact/:contactId', '/segments/by-contact/:contac
 router.get(['/api/segments/:id/contacts', '/segments/:id/contacts'], segmentController.getSegmentContacts);
 router.post(['/api/segments/:id/contacts', '/segments/:id/contacts'], segmentController.addContactsToSegment);
 router.delete(['/api/segments/:id/contacts/:contactId', '/segments/:id/contacts/:contactId'], segmentController.removeContactFromSegment);
+router.delete(['/api/segments/:id/contacts', '/segments/:id/contacts'], segmentController.removeContactsFromSegment);
+router.post(['/api/segments/:id/contacts/remove', '/segments/:id/contacts/remove'], segmentController.removeContactsFromSegment);
 router.post(['/api/segments/:id/members/associate', '/segments/:id/members/associate'], segmentController.associateMembers);
 router.post(['/api/segments/:id/members/create-and-associate', '/segments/:id/members/create-and-associate'], segmentController.createAndAssociateMembers);
 

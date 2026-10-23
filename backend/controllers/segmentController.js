@@ -170,6 +170,28 @@ const segmentController = {
   },
 
   /**
+   * DELETE /api/segments/:id/contacts
+   * POST /api/segments/:id/contacts/remove
+   * Bulk remove Contact associations from a Segment
+   */
+  removeContactsFromSegment: async (req, res, next) => {
+    try {
+      await metadataService.checkPermission(req.user, 'segment', 'update');
+      const organizationId = req.user?.organization_id;
+      const userId = req.user?.id;
+      const { id } = req.params;
+      const contactIds = Array.isArray(req.body?.contactIds)
+        ? req.body.contactIds
+        : (Array.isArray(req.body?.contacts) ? req.body.contacts : (Array.isArray(req.body) ? req.body : []));
+
+      const result = await segmentService.removeContactsFromSegment(id, contactIds, organizationId, userId);
+      return successResponse(res, result, result.message);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
    * GET /api/segments/by-contact/:contactId
    * Reverse Lookup: Get all Segments containing a given Contact
    */
