@@ -18,7 +18,8 @@ import ReactDOM from 'react-dom';
 import {
   X, UploadCloud, AlertTriangle, Check, RefreshCw,
   ChevronDown, Link2, Save, Trash2, Sparkles, ArrowRight,
-  CheckCircle2, XCircle, HelpCircle, ChevronUp, Search, Download
+  CheckCircle2, XCircle, HelpCircle, ChevronUp, Search, Download,
+  Layers, Users
 } from 'lucide-react';
 import { apiGet, apiPost } from '../api/client';
 import { mapHeaderToField, buildFieldMetadataList } from '../utils/csvImportMapping';
@@ -570,6 +571,283 @@ function FieldMappingRow({
                     <option value="replace">Replace (Overwrite existing)</option>
                   </select>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Searchable Target Segment Dropdown ─────────────────────────────────────────
+
+function SearchableSegmentSelect({ availableSegments = [], value, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      setTimeout(() => {
+        if (searchInputRef.current) searchInputRef.current.focus();
+      }, 50);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  const selectedSegment = useMemo(() => {
+    if (!value) return null;
+    return availableSegments.find((s) => String(s.id) === String(value));
+  }, [value, availableSegments]);
+
+  const filteredSegments = useMemo(() => {
+    if (!searchTerm.trim()) return availableSegments;
+    const q = searchTerm.toLowerCase().trim();
+    return availableSegments.filter((seg) => {
+      const name = (seg.name || seg.data?.name || '').toLowerCase();
+      const desc = (seg.data?.description || '').toLowerCase();
+      const extId = (seg.data?.hubspot_segment_id || seg.data?.record_id__c || seg.data?.external_id || '').toLowerCase();
+      const id = String(seg.id || '').toLowerCase();
+      return name.includes(q) || desc.includes(q) || extId.includes(q) || id.includes(q);
+    });
+  }, [availableSegments, searchTerm]);
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
+      {/* Trigger Button */}
+      <div
+        onClick={() => setIsOpen((prev) => !prev)}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          minHeight: '44px',
+          padding: '8px 12px',
+          borderRadius: 10,
+          border: isOpen ? '1.5px solid #6366f1' : '1px solid #cbd5e1',
+          background: '#ffffff',
+          boxShadow: isOpen ? '0 0 0 3px rgba(99, 102, 241, 0.15)' : '0 1px 2px rgba(0,0,0,0.03)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          transition: 'all 0.15s ease',
+          userSelect: 'none',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: selectedSegment ? 'rgba(99, 102, 241, 0.12)' : '#f1f5f9',
+              color: selectedSegment ? '#6366f1' : '#94a3b8',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Layers size={15} />
+          </div>
+
+          {selectedSegment ? (
+            <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {selectedSegment.name || selectedSegment.data?.name || 'Untitled Segment'}
+              </span>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: '#ede9fe', color: '#6d28d9', textTransform: 'uppercase' }}>
+                {selectedSegment.target_object_type || selectedSegment.data?.target_object_type || 'Contact'}
+              </span>
+              {(selectedSegment.active_member_count > 0 || selectedSegment.member_count > 0 || selectedSegment.data?.contact_ids?.length > 0) && (
+                <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <Users size={12} />
+                  {(selectedSegment.active_member_count || selectedSegment.member_count || selectedSegment.data?.contact_ids?.length || 0).toLocaleString()} members
+                </span>
+              )}
+            </div>
+          ) : (
+            <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              — No target segment (use CSV Segment column if present) —
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {selectedSegment && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange('');
+                setSearchTerm('');
+              }}
+              title="Clear segment selection"
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: '50%',
+                border: 'none',
+                background: '#f1f5f9',
+                color: '#64748b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <X size={12} />
+            </button>
+          )}
+          <div style={{ color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
+            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Dropdown List */}
+      {isOpen && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: '#ffffff',
+            borderRadius: 14,
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 16px 36px -8px rgba(15, 23, 42, 0.18), 0 4px 12px -2px rgba(15, 23, 42, 0.08)',
+            overflow: 'hidden',
+            animation: 'fadeIn 0.15s ease',
+          }}
+        >
+          {/* Search Box Header */}
+          <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Search size={14} style={{ color: '#94a3b8', flexShrink: 0 }} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder={`Search ${availableSegments.length} segments by name...`}
+              style={{
+                width: '100%',
+                border: 'none',
+                background: 'transparent',
+                outline: 'none',
+                fontSize: '0.84rem',
+                color: '#0f172a',
+                fontWeight: 500,
+              }}
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 2 }}
+              >
+                <X size={13} />
+              </button>
+            )}
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', flexShrink: 0, background: '#ffffff', padding: '2px 8px', borderRadius: 999, border: '1px solid #e2e8f0' }}>
+              {filteredSegments.length} of {availableSegments.length}
+            </span>
+          </div>
+
+          {/* Options Scroll Container */}
+          <div style={{ maxHeight: '250px', overflowY: 'auto', padding: '6px' }}>
+            {/* Clear / No Segment Option */}
+            <div
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+                setSearchTerm('');
+              }}
+              style={{
+                padding: '9px 12px',
+                borderRadius: 8,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                color: !value ? '#6366f1' : '#64748b',
+                fontWeight: !value ? 700 : 500,
+                background: !value ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                transition: 'background 0.1s ease',
+              }}
+              onMouseEnter={(e) => { if (value) e.currentTarget.style.background = '#f8fafc'; }}
+              onMouseLeave={(e) => { if (value) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span>— No target segment (use CSV Segment column if present) —</span>
+              {!value && <Check size={14} style={{ color: '#6366f1' }} />}
+            </div>
+
+            {/* Filtered Segments */}
+            {filteredSegments.length > 0 ? (
+              filteredSegments.map((seg) => {
+                const isSelected = String(seg.id) === String(value);
+                const segName = seg.name || seg.data?.name || 'Untitled Segment';
+                const memberCount = seg.active_member_count || seg.member_count || seg.data?.contact_ids?.length || (Number(seg.data?.source_record_count) || null);
+
+                return (
+                  <div
+                    key={seg.id}
+                    onClick={() => {
+                      onChange(seg.id);
+                      setIsOpen(false);
+                      setSearchTerm('');
+                    }}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: 8,
+                      fontSize: '0.84rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                      color: isSelected ? '#4f46e5' : '#0f172a',
+                      fontWeight: isSelected ? 700 : 500,
+                      transition: 'background 0.1s ease',
+                    }}
+                    onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f8fafc'; }}
+                    onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                      <Layers size={14} style={{ color: isSelected ? '#6366f1' : '#94a3b8', flexShrink: 0 }} />
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {segName}
+                      </span>
+                      {memberCount !== null && memberCount > 0 && (
+                        <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600, flexShrink: 0 }}>
+                          ({memberCount.toLocaleString()})
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && <Check size={15} style={{ color: '#6366f1', flexShrink: 0 }} />}
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: '20px 12px', textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
+                No segments matching &ldquo;{searchTerm}&rdquo;
               </div>
             )}
           </div>
@@ -1728,27 +2006,11 @@ export default function CSVFieldMappingModal({
                         Assign imported contacts to this segment if CSV has no Segment column
                       </span>
                     </div>
-                    <select
+                    <SearchableSegmentSelect
+                      availableSegments={availableSegments}
                       value={targetSegmentId}
-                      onChange={(e) => setTargetSegmentId(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        border: '1px solid #cbd5e1',
-                        background: '#ffffff',
-                        fontSize: '0.82rem',
-                        color: targetSegmentId ? '#1e293b' : '#64748b',
-                        outline: 'none',
-                      }}
-                    >
-                      <option value="">— No target segment (use CSV Segment column if present) —</option>
-                      {availableSegments.map((seg) => (
-                        <option key={seg.id} value={seg.id}>
-                          {seg.name || seg.data?.name || 'Untitled Segment'}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setTargetSegmentId}
+                    />
                   </div>
                 )}
               </div>

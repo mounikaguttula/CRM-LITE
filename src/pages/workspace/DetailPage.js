@@ -1004,6 +1004,27 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const [addingContacts, setAddingContacts] = useState(false);
   const [contactToRemoveFromSegment, setContactToRemoveFromSegment] = useState(null);
   const [removingSegmentContact, setRemovingSegmentContact] = useState(false);
+  const [segmentContactsPage, setSegmentContactsPage] = useState(1);
+  const [segmentContactsSearch, setSegmentContactsSearch] = useState('');
+  const SEGMENT_CONTACTS_PER_PAGE = 50;
+
+  const filteredSegmentContacts = useMemo(() => {
+    if (!segmentContactsSearch.trim()) return segmentContacts;
+    const q = segmentContactsSearch.toLowerCase().trim();
+    return segmentContacts.filter((ct) => {
+      const name = (ct.name || `${ct.first_name || ''} ${ct.last_name || ''}`).toLowerCase();
+      const email = (ct.email || ct.data?.email || '').toLowerCase();
+      const phone = (ct.phone || ct.data?.phone || ct.mobile || '').toLowerCase();
+      const comp = (ct.company_name || ct.data?.company_name || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || phone.includes(q) || comp.includes(q);
+    });
+  }, [segmentContacts, segmentContactsSearch]);
+
+  const totalSegmentContactPages = Math.max(1, Math.ceil(filteredSegmentContacts.length / SEGMENT_CONTACTS_PER_PAGE));
+  const paginatedSegmentContacts = useMemo(() => {
+    const start = (segmentContactsPage - 1) * SEGMENT_CONTACTS_PER_PAGE;
+    return filteredSegmentContacts.slice(start, start + SEGMENT_CONTACTS_PER_PAGE);
+  }, [filteredSegmentContacts, segmentContactsPage]);
 
   /* Products & Line Items state */
   const [lineItems, setLineItems] = useState([]);
@@ -1467,10 +1488,10 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   };
 
   const handleToggleSelectAllSegmentContacts = () => {
-    if (selectedSegmentContactIds.length === segmentContacts.length) {
+    if (selectedSegmentContactIds.length === filteredSegmentContacts.length) {
       setSelectedSegmentContactIds([]);
     } else {
-      setSelectedSegmentContactIds(segmentContacts.map((c) => String(c.id)));
+      setSelectedSegmentContactIds(filteredSegmentContacts.map((c) => String(c.id)));
     }
   };
 
@@ -2090,13 +2111,15 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
   const getRecordValue = (fName, rec) => {
     if (!rec || !fName) return undefined;
 
+    const isCompanyRec = String(objectTypeId || '').toLowerCase().includes('company') || String(objectTypeId || '').toLowerCase().includes('account');
+
     const aliasesMap = {
       name: ['name', 'company_name', 'account_name', 'title', 'subject', 'display_name'],
-      company_name: ['company_name', 'name', 'account_name', 'company'],
-      account_name: ['account_name', 'company_name', 'name'],
-      title: ['title', 'job_title', 'role', 'designation', 'name'],
-      job_title: ['job_title', 'title', 'role', 'designation'],
-      role: ['role', 'designation', 'job_title', 'title'],
+      company_name: isCompanyRec ? ['company_name', 'name', 'account_name', 'company'] : ['company_name', 'account_name', 'company'],
+      account_name: isCompanyRec ? ['account_name', 'company_name', 'name'] : ['account_name', 'company_name'],
+      title: ['title', 'job_title', 'designation'],
+      job_title: ['job_title', 'title', 'designation'],
+      role: ['role', 'designation'],
       designation: ['designation', 'role', 'job_title', 'title'],
       phone: ['phone', 'work_phone', 'phone_number', 'mobile', 'tel'],
       work_phone: ['work_phone', 'phone', 'phone_number', 'mobile', 'tel'],
@@ -3733,7 +3756,7 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                         RELATED CONTACTS
                       </h3>
                       <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: 'rgba(99,102,241,.12)', color: C.indigo }}>
-                        {segmentContacts.length}
+                        {segmentContacts.length.toLocaleString()}
                       </span>
                       {selectedSegmentContactIds.length > 0 && (
                         <span style={{
@@ -3748,6 +3771,34 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {segmentContacts.length > 5 && (
+                        <div style={{ position: 'relative', width: 220 }}>
+                          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }} />
+                          <input
+                            type="text"
+                            value={segmentContactsSearch}
+                            onChange={(e) => {
+                              setSegmentContactsSearch(e.target.value);
+                              setSegmentContactsPage(1);
+                            }}
+                            placeholder={`Search ${segmentContacts.length.toLocaleString()} contacts...`}
+                            style={{
+                              width: '100%', padding: '6px 28px 6px 30px', borderRadius: 9,
+                              fontSize: 12.5, border: '1px solid #cbd5e1', outline: 'none',
+                              background: '#fff', color: '#1e293b', boxSizing: 'border-box',
+                            }}
+                          />
+                          {segmentContactsSearch && (
+                            <button
+                              type="button"
+                              onClick={() => { setSegmentContactsSearch(''); setSegmentContactsPage(1); }}
+                              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 0 }}
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {selectedSegmentContactIds.length > 0 && (
                         <>
                           <button
@@ -3811,100 +3862,152 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
                     </div>
                   </header>
 
-                  {segmentContacts.length > 0 ? (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
-                        <thead>
-                          <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                            <th style={{ width: 44, padding: '12px 14px 12px 20px', textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={segmentContacts.length > 0 && selectedSegmentContactIds.length === segmentContacts.length}
-                                ref={(el) => {
-                                  if (el) {
-                                    el.indeterminate = selectedSegmentContactIds.length > 0 && selectedSegmentContactIds.length < segmentContacts.length;
-                                  }
-                                }}
-                                onChange={handleToggleSelectAllSegmentContacts}
-                                aria-label="Select all contacts"
-                                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#4f46e5', verticalAlign: 'middle' }}
-                              />
-                            </th>
-                            <th style={{ padding: '12px 16px' }}>Contact Name</th>
-                            <th style={{ padding: '12px 16px' }}>Email</th>
-                            <th style={{ padding: '12px 16px' }}>Phone</th>
-                            <th style={{ padding: '12px 16px' }}>Company</th>
-                            <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {segmentContacts.map((ct) => {
-                            const isSelected = selectedSegmentContactIds.includes(String(ct.id));
-                            return (
-                              <tr
-                                key={ct.id}
-                                style={{
-                                  borderBottom: `1px solid ${C.border}`,
-                                  backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.05)' : 'transparent',
-                                  transition: 'background-color 0.15s ease',
-                                }}
-                              >
-                                <td style={{ width: 44, padding: '14px 14px 14px 20px', textAlign: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => handleToggleSelectSegmentContact(ct.id)}
-                                    aria-label={`Select contact ${ct.name || 'contact'}`}
-                                    style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#4f46e5', verticalAlign: 'middle' }}
-                                  />
-                                </td>
-                                <td style={{ padding: '14px 16px', fontWeight: 700 }}>
-                                  <Link to={`/workspace/object/contact/${ct.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                    <User size={14} />
-                                    {ct.name || `${ct.first_name || ''} ${ct.last_name || ''}`.trim() || 'Unnamed Contact'}
-                                  </Link>
-                                </td>
-                                <td style={{ padding: '14px 16px', color: C.dim }}>
-                                  {ct.email || ct.data?.email || '—'}
-                                </td>
-                                <td style={{ padding: '14px 16px', color: C.dim }}>
-                                  {ct.phone || ct.data?.phone || ct.mobile || '—'}
-                                </td>
-                                <td style={{ padding: '14px 16px', color: C.text, fontWeight: 600 }}>
-                                  {ct.company_name || ct.data?.company_name || '—'}
-                                </td>
-                                <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                                    <Link to={`/workspace/object/contact/${ct.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
-                                      View <ChevronRight size={14} />
+                  {filteredSegmentContacts.length > 0 ? (
+                    <>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13.5 }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${C.border}`, color: C.dim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                              <th style={{ width: 44, padding: '12px 14px 12px 20px', textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={filteredSegmentContacts.length > 0 && selectedSegmentContactIds.length === filteredSegmentContacts.length}
+                                  ref={(el) => {
+                                    if (el) {
+                                      el.indeterminate = selectedSegmentContactIds.length > 0 && selectedSegmentContactIds.length < filteredSegmentContacts.length;
+                                    }
+                                  }}
+                                  onChange={handleToggleSelectAllSegmentContacts}
+                                  aria-label="Select all contacts"
+                                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#4f46e5', verticalAlign: 'middle' }}
+                                />
+                              </th>
+                              <th style={{ padding: '12px 16px' }}>Contact Name</th>
+                              <th style={{ padding: '12px 16px' }}>Email</th>
+                              <th style={{ padding: '12px 16px' }}>Phone</th>
+                              <th style={{ padding: '12px 16px' }}>Company</th>
+                              <th style={{ padding: '12px 20px', textAlign: 'right' }}>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {paginatedSegmentContacts.map((ct) => {
+                              const isSelected = selectedSegmentContactIds.includes(String(ct.id));
+                              return (
+                                <tr
+                                  key={ct.id}
+                                  style={{
+                                    borderBottom: `1px solid ${C.border}`,
+                                    backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.05)' : 'transparent',
+                                    transition: 'background-color 0.15s ease',
+                                  }}
+                                >
+                                  <td style={{ width: 44, padding: '14px 14px 14px 20px', textAlign: 'center' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => handleToggleSelectSegmentContact(ct.id)}
+                                      aria-label={`Select contact ${ct.name || 'contact'}`}
+                                      style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#4f46e5', verticalAlign: 'middle' }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '14px 16px', fontWeight: 700 }}>
+                                    <Link to={`/workspace/object/contact/${ct.id}`} style={{ color: C.indigo, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                      <User size={14} />
+                                      {ct.name || `${ct.first_name || ''} ${ct.last_name || ''}`.trim() || 'Unnamed Contact'}
                                     </Link>
-                                    <button
-                                      onClick={() => handleOpenRemoveSegmentContactModal(ct)}
-                                      title="Remove from Segment"
-                                      style={{
-                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                        padding: '6px 10px', borderRadius: 8, border: '1px solid #fee2e2',
-                                        background: '#fff1f2', color: '#e11d48', cursor: 'pointer',
-                                        transition: 'all 0.15s ease',
-                                      }}
-                                      onMouseEnter={(e) => {
-                                        e.currentTarget.style.background = '#ffe4e6';
-                                        e.currentTarget.style.borderColor = '#fca5a5';
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        e.currentTarget.style.background = '#fff1f2';
-                                        e.currentTarget.style.borderColor = '#fee2e2';
-                                      }}
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                  </td>
+                                  <td style={{ padding: '14px 16px', color: C.dim }}>
+                                    {ct.email || ct.data?.email || '—'}
+                                  </td>
+                                  <td style={{ padding: '14px 16px', color: C.dim }}>
+                                    {ct.phone || ct.data?.phone || ct.mobile || '—'}
+                                  </td>
+                                  <td style={{ padding: '14px 16px', color: C.text, fontWeight: 600 }}>
+                                    {ct.company_name || ct.data?.company_name || '—'}
+                                  </td>
+                                  <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                      <Link to={`/workspace/object/contact/${ct.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: '#f1f5f9', color: C.text, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                                       View <ChevronRight size={14} />
+                                      </Link>
+                                      <button
+                                        onClick={() => handleOpenRemoveSegmentContactModal(ct)}
+                                        title="Remove from Segment"
+                                        style={{
+                                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                          padding: '6px 10px', borderRadius: 8, border: '1px solid #fee2e2',
+                                          background: '#fff1f2', color: '#e11d48', cursor: 'pointer',
+                                          transition: 'all 0.15s ease',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          e.currentTarget.style.background = '#ffe4e6';
+                                          e.currentTarget.style.borderColor = '#fca5a5';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.background = '#fff1f2';
+                                          e.currentTarget.style.borderColor = '#fee2e2';
+                                        }}
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Pagination Controls */}
+                      {totalSegmentContactPages > 1 && (
+                        <div style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+                          padding: '12px 24px', borderTop: `1px solid ${C.border}`, background: '#f8fafc',
+                          fontSize: 12.5, color: '#64748b',
+                        }}>
+                          <div>
+                            Showing <b>{((segmentContactsPage - 1) * SEGMENT_CONTACTS_PER_PAGE) + 1}</b>–<b>{Math.min(segmentContactsPage * SEGMENT_CONTACTS_PER_PAGE, filteredSegmentContacts.length)}</b> of <b>{filteredSegmentContacts.length.toLocaleString()}</b> contacts
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => setSegmentContactsPage((p) => Math.max(1, p - 1))}
+                              disabled={segmentContactsPage === 1}
+                              style={{
+                                padding: '5px 12px', borderRadius: 8, border: '1px solid #cbd5e1',
+                                background: segmentContactsPage === 1 ? '#f1f5f9' : '#fff',
+                                color: segmentContactsPage === 1 ? '#94a3b8' : '#334155',
+                                cursor: segmentContactsPage === 1 ? 'not-allowed' : 'pointer',
+                                fontWeight: 600, fontSize: 12,
+                              }}
+                            >
+                              Previous
+                            </button>
+                            <span style={{ fontWeight: 700, color: '#334155' }}>
+                              Page {segmentContactsPage} of {totalSegmentContactPages}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSegmentContactsPage((p) => Math.min(totalSegmentContactPages, p + 1))}
+                              disabled={segmentContactsPage === totalSegmentContactPages}
+                              style={{
+                                padding: '5px 12px', borderRadius: 8, border: '1px solid #cbd5e1',
+                                background: segmentContactsPage === totalSegmentContactPages ? '#f1f5f9' : '#fff',
+                                color: segmentContactsPage === totalSegmentContactPages ? '#94a3b8' : '#334155',
+                                cursor: segmentContactsPage === totalSegmentContactPages ? 'not-allowed' : 'pointer',
+                                fontWeight: 600, fontSize: 12,
+                              }}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : segmentContacts.length > 0 ? (
+                    <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
+                      No contacts matched your search "{segmentContactsSearch}".
                     </div>
                   ) : (
                     <div style={{ padding: '36px 24px', textAlign: 'center', color: C.dim, fontSize: 13.5 }}>
@@ -5107,6 +5210,20 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
           document.body
         );
       })()}
+
+      {/* ── Page Layout Drag & Drop Modal ── */}
+      <PageLayoutModal
+        isOpen={Boolean(showPageLayoutModal)}
+        onClose={() => setShowPageLayoutModal(false)}
+        objectTypeId={objectTypeId}
+        displayName={meta?.displayName || objectTypeId}
+        availableFields={getAllMergedFields(meta?.fields || [], record, objectTypeId)}
+        onLayoutSaved={() => {
+          setLayoutTick((prev) => prev + 1);
+          setShowPageLayoutModal(false);
+          showToast('Page layout updated successfully!', 'success');
+        }}
+      />
     </>
   );
 }
