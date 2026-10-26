@@ -346,21 +346,40 @@ const segmentService = {
 
     const contactDefId = await segmentService.resolveContactObjectType(organizationId);
 
-    const { data: rows, error } = await dbClient
-      .from('universal_table')
-      .select('*')
-      .in('id', contactIds)
-      .eq('organization_id', organizationId)
-      .eq('object_type_id', contactDefId)
-      .eq('is_deleted', false)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[SegmentService] getSegmentContacts error:', error.message);
-      throw { statusCode: 500, message: `Failed to fetch contacts: ${error.message}` };
+    // Chunk contact IDs in batches of 100 to avoid Cloudflare/PostgREST HTTP 414 (Request-URI Too Large)
+    const CHUNK_SIZE = 100;
+    const chunks = [];
+    for (let i = 0; i < contactIds.length; i += CHUNK_SIZE) {
+      chunks.push(contactIds.slice(i, i + CHUNK_SIZE));
     }
 
-    const normalizedContacts = (rows || []).map((row) => objectService.normalizeRecord(row));
+    const chunkResults = await Promise.all(
+      chunks.map((chunk) =>
+        dbClient
+          .from('universal_table')
+          .select('*')
+          .in('id', chunk)
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', contactDefId)
+          .eq('is_deleted', false)
+      )
+    );
+
+    let rows = [];
+    for (const r of chunkResults) {
+      if (r.error) {
+        console.error('[SegmentService] getSegmentContacts error:', r.error.message);
+        throw { statusCode: 500, message: `Failed to fetch contacts: ${r.error.message}` };
+      }
+      if (Array.isArray(r.data)) {
+        rows.push(...r.data);
+      }
+    }
+
+    // Sort by created_at descending
+    rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const normalizedContacts = rows.map((row) => objectService.normalizeRecord(row));
 
     return {
       contacts: normalizedContacts,
@@ -392,19 +411,35 @@ const segmentService = {
     const contactDefId = await segmentService.resolveContactObjectType(organizationId);
 
     // Validate that all requested contacts exist, are active, and belong to the authenticated organization
-    const { data: validRows, error: validErr } = await dbClient
-      .from('universal_table')
-      .select('id')
-      .in('id', requestedIds)
-      .eq('organization_id', organizationId)
-      .eq('object_type_id', contactDefId)
-      .eq('is_deleted', false);
-
-    if (validErr) {
-      throw { statusCode: 500, message: `Failed to validate contacts: ${validErr.message}` };
+    const CHUNK_SIZE = 100;
+    const reqChunks = [];
+    for (let i = 0; i < requestedIds.length; i += CHUNK_SIZE) {
+      reqChunks.push(requestedIds.slice(i, i + CHUNK_SIZE));
     }
 
-    const validIdSet = new Set((validRows || []).map(r => r.id));
+    const validResults = await Promise.all(
+      reqChunks.map((chunk) =>
+        dbClient
+          .from('universal_table')
+          .select('id')
+          .in('id', chunk)
+          .eq('organization_id', organizationId)
+          .eq('object_type_id', contactDefId)
+          .eq('is_deleted', false)
+      )
+    );
+
+    let validRows = [];
+    for (const r of validResults) {
+      if (r.error) {
+        throw { statusCode: 500, message: `Failed to validate contacts: ${r.error.message}` };
+      }
+      if (Array.isArray(r.data)) {
+        validRows.push(...r.data);
+      }
+    }
+
+    const validIdSet = new Set(validRows.map(r => r.id));
     for (const reqId of requestedIds) {
       if (!validIdSet.has(reqId)) {
         throw {
@@ -622,15 +657,32 @@ const segmentService = {
       segmentExtId = segRow?.data?.record_id__c || segRow?.data?.hubspot_record_id || null;
     } catch (e) {}
 
-    // Fetch the target contacts
-    const { data: contacts, error } = await dbClient
-      .from('universal_table')
-      .select('id, data')
-      .in('id', contactIds)
-      .eq('organization_id', organizationId)
-      .eq('is_deleted', false);
+    // Fetch the target contacts in chunks
+    const CHUNK_SIZE = 100;
+    const cChunks = [];
+    for (let i = 0; i < contactIds.length; i += CHUNK_SIZE) {
+      cChunks.push(contactIds.slice(i, i + CHUNK_SIZE));
+    }
 
-    if (error || !contacts) return;
+    const contactResults = await Promise.all(
+      cChunks.map((chunk) =>
+        dbClient
+          .from('universal_table')
+          .select('id, data')
+          .in('id', chunk)
+          .eq('organization_id', organizationId)
+          .eq('is_deleted', false)
+      )
+    );
+
+    let contacts = [];
+    for (const r of contactResults) {
+      if (Array.isArray(r.data)) {
+        contacts.push(...r.data);
+      }
+    }
+
+    if (contacts.length === 0) return;
 
     for (const c of contacts) {
       try {

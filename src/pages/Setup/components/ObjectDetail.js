@@ -1158,6 +1158,20 @@ function PageLayoutsTab({ objectKey, displayName, fields, showToast }) {
             </span>
             <button
               type="button"
+              onClick={() => setShowModal(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 16px', borderRadius: 10, fontSize: '0.82rem',
+                fontWeight: 700, color: '#4f46e5',
+                background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)',
+                cursor: 'pointer', transition: 'all 0.15s ease',
+              }}
+              title="Open full visual layout designer with sections"
+            >
+              <Layout size={13} /> Visual Designer
+            </button>
+            <button
+              type="button"
               onClick={handleReset}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
