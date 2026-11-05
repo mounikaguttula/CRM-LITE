@@ -2506,6 +2506,19 @@ function ObjectListContent({ objectTypeId }) {
     </button>
   );
 
+  const formatDateTime = (isoStr) => {
+    if (!isoStr) return '—';
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return String(isoStr);
+      const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const timePart = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      return `${datePart}, ${timePart}`;
+    } catch {
+      return String(isoStr);
+    }
+  };
+
   const formatDate = (isoStr) => {
     if (!isoStr) return '—';
     try {
@@ -2584,7 +2597,7 @@ function ObjectListContent({ objectTypeId }) {
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str) || /id$/i.test(key)) {
       return '—';
     }
-    if (key.includes('created') || key.includes('date') || key.includes('modified') || key.includes('updated')) {
+    if (key.includes('created') || key.includes('date') || key.includes('modified') || key.includes('updated') || key.includes('timestamp')) {
       try {
         const d = new Date(str);
         if (!isNaN(d.getTime())) {
@@ -3473,13 +3486,13 @@ function ObjectListContent({ objectTypeId }) {
                           );
                         }
 
-                        if (keyLower.includes('created') || keyLower.includes('date')) {
+                        if (keyLower.includes('created') || keyLower.includes('date') || keyLower.includes('timestamp') || col.type === 'datetime' || col.type === 'date') {
                           const v = raw || r.created_at;
                           return (
                             <td key={col.key} style={{ padding: '14px 18px', fontSize: 12.5, color: 'var(--text-dim)' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <Calendar size={13} style={{ color: 'var(--text-faint)' }} />
-                                <span>{formatDate(v)}</span>
+                                <span>{col.type === 'datetime' ? formatDateTime(v) : formatDate(v)}</span>
                               </div>
                             </td>
                           );

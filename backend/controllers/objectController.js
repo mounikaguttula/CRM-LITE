@@ -171,7 +171,17 @@ const createRecord = async (req, res, next) => {
     if (Array.isArray(req.body)) {
       const importMode = req.query.importMode || req.headers['x-import-mode'] || 'upsert';
       const targetSegment = req.query.target_segment || req.query.targetSegmentId || req.query.target_segment_id || req.headers['x-target-segment'];
-      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId, null, { importMode, targetSegmentId: targetSegment });
+      const dateFormatPreference = req.query.dateFormatPreference || req.headers['x-date-format-preference'] || req.body.__dateFormatPreference || null;
+      const sourceTimezone = req.query.sourceTimezone || req.headers['x-source-timezone'] || req.body.__sourceTimezone || null;
+      const dstFallBackPolicy = req.query.dstFallBackPolicy || req.headers['x-dst-fallback-policy'] || req.body.__dstFallBackPolicy || null;
+
+      const bulkResult = await objectService.bulkCreateRecords(objectType, req.body, organizationId, userId, null, {
+        importMode,
+        targetSegmentId: targetSegment,
+        dateFormatPreference,
+        sourceTimezone,
+        dstFallBackPolicy,
+      });
 
       const isSuccess = (bulkResult.createdCount > 0 || bulkResult.updatedCount > 0);
 
@@ -203,7 +213,7 @@ const createRecord = async (req, res, next) => {
     }
 
     validateMeaningfulPayload(objectType, req.body);
-    const record = await objectService.createRecord(objectType, req.body, organizationId, userId);
+    const record = await objectService.createRecord(objectType, req.body, organizationId, userId, { clientTimezone: req.headers['x-client-timezone'] });
 
     // Log audit activity after successful creation
     auditService.logUserActivity({
@@ -235,7 +245,7 @@ const updateRecord = async (req, res, next) => {
     // Enforce permission and record-level scope check
     await metadataService.checkPermission(req.user, objectType, 'update', existing);
 
-    const record = await objectService.updateRecord(objectType, id, req.body, organizationId, userId);
+    const record = await objectService.updateRecord(objectType, id, req.body, organizationId, userId, { clientTimezone: req.headers['x-client-timezone'] });
 
     // Log audit activity after successful update
     auditService.logUserActivity({

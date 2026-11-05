@@ -102,6 +102,76 @@ export function buildFieldMetadataList(fieldsList = [], objectList = []) {
  * Auto-map suggestion: exact then normalized match on API name or label only.
  * Anything else stays Unmapped and the user picks it manually.
  */
+// Dedicated Migration Aliases for HubSpot Segments (decoupled from generic metadata mapping)
+export const HUBSPOT_SEGMENT_ALIASES = {
+  'ils segment id': 'hubspot_segment_id',
+  'segment id': 'hubspot_segment_id',
+  'hubspot segment id': 'hubspot_segment_id',
+  'list id': 'hubspot_list_id',
+  'hubspot list id': 'hubspot_list_id',
+  'record id': 'hubspot_record_id',
+  'record_id': 'hubspot_record_id',
+  'hubspot record id': 'hubspot_record_id',
+  'folder id': 'folder_id',
+  'folder_id': 'folder_id',
+  'list size': 'source_record_count',
+  'list_size': 'source_record_count',
+  'processing type': 'hubspot_processing_type',
+  'processing_type': 'hubspot_processing_type',
+  'segment name': 'name',
+  'segment_name': 'name',
+  'object type': 'target_object_type',
+  'object_type': 'target_object_type',
+  'description': 'description',
+  'average lookalike similarity score': 'lookalike_similarity_score',
+  'lookalike similarity score': 'lookalike_similarity_score',
+  'email click through rate': 'email_click_through_rate',
+  'cluster segment description': 'cluster_segment_description',
+  'created at': 'hubspot_created_at',
+  'created by user id': 'hubspot_created_by_user_id',
+  'object create date/time': 'hubspot_object_created_at',
+  'object create date time': 'hubspot_object_created_at',
+  'email open rate': 'email_open_rate',
+  'generated with ai': 'generated_with_ai',
+  'type: active': 'hubspot_type_active',
+  'type active': 'hubspot_type_active',
+  'read only': 'is_read_only',
+  'read_only': 'is_read_only',
+  'last record added at': 'last_record_added_at',
+  'last record removed at': 'last_record_removed_at',
+  'object last modified date/time': 'hubspot_object_last_modified_at',
+  'object last modified date time': 'hubspot_object_last_modified_at',
+  'segment access level': 'segment_access_level',
+  'notifications': 'hubspot_notifications',
+  'used in': 'hubspot_used_in',
+  'used in (count)': 'hubspot_used_in_count',
+  'used in count': 'hubspot_used_in_count',
+  '7-day change': 'seven_day_change',
+  '7 day change': 'seven_day_change',
+  'segment version': 'hubspot_segment_version',
+  'lookalikes ai summary': 'lookalikes_ai_summary',
+  'merged record ids': 'hubspot_merged_record_ids',
+  'record source detail 1': 'record_source_detail_1',
+  'record source detail 2': 'record_source_detail_2',
+  'record source detail 3': 'record_source_detail_3',
+  'record source': 'record_source',
+  'teams with edit access': 'teams_with_edit_access',
+  'updated at': 'hubspot_updated_at',
+  'updated by user id': 'hubspot_updated_by_user_id',
+  'users with edit access': 'users_with_edit_access',
+  'owner assigned date': 'owner_assigned_date',
+  'owner': 'hubspot_owner_name',
+};
+
+const HUBSPOT_BLOCKED_ID_HEADERS = new Set([
+  'record id', 'record_id', 'hubspot record id', 'hubspot_record_id', 'hubspot id',
+  'list id', 'list_id', 'ils segment id', 'ils_segment_id', 'folder id', 'folder_id'
+]);
+
+/**
+ * Auto-map suggestion: exact then normalized match on API name or label only.
+ * Anything else stays Unmapped and the user picks it manually.
+ */
 export function mapHeaderToField(rawHeader, fields = []) {
   const raw = String(rawHeader ?? '').trim().toLowerCase();
   const n = norm(rawHeader);
@@ -109,60 +179,14 @@ export function mapHeaderToField(rawHeader, fields = []) {
 
   const isSegmentOrHubSpot = fields.some((f) => f.key === 'hubspot_segment_id' || f.key === 'hubspot_list_id');
 
-  // Specialized HubSpot Segment field mappings
+  // If this object supports HubSpot migration keys, evaluate migration aliases dictionary
   if (isSegmentOrHubSpot) {
-    const findField = (k) => fields.find((f) => f.key === k);
-
-    if (raw === 'ils segment id' || raw === 'segment id' || raw === 'hubspot segment id') return findField('hubspot_segment_id');
-    if (raw === 'list id' || raw === 'hubspot list id') return findField('hubspot_list_id');
-    if (raw === 'record id' || raw === 'record_id' || raw === 'hubspot record id') return findField('hubspot_record_id');
-    if (raw === 'folder id' || raw === 'folder_id') return findField('folder_id');
-    if (raw === 'list size' || raw === 'list_size') return findField('source_record_count');
-    if (raw === 'processing type' || raw === 'processing_type') return findField('hubspot_processing_type');
-    if (raw === 'segment name' || raw === 'segment_name') return findField('name');
-    if (raw === 'object type' || raw === 'object_type') return findField('target_object_type');
-    if (raw === 'description') return findField('description');
-
-    if (raw === 'average lookalike similarity score' || raw === 'lookalike similarity score') return findField('lookalike_similarity_score');
-    if (raw === 'email click through rate') return findField('email_click_through_rate');
-    if (raw === 'cluster segment description') return findField('cluster_segment_description');
-    if (raw === 'created at') return findField('hubspot_created_at');
-    if (raw === 'created by user id') return findField('hubspot_created_by_user_id');
-    if (raw === 'object create date/time' || raw === 'object create date time') return findField('hubspot_object_created_at');
-    if (raw === 'email open rate') return findField('email_open_rate');
-    if (raw === 'generated with ai') return findField('generated_with_ai');
-    if (raw === 'type: active' || raw === 'type active') return findField('hubspot_type_active');
-    if (raw === 'read only' || raw === 'read_only') return findField('is_read_only');
-    if (raw === 'last record added at') return findField('last_record_added_at');
-    if (raw === 'last record removed at') return findField('last_record_removed_at');
-    if (raw === 'object last modified date/time' || raw === 'object last modified date time') return findField('hubspot_object_last_modified_at');
-    if (raw === 'segment access level') return findField('segment_access_level');
-    if (raw === 'notifications') return findField('hubspot_notifications');
-    if (raw === 'used in') return findField('hubspot_used_in');
-    if (raw === 'used in (count)' || raw === 'used in count') return findField('hubspot_used_in_count');
-    if (raw === '7-day change' || raw === '7 day change') return findField('seven_day_change');
-    if (raw === 'segment version') return findField('hubspot_segment_version');
-    if (raw === 'lookalikes ai summary') return findField('lookalikes_ai_summary');
-    if (raw === 'merged record ids') return findField('hubspot_merged_record_ids');
-    if (raw === 'record source detail 1') return findField('record_source_detail_1');
-    if (raw === 'record source detail 2') return findField('record_source_detail_2');
-    if (raw === 'record source detail 3') return findField('record_source_detail_3');
-    if (raw === 'record source') return findField('record_source');
-    if (raw === 'teams with edit access') return findField('teams_with_edit_access');
-    if (raw === 'updated at') return findField('hubspot_updated_at');
-    if (raw === 'updated by user id') return findField('hubspot_updated_by_user_id');
-    if (raw === 'users with edit access') return findField('users_with_edit_access');
-    if (raw === 'owner assigned date') return findField('owner_assigned_date');
-    if (raw === 'owner') return findField('hubspot_owner_name');
-
-    // Strictly block HubSpot Record ID, List ID, ILS Segment ID, Folder ID from ever mapping to internal id
-    if (
-      raw === 'record id' || raw === 'record_id' ||
-      raw === 'hubspot record id' || raw === 'hubspot_record_id' || raw === 'hubspot id' ||
-      raw === 'list id' || raw === 'list_id' ||
-      raw === 'ils segment id' || raw === 'ils_segment_id' ||
-      raw === 'folder id' || raw === 'folder_id'
-    ) {
+    const targetKey = HUBSPOT_SEGMENT_ALIASES[raw];
+    if (targetKey) {
+      const match = fields.find((f) => f.key === targetKey);
+      if (match) return match;
+    }
+    if (HUBSPOT_BLOCKED_ID_HEADERS.has(raw)) {
       return null;
     }
   }
@@ -205,11 +229,98 @@ export function mapHeaderToField(rawHeader, fields = []) {
     if (extField) return extField;
   }
 
-  return (
-    fields.find((f) => f.key.toLowerCase() === raw) ||
-    fields.find((f) => f.label.toLowerCase() === raw) ||
-    fields.find((f) => norm(f.key) === n) ||
-    fields.find((f) => norm(f.label) === n) ||
-    null
-  );
+  // Exact or normalized match against field key or label
+  let match = fields.find((f) => f.key.toLowerCase() === raw) ||
+              fields.find((f) => f.label.toLowerCase() === raw) ||
+              fields.find((f) => norm(f.key) === n) ||
+              fields.find((f) => norm(f.label) === n);
+  if (match) return match;
+
+  // Generic qualifier stripping ('url', 'number', 'no')
+  // e.g. "Website URL" -> "website" matches Website, "Phone Number" -> "phone" matches Phone
+  const qualifiers = [' url', ' number', ' no', ' ids', ' id'];
+  for (const q of qualifiers) {
+    if (raw.endsWith(q)) {
+      const stripped = raw.slice(0, -q.length).trim();
+      const nStripped = norm(stripped);
+      match = fields.find((f) => f.key.toLowerCase() === stripped) ||
+              fields.find((f) => f.label.toLowerCase() === stripped) ||
+              fields.find((f) => norm(f.key) === nStripped) ||
+              fields.find((f) => norm(f.label) === nStripped);
+      if (match) return match;
+    }
+  }
+
+  // Metadata-driven entity title field matching (e.g. "<Object> Name", "Name", "Title")
+  if (raw.endsWith(' name') || raw === 'name' || raw === 'title') {
+    const titleField = fields.find((f) => f.isTitle || f.key === 'name' || f.key === 'deal_name');
+    if (titleField) return titleField;
+  }
+
+  // Metadata-driven source owner matching (when source_owner_name exists on the object)
+  if (raw.endsWith(' owner') || raw.endsWith(' owner name') || raw === 'source owner') {
+    const srcOwnerField = fields.find((f) => f.key === 'source_owner_name' || f.key === 'owner_id' || f.key === 'contact_owner');
+    if (srcOwnerField) return srcOwnerField;
+  }
+
+  // Source creator aliases (source users from legacy systems)
+  if (raw === 'created by user' || raw === 'created by user id' || raw === 'created by' || raw === 'source created by') {
+    const creatorField = fields.find((f) =>
+      f.key === 'source_created_by' || f.key === 'source_created_by_id' ||
+      f.key === 'created_by_user' || f.key === 'created_by_user__c' || f.key === 'created_by'
+    );
+    if (creatorField) return creatorField;
+  }
+
+  // Source updater aliases (source users from legacy systems)
+  if (raw === 'updated by user' || raw === 'updated by user id' || raw === 'updated by' || raw === 'source updated by' || raw === 'modified by user id') {
+    const updaterField = fields.find((f) =>
+      f.key === 'source_updated_by' || f.key === 'source_modified_by_id' || f.key === 'source_updated_by_id' ||
+      f.key === 'updated_by_user' || f.key === 'updated_by_user__c' || f.key === 'updated_by'
+    );
+    if (updaterField) return updaterField;
+  }
+
+  // Message & inquiry content aliases
+  if (raw === 'message' || raw === 'inquiry message' || raw === 'contact message' || raw === 'form message') {
+    const msgField = fields.find((f) =>
+      f.key === 'message' || f.key === 'message__c' || f.key === 'notes' || f.key === 'description' || f.key === 'details'
+    );
+    if (msgField) return msgField;
+  }
+
+  // Associated company aliases
+  if (raw === 'associated company (primary)' || raw === 'associated company' || raw === 'primary company') {
+    const compField = fields.find((f) =>
+      f.key === 'associated_company' || f.key === 'parent_id' || f.key === 'company' || f.key === 'company_id' || f.key === 'primary_company_id'
+    );
+    if (compField) return compField;
+  }
+
+  // Engagement ID aliases
+  if (raw === 'id of first engagement' || raw === 'first engagement id' || raw === 'engagement id') {
+    const engField = fields.find((f) =>
+      f.key === 'first_engagement_id' || f.key === 'id_of_first_engagement' || f.key === 'first_engagement_id__c'
+    );
+    if (engField) return engField;
+  }
+
+  return null;
+}
+
+export function autoMapColumns(headers, fields = []) {
+  const mapping = {};
+  (headers || []).forEach((h) => {
+    // Normalize field list elements so they have .key and .label
+    const normalizedFields = fields.map((f) => ({
+      key: f.key || f.name || f.api_name,
+      label: f.label || f.display_name || f.name || f.key,
+      ...f
+    }));
+    const matched = mapHeaderToField(h, normalizedFields);
+    if (matched) {
+      mapping[h] = matched.key;
+    }
+  });
+  return mapping;
 }

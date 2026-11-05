@@ -3,9 +3,66 @@ const { supabaseAdmin } = require('../config/supabase');
 const dbClient = supabaseAdmin || supabase;
 const metadataService = require('./metadataService');
 const validationRuleService = require('./validationRuleService');
+const dateTimeUtils = require('../utils/dateTimeUtils');
 
 // Helper to validate UUID format to prevent PostgreSQL syntax errors
 const isUuid = (val) => Boolean(val && typeof val === 'string' && /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(val.trim()));
+
+const parseNumericValue = (val) => {
+  if (typeof val === 'number') return isFinite(val) ? val : null;
+  if (val === null || val === undefined) return null;
+  let s = String(val).trim();
+  if (s === '' || dateTimeUtils.isPlaceholder(s)) return null;
+
+  let isNegative = false;
+  if (s.startsWith('(') && s.endsWith(')')) {
+    isNegative = true;
+    s = s.slice(1, -1).trim();
+  } else if (s.startsWith('-')) {
+    isNegative = true;
+    s = s.slice(1).trim();
+  }
+
+  // Currency symbols ($ £ € ₹ ¥) or 3-letter currency code (USD, EUR, GBP, etc.)
+  const currencyMatch = s.match(/^($|£|€|₹|¥|[A-Za-z]{3})s*/);
+  if (currencyMatch) {
+    s = s.slice(currencyMatch[0].length).trim();
+    if (!isNegative && s.startsWith('-')) {
+      isNegative = true;
+      s = s.slice(1).trim();
+    }
+  }
+
+  // Financial & SI magnitude multipliers: K (thousand), M (million), B (billion), T (trillion)
+  let multiplier = 1;
+  const suffixMatch = s.match(/([kmbtsKMBTS])$/);
+  if (suffixMatch) {
+    const suf = suffixMatch[1].toUpperCase();
+    if (suf === 'K') multiplier = 1e3;
+    else if (suf === 'M') multiplier = 1e6;
+    else if (suf === 'B') multiplier = 1e9;
+    else if (suf === 'T') multiplier = 1e12;
+    s = s.slice(0, -1).trim();
+  }
+
+  // Reject if remaining string contains negative signs
+  if (s.includes('-')) return null;
+
+  // Validate format:
+  // 1) Standard: 1,500,000 or 50,000
+  // 2) Indian lakh format: 12,34,567 or 50,00,000
+  // 3) Plain integers/decimals: 50000 or 45.5
+  const isFormattedNumber = /^(\d{1,2}(,\d{2})*,\d{3}|\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(s);
+  if (!isFormattedNumber) {
+    return null;
+  }
+
+  const cleanStr = s.replace(/,/g, '');
+  const num = Number(cleanStr);
+  if (isNaN(num) || !isFinite(num)) return null;
+
+  return isNegative ? -(num * multiplier) : (num * multiplier);
+};
 
 const cleanImportValue = (val) => {
   if (val === null || val === undefined) return '';
@@ -248,6 +305,39 @@ const resolveContactCompanyTokens = async (contactId, organizationId = null) => 
     return [...new Set(rawTokens)];
   } catch (err) {
     console.warn('Could not resolve contact company tokens:', err.message);
+    return [];
+  }
+};
+
+/**
+ * Helper to resolve contact identifiers (UUIDs) stored on a company record.
+ */
+const resolveCompanyContactTokens = async (companyId, organizationId = null) => {
+  if (!isUuid(companyId)) return [];
+  try {
+    let q = supabase
+      .from('universal_table')
+      .select('secondary_parent_id, data')
+      .eq('id', companyId)
+      .eq('is_deleted', false);
+    if (organizationId) q = q.eq('organization_id', organizationId);
+    const { data: companyRow } = await q.maybeSingle();
+
+    if (!companyRow) return [];
+
+    const rawTokens = [
+      companyRow.secondary_parent_id,
+      companyRow.data?.contact,
+      companyRow.data?.contact_id,
+      companyRow.data?.contact_with_primary_company,
+      ...(Array.isArray(companyRow.data?.contact_ids) ? companyRow.data.contact_ids : []),
+      ...(Array.isArray(companyRow.data?.associated_contact_ids) ? companyRow.data.associated_contact_ids : []),
+      ...(Array.isArray(companyRow.data?.associated_contact) ? companyRow.data.associated_contact : (typeof companyRow.data?.associated_contact === 'string' && isUuid(companyRow.data?.associated_contact) ? [companyRow.data?.associated_contact] : []))
+    ].filter(isUuid);
+
+    return [...new Set(rawTokens)];
+  } catch (err) {
+    console.warn('Could not resolve company contact tokens:', err.message);
     return [];
   }
 };
@@ -654,6 +744,17 @@ const objectService = {
           query = query.or(orParts.join(','));
         } else if (relType === 'contact') {
           query = query.or(`secondary_parent_id.eq.${relId},data->contact_ids.cs.${jsonFilter},data->associated_contact_ids.cs.${jsonFilter}`);
+        } else if (cleanKey.includes('contact') && relType === 'company') {
+          const contactTokens = await resolveCompanyContactTokens(relId, organizationId);
+          const orParts = [
+            `parent_id.eq.${relId}`,
+            `data->company_ids.cs.${jsonFilter}`,
+            `data->associated_company_ids.cs.${jsonFilter}`
+          ];
+          if (contactTokens.length > 0) {
+            orParts.push(`id.in.(${contactTokens.join(',')})`);
+          }
+          query = query.or(orParts.join(','));
         } else {
           query = query.or(`parent_id.eq.${relId},data->company_ids.cs.${jsonFilter},data->associated_company_ids.cs.${jsonFilter}`);
         }
@@ -790,6 +891,17 @@ const objectService = {
           query = query.or(orParts.join(','));
         } else if (relType === 'contact') {
           query = query.or(`secondary_parent_id.eq.${relId},data->contact_ids.cs.${jsonFilter},data->associated_contact_ids.cs.${jsonFilter}`);
+        } else if (cleanKey.includes('contact') && relType === 'company') {
+          const contactTokens = await resolveCompanyContactTokens(relId, organizationId);
+          const orParts = [
+            `parent_id.eq.${relId}`,
+            `data->company_ids.cs.${jsonFilter}`,
+            `data->associated_company_ids.cs.${jsonFilter}`
+          ];
+          if (contactTokens.length > 0) {
+            orParts.push(`id.in.(${contactTokens.join(',')})`);
+          }
+          query = query.or(orParts.join(','));
         } else {
           query = query.or(`parent_id.eq.${relId},data->company_ids.cs.${jsonFilter},data->associated_company_ids.cs.${jsonFilter}`);
         }
@@ -846,7 +958,7 @@ const objectService = {
   /**
    * Create record for any objectType in universal_table.
    */
-  createRecord: async (objectKey, payload, organizationId, userId) => {
+  createRecord: async (objectKey, payload, organizationId, userId, options = {}) => {
     const { definition: objDef, fields } = await metadataService.getObjectDefinition(objectKey, organizationId);
 
     // Map name aliases if first_name / last_name / name are present
@@ -1006,6 +1118,25 @@ const objectService = {
       };
     }
 
+        // Metadata-driven Date and DateTime normalization
+    for (const field of fields) {
+      const fName = field.name;
+      const fType = String(field.type || field.field_type || '').toLowerCase();
+      if (fType === 'date') {
+        if (customData[fName] !== undefined && customData[fName] !== null && String(customData[fName]).trim() !== '') {
+          customData[fName] = dateTimeUtils.validateAndFormatDate(customData[fName], field.label || field.name, options);
+        } else if (customData[fName] !== undefined && (customData[fName] === null || String(customData[fName]).trim() === '')) {
+          customData[fName] = null;
+        }
+      } else if (fType === 'datetime') {
+        if (customData[fName] !== undefined && customData[fName] !== null && String(customData[fName]).trim() !== '') {
+          customData[fName] = dateTimeUtils.validateAndFormatDateTime(customData[fName], field.label || field.name, options);
+        } else if (customData[fName] !== undefined && (customData[fName] === null || String(customData[fName]).trim() === '')) {
+          customData[fName] = null;
+        }
+      }
+    }
+
     const newRow = {
       organization_id: organizationId,
       object_type_id: objDef.id,
@@ -1048,8 +1179,9 @@ const objectService = {
   /**
    * Update record in universal_table.
    */
-  updateRecord: async (objectKey, id, payload, organizationId, userId) => {
+  updateRecord: async (objectKey, id, payload, organizationId, userId, options = {}) => {
     const existing = await objectService.getRecordById(objectKey, id, organizationId);
+    const { fields = [] } = await metadataService.getObjectDefinition(objectKey, organizationId).catch(() => ({ fields: [] }));
 
     const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = {
       ...existing,
@@ -1290,8 +1422,146 @@ const objectService = {
       customData.contact_name = null;
     }
 
+    // 3. Multi-contact relationship synchronization (contact_ids <-> associated_contact_ids)
+    if (!cleanObjKey.includes('segment') && !cleanObjKey.includes('contact') && !cleanObjKey.includes('person')) {
+      const hasIncomingContactIds = payload.contact_ids !== undefined;
+      const hasIncomingAssocContactIds = payload.associated_contact_ids !== undefined;
+
+      if (hasIncomingContactIds || hasIncomingAssocContactIds) {
+        const parseContactTokens = (val) => {
+          if (val === null || val === undefined || val === '') return [];
+          if (Array.isArray(val)) {
+            return val.flatMap((v) => (typeof v === 'string' ? v.split(/[;,]/) : [v])).map((v) => String(v).trim()).filter(Boolean);
+          }
+          if (typeof val === 'string') {
+            return val.split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+          }
+          return [];
+        };
+
+        let combinedIncomingTokens = [];
+        if (hasIncomingContactIds && hasIncomingAssocContactIds) {
+          const t1 = parseContactTokens(payload.contact_ids);
+          const t2 = parseContactTokens(payload.associated_contact_ids);
+          combinedIncomingTokens = [...new Set([...t1, ...t2])];
+        } else if (hasIncomingContactIds) {
+          combinedIncomingTokens = [...new Set(parseContactTokens(payload.contact_ids))];
+        } else {
+          combinedIncomingTokens = [...new Set(parseContactTokens(payload.associated_contact_ids))];
+        }
+
+        if (combinedIncomingTokens.length > 0) {
+          for (const tok of combinedIncomingTokens) {
+            if (!isUuid(tok)) {
+              throw {
+                statusCode: 400,
+                message: `Validation Error: Contact ID '${tok}' is not a valid UUID format.`,
+              };
+            }
+          }
+
+          const { data: contactRows, error: cErr } = await supabase
+            .from('universal_table')
+            .select('id, organization_id, object_type_id, is_deleted')
+            .in('id', combinedIncomingTokens);
+
+          if (cErr) {
+            throw { statusCode: 500, message: `Failed to validate contact relationships: ${cErr.message}` };
+          }
+
+          const contactRowMap = new Map((contactRows || []).map((r) => [r.id, r]));
+          const contactDef = await metadataService.getObjectTypeByApiName('contact', organizationId).catch(() => null);
+
+          for (const tok of combinedIncomingTokens) {
+            const cRow = contactRowMap.get(tok);
+            if (!cRow || cRow.is_deleted) {
+              throw {
+                statusCode: 400,
+                message: `Validation Error: Contact ID '${tok}' was not found.`,
+              };
+            }
+            if (cRow.organization_id !== organizationId) {
+              throw {
+                statusCode: 403,
+                message: `Validation Error: Contact ID '${tok}' does not belong to the current organization.`,
+              };
+            }
+            if (contactDef && contactDef.id && cRow.object_type_id !== contactDef.id) {
+              throw {
+                statusCode: 400,
+                message: `Validation Error: The referenced record '${tok}' is not a Contact.`,
+              };
+            }
+          }
+
+          customData.contact_ids = combinedIncomingTokens;
+          customData.associated_contact_ids = combinedIncomingTokens;
+
+          if (payloadContactVal === undefined) {
+            if (!resolvedSecondary || !combinedIncomingTokens.includes(resolvedSecondary)) {
+              resolvedSecondary = combinedIncomingTokens[0];
+              customData.contact = resolvedSecondary;
+              customData.contact_id = resolvedSecondary;
+              customData.Contact = resolvedSecondary;
+              customData.Contact_id = resolvedSecondary;
+            }
+          }
+        } else {
+          // Explicit clearing: payload specified empty/null contact_ids or associated_contact_ids
+          customData.contact_ids = [];
+          customData.associated_contact_ids = [];
+          if (payloadContactVal === undefined) {
+            resolvedSecondary = null;
+            customData.contact = null;
+            customData.contact_id = null;
+            customData.Contact = null;
+            customData.Contact_id = null;
+            customData.contact_name = null;
+          }
+        }
+      } else {
+        // Neither contact_ids nor associated_contact_ids provided in payload.
+        // Maintain consistency if existing record has one or both:
+        const existingCIds = Array.isArray(customData.contact_ids)
+          ? customData.contact_ids
+          : (Array.isArray(existing.contact_ids) ? existing.contact_ids : (Array.isArray(existing.data?.contact_ids) ? existing.data.contact_ids : null));
+        const existingAssocCIds = Array.isArray(customData.associated_contact_ids)
+          ? customData.associated_contact_ids
+          : (Array.isArray(existing.associated_contact_ids) ? existing.associated_contact_ids : (Array.isArray(existing.data?.associated_contact_ids) ? existing.data.associated_contact_ids : null));
+
+        if (existingCIds && !existingAssocCIds) {
+          customData.associated_contact_ids = existingCIds;
+        } else if (!existingCIds && existingAssocCIds) {
+          customData.contact_ids = existingAssocCIds;
+        } else if (existingCIds && existingAssocCIds && JSON.stringify(existingCIds) !== JSON.stringify(existingAssocCIds)) {
+          const unionExisting = [...new Set([...existingCIds, ...existingAssocCIds])];
+          customData.contact_ids = unionExisting;
+          customData.associated_contact_ids = unionExisting;
+        }
+      }
+    }
+
     const finalResolvedName = name || existing.name || customData.name || 'Untitled';
     customData.name = finalResolvedName;
+
+        // Metadata-driven Date and DateTime normalization on update
+    for (const field of fields) {
+      const fName = field.name;
+      const fType = String(field.type || field.field_type || '').toLowerCase();
+      if (fType === 'date') {
+        if (customData[fName] !== undefined && customData[fName] !== null && String(customData[fName]).trim() !== '') {
+          customData[fName] = dateTimeUtils.validateAndFormatDate(customData[fName], field.label || field.name, options);
+        } else if (customData[fName] !== undefined && (customData[fName] === null || String(customData[fName]).trim() === '')) {
+          customData[fName] = null;
+        }
+      } else if (fType === 'datetime') {
+        if (customData[fName] !== undefined && customData[fName] !== null && String(customData[fName]).trim() !== '') {
+          customData[fName] = dateTimeUtils.validateAndFormatDateTime(customData[fName], field.label || field.name, options);
+        } else if (customData[fName] !== undefined && (customData[fName] === null || String(customData[fName]).trim() === '')) {
+          customData[fName] = null;
+        }
+      }
+    }
 
     const updatePayload = {
       name: finalResolvedName,
@@ -1617,7 +1887,8 @@ const objectService = {
         const candidateCompanyKeys = [
           'company_ids', 'Company IDs', 'associated_company_ids', 'Associated Company IDs', 'assoc_company_ids',
           'company', 'company_id', 'parent_id', 'Company', 'Company_id', 'primary_company_id', 'Primary Company ID',
-          'Associated Company IDs (Primary)', 'associated_company_id', 'Associated Company ID', 'assoc_company_id'
+          'Associated Company IDs (Primary)', 'Associated Company (Primary)', 'associated_company', 'Associated Company',
+          'associated_company_id', 'Associated Company ID', 'assoc_company_id'
         ];
         for (const k of candidateCompanyKeys) {
           if (rowPayload[k] !== undefined && rowPayload[k] !== null) {
@@ -1655,7 +1926,7 @@ const objectService = {
 
       if (!isContactObject) {
         const candidateContactKeys = [
-          'contact_ids', 'Contact IDs', 'associated_contact_ids', 'Associated Contact IDs', 'assoc_contact_ids',
+          'contact_ids', 'Contact IDs', 'associated_contact_ids', 'Associated Contact IDs', 'associated_contact', 'Associated Contact', 'assoc_contact_ids',
           'contact', 'contact_id', 'secondary_parent_id', 'Contact', 'Contact_id', 'primary_contact_id', 'Primary Contact ID',
           'associated_contact_id', 'Associated Contact ID', 'assoc_contact_id'
         ];
@@ -1768,8 +2039,97 @@ const objectService = {
     const segmentByNameMap = new Map();
     const segmentByExternalIdMap = new Map();
 
+    // Generic lookup fields pre-fetch map
+    const genericLookupByIdMap = new Map();
+    const genericLookupByNameMap = new Map(); // key: `${targetObjId}:${normKey}` -> array of rows
+    const lookupFieldDefs = (fields || []).filter(
+      (f) => f.type === 'lookup' || f.field_type === 'lookup'
+    );
+    const genericLookupUuidsSet = new Set();
+    const genericLookupNamesByTargetMap = new Map(); // targetObjId -> Set of normKeys
+
+    recordsArray.forEach((rowPayload) => {
+      lookupFieldDefs.forEach((lf) => {
+        const val = rowPayload[lf.name] !== undefined ? rowPayload[lf.name] : (rowPayload.data && rowPayload.data[lf.name]);
+        if (val !== undefined && val !== null) {
+          const toks = extractMultiTokens(val);
+          const targetObjId = lf.lookup_target_object_type_id || lf.target_object_id || null;
+          toks.forEach((t) => {
+            if (isUuid(t)) {
+              genericLookupUuidsSet.add(t);
+            } else if (!isPlaceholder(t) && targetObjId) {
+              if (!genericLookupNamesByTargetMap.has(targetObjId)) {
+                genericLookupNamesByTargetMap.set(targetObjId, new Set());
+              }
+              getNormalizedKeys(t).forEach((k) => genericLookupNamesByTargetMap.get(targetObjId).add(k));
+            }
+          });
+        }
+      });
+    });
+
     // Build all relationship lookup promises upfront, then execute in parallel
     const relationshipPromises = [];
+
+    // Generic lookups batch query by UUID
+    if (genericLookupUuidsSet.size > 0) {
+      const validLookupUuids = Array.from(genericLookupUuidsSet).filter(isUuid);
+      if (validLookupUuids.length > 0) {
+        relationshipPromises.push(
+          supabase
+            .from('universal_table')
+            .select('id, organization_id, object_type_id, name, data, is_deleted')
+            .in('id', validLookupUuids)
+            .then(({ data: rows }) => {
+              (rows || []).forEach((r) => genericLookupByIdMap.set(r.id, r));
+            })
+        );
+        relationshipPromises.push(
+          supabase
+            .from('users')
+            .select('id, organization_id')
+            .in('id', validLookupUuids)
+            .then(({ data: rows }) => {
+              (rows || []).forEach((u) => {
+                if (!genericLookupByIdMap.has(u.id)) {
+                  genericLookupByIdMap.set(u.id, {
+                    id: u.id,
+                    organization_id: u.organization_id,
+                    object_type_id: 'user',
+                    is_deleted: false
+                  });
+                }
+              });
+            })
+        );
+      }
+    }
+
+    // Generic lookups batch query by Name per target object type
+    if (genericLookupNamesByTargetMap.size > 0) {
+      for (const [targetObjId, nameSet] of genericLookupNamesByTargetMap.entries()) {
+        relationshipPromises.push(
+          supabase
+            .from('universal_table')
+            .select('id, organization_id, object_type_id, name, data, is_deleted')
+            .eq('organization_id', organizationId)
+            .eq('object_type_id', targetObjId)
+            .eq('is_deleted', false)
+            .then(({ data: rows }) => {
+              (rows || []).forEach((r) => {
+                genericLookupByIdMap.set(r.id, r);
+                const rName = r.name || r.data?.name || r.data?.title || '';
+                getNormalizedKeys(rName).forEach((k) => {
+                  const mapKey = `${targetObjId}:${k}`;
+                  if (!genericLookupByNameMap.has(mapKey)) genericLookupByNameMap.set(mapKey, []);
+                  const list = genericLookupByNameMap.get(mapKey);
+                  if (!list.some((e) => e.id === r.id)) list.push(r);
+                });
+              });
+            })
+        );
+      }
+    }
 
     // Company ID lookup
     if (companyIdsSet.size > 0) {
@@ -2003,18 +2363,30 @@ const objectService = {
     const incomingExternalIds = Array.from(new Set(
       recordsArray.map(r => getRowExternalId(r)).filter(id => id && String(id).trim() !== '' && !isPlaceholder(String(id)))
     ));
+    const incomingEmails = isContactObject ? Array.from(new Set(
+      recordsArray.map(r => String(r.email || (r.data && r.data.email) || '').trim().toLowerCase()).filter(Boolean)
+    )) : [];
+    const incomingNames = (isSegmentObject || isCompanyObject) ? Array.from(new Set(
+      recordsArray.map(r => String(r.name || r.company_name || r.segment_name || (r.data && r.data.name) || '').trim().toLowerCase()).filter(Boolean)
+    )) : [];
+    const incomingSegmentIds = isSegmentObject ? Array.from(new Set(
+      recordsArray.map(r => String(r.hubspot_segment_id || (r.data && r.data.hubspot_segment_id) || '').trim().toLowerCase()).filter(Boolean)
+    )) : [];
 
+    // Fetch existing records for matching & duplicate checks:
+    // 1. All existing records for this object type
+    // 2. Targeted ID & external ID queries to ensure complete coverage beyond default limits
     const [allExistingRes, targetedIdRes, targetedExtRes] = await Promise.all([
       dbClient
         .from('universal_table')
-        .select('*')
+        .select('id, organization_id, object_type_id, name, status, owner_id, parent_id, secondary_parent_id, data, is_deleted')
         .eq('organization_id', organizationId)
         .eq('object_type_id', objDef.id)
         .eq('is_deleted', false),
       incomingInternalUuids.length > 0
         ? dbClient
             .from('universal_table')
-            .select('*')
+            .select('id, organization_id, object_type_id, name, status, owner_id, parent_id, secondary_parent_id, data, is_deleted')
             .eq('organization_id', organizationId)
             .eq('object_type_id', objDef.id)
             .eq('is_deleted', false)
@@ -2023,13 +2395,13 @@ const objectService = {
       incomingExternalIds.length > 0
         ? dbClient
             .from('universal_table')
-            .select('*')
+            .select('id, organization_id, object_type_id, name, status, owner_id, parent_id, secondary_parent_id, data, is_deleted')
             .eq('organization_id', organizationId)
             .eq('object_type_id', objDef.id)
             .eq('is_deleted', false)
             .or(
               incomingExternalIds
-                .map(ext => `data->>record_id__c.eq."${ext}",data->>external_id.eq."${ext}",data->>hubspot_record_id.eq."${ext}",data->>hubspot_reference_id.eq."${ext}"`)
+                .map(ext => `data->>record_id__c.eq.${ext},data->>external_id.eq.${ext},data->>hubspot_record_id.eq.${ext},data->>hubspot_reference_id.eq.${ext}`)
                 .join(',')
             )
         : Promise.resolve({ data: [] }),
@@ -2125,6 +2497,7 @@ const objectService = {
 
     // 6. In-Memory Validation & Payload Construction Loop
     const validNewRows = [];
+    const validUpdateRows = [];
     const validPayloadsToReturn = [];
     const rowResults = [];
     const errorDetails = [];
@@ -2470,6 +2843,199 @@ const objectService = {
         validateDuplicateEmails(cleanPayload, fields);
         validateEmailFormats(cleanPayload, fields, { isBulkImport: true });
 
+        // ── Generic Metadata-Driven Dropdown Validation & Type Coercion ───────
+        for (const field of fields) {
+          const fName = field.name;
+          const fType = String(field.type || field.field_type || '').toLowerCase();
+          const isDropdown = fType === 'dropdown' || fType === 'picklist';
+          const rawVal = cleanPayload[fName];
+          const isFieldPlaceholder = dateTimeUtils.isPlaceholder(rawVal);
+
+          if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '' && !isFieldPlaceholder) {
+            const strVal = String(rawVal).trim();
+
+            if (isDropdown) {
+              const allowedOptions = field.picklist_values || field.options || [];
+              if (Array.isArray(allowedOptions) && allowedOptions.length > 0) {
+                const matchedOption = allowedOptions.find((opt) => String(opt).trim().toLowerCase() === strVal.toLowerCase());
+                if (matchedOption) {
+                  cleanPayload[fName] = matchedOption;
+                } else {
+                  if (field.required) {
+                    throw {
+                      statusCode: 400,
+                      message: `Validation Error: Invalid value '${strVal}' for '${field.label || field.name}'. Allowed options are: ${allowedOptions.join(', ')}.`
+                    };
+                  } else {
+                    if (!cleanPayload[`source_${fName}`]) cleanPayload[`source_${fName}`] = strVal;
+                    cleanPayload[fName] = null;
+                  }
+                }
+              }
+            } else if (fType === 'number') {
+              const num = parseNumericValue(strVal);
+              if (num === null) {
+                if (field.required) {
+                  throw {
+                    statusCode: 400,
+                    message: `Validation Error: '${field.label || field.name}' must be a valid number.`
+                  };
+                } else {
+                  if (!cleanPayload[`source_${fName}`]) cleanPayload[`source_${fName}`] = strVal;
+                  cleanPayload[fName] = null;
+                }
+              } else {
+                cleanPayload[fName] = num;
+              }
+            } else if (fType === 'boolean') {
+              const lower = strVal.toLowerCase();
+              if (lower === 'true' || lower === '1' || lower === 'yes' || lower === 'y' || lower === 'public' || lower === 't') {
+                cleanPayload[fName] = true;
+              } else if (lower === 'false' || lower === '0' || lower === 'no' || lower === 'n' || lower === 'private' || lower === 'f') {
+                cleanPayload[fName] = false;
+              } else {
+                if (field.required) {
+                  throw {
+                    statusCode: 400,
+                    message: `Validation Error: '${field.label || field.name}' must be a boolean (true/false).`
+                  };
+                } else {
+                  if (!cleanPayload[`source_${fName}`]) cleanPayload[`source_${fName}`] = strVal;
+                  cleanPayload[fName] = null;
+                }
+              }
+            } else if (fType === 'date') {
+              try {
+                cleanPayload[fName] = dateTimeUtils.validateAndFormatDate(strVal, field.label || field.name, options);
+              } catch (dateErr) {
+                if (field.required) {
+                  throw dateErr;
+                } else {
+                  if (!cleanPayload[`source_${fName}`]) cleanPayload[`source_${fName}`] = strVal;
+                  cleanPayload[fName] = null;
+                }
+              }
+            } else if (fType === 'datetime') {
+              try {
+                cleanPayload[fName] = dateTimeUtils.validateAndFormatDateTime(strVal, field.label || field.name, options);
+              } catch (dtErr) {
+                if (field.required) {
+                  throw dtErr;
+                } else {
+                  if (!cleanPayload[`source_${fName}`]) cleanPayload[`source_${fName}`] = strVal;
+                  cleanPayload[fName] = null;
+                }
+              }
+            }
+          } else if (rawVal !== undefined && (rawVal === null || String(rawVal).trim() === '' || isFieldPlaceholder)) {
+            if (fType === 'number' || fType === 'boolean' || fType === 'date' || fType === 'datetime' || isDropdown || fType === 'lookup') {
+              cleanPayload[fName] = null;
+            }
+          }
+        }
+
+        // ── Generic Lookup Resolution & Multi-Tenant Scope Validation ─────────
+        for (const lf of lookupFieldDefs) {
+          const rawVal = cleanPayload[lf.name];
+          if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '') {
+            const isMulti = lf.is_multi === true || Array.isArray(rawVal) || String(rawVal).includes(';');
+            const tokens = extractMultiTokens(rawVal);
+            const targetObjId = lf.lookup_target_object_type_id || lf.target_object_id || null;
+            const resolvedLookupIds = [];
+
+            for (const tok of tokens) {
+              if (isUuid(tok)) {
+                const targetRow = genericLookupByIdMap.get(tok) || companyByIdMap.get(tok) || contactByIdMap.get(tok) || segmentByIdMap.get(tok);
+                if (!targetRow || targetRow.is_deleted) {
+                  if (lf.required) {
+                    throw { statusCode: 400, message: `Validation Error: ${lf.label || lf.name} ID '${tok}' was not found.` };
+                  }
+                  continue;
+                }
+                if (targetRow.organization_id !== organizationId) {
+                  throw { statusCode: 403, message: `Validation Error: ${lf.label || lf.name} ID '${tok}' does not belong to the current organization.` };
+                }
+                if (targetObjId && targetRow.object_type_id !== targetObjId) {
+                  throw { statusCode: 400, message: `Validation Error: The referenced record '${tok}' is not the expected object type for ${lf.label || lf.name}.` };
+                }
+                resolvedLookupIds.push(targetRow.id);
+              } else if (!isPlaceholder(tok)) {
+                if (targetObjId) {
+                  const normKeys = getNormalizedKeys(tok);
+                  let matchedRows = [];
+                  for (const nk of normKeys) {
+                    const found = genericLookupByNameMap.get(`${targetObjId}:${nk}`);
+                    if (found && found.length > 0) {
+                      matchedRows = found;
+                      break;
+                    }
+                  }
+                  if (matchedRows.length === 1) {
+                    resolvedLookupIds.push(matchedRows[0].id);
+                  } else if (matchedRows.length > 1) {
+                    if (lf.required) {
+                      throw { statusCode: 400, message: `Validation Error: Multiple records found matching name '${tok}' for ${lf.label || lf.name}. Ambiguous reference.` };
+                    }
+                  } else {
+                    if (lf.required) {
+                      throw { statusCode: 400, message: `Validation Error: ${lf.label || lf.name} '${tok}' was not found.` };
+                    }
+                  }
+                } else {
+                  resolvedLookupIds.push(tok);
+                }
+              }
+            }
+
+            const isArrayStorage = lf.name === 'segment_ids' || lf.name === 'company_ids' || lf.name === 'contact_ids' || lf.is_multi === true || isMulti;
+            if (isMulti && isArrayStorage) {
+              cleanPayload[lf.name] = resolvedLookupIds;
+            } else {
+              cleanPayload[lf.name] = resolvedLookupIds[0] || null;
+            }
+          }
+        }
+
+        // ── Dynamic Name Resolution from Metadata (prior to required-field validation) ──
+        let resolvedName = '';
+        if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
+          const candidate = cleanPayload.name || cleanPayload.company_name || cleanPayload.account_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.company_name));
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : (isUpdateRow ? (existingRecord?.name || '') : '');
+        } else if (cleanKey === 'contact' || cleanKey === 'person' || cleanKey === 'contacts' || cleanKey === 'people') {
+          const explicitName = (!isUuid(cleanPayload.name) && String(cleanPayload.name || '').trim()) ? String(cleanPayload.name).trim() : '';
+          const fn = String(cleanPayload.first_name || (cleanPayload.data && cleanPayload.data.first_name) || '').trim();
+          const ln = String(cleanPayload.last_name || (cleanPayload.data && cleanPayload.data.last_name) || '').trim();
+          const combined = `${fn} ${ln}`.trim();
+          resolvedName = explicitName || combined || (!isUuid(cleanPayload.email) && cleanPayload.email ? String(cleanPayload.email).split('@')[0] : (isUpdateRow ? (existingRecord?.name || 'Contact') : ''));
+        } else if (cleanKey === 'deal' || cleanKey === 'opportunity' || cleanKey === 'deals' || cleanKey === 'opportunities') {
+          const candidate = cleanPayload.name || cleanPayload.deal_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.deal_name));
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : (isUpdateRow ? (existingRecord?.name || 'New Deal') : '');
+        } else {
+          // For custom objects, prioritize custom/business text fields over platform default 'name'
+          const customFields = (fields || []).filter((f) => !f.is_system && f.name !== 'name');
+          const titleField = customFields.find((f) => f.isTitle || f.is_title) ||
+                             customFields.find((f) => f.name === 'title' || f.name === 'subject' || f.name === 'label') ||
+                             customFields.find((f) => (f.type === 'text' || f.field_type === 'text') && (f.display_order === 1 || f.display_order === 0)) ||
+                             customFields.find((f) => (f.type === 'text' || f.field_type === 'text') && f.required) ||
+                             customFields.find((f) => f.type === 'text' || f.field_type === 'text') ||
+                             (fields || []).find((f) => f.name === 'name' || f.isTitle);
+
+          let candidate = cleanPayload.name || cleanPayload.title || cleanPayload.subject || (cleanPayload.data && cleanPayload.data.name);
+          if (!candidate && titleField && cleanPayload[titleField.name]) {
+            candidate = cleanPayload[titleField.name];
+          }
+          resolvedName = (!isUuid(candidate) && String(candidate || '').trim())
+            ? String(candidate).trim()
+            : (isUpdateRow ? (existingRecord?.name || '') : (titleField && cleanPayload[titleField.name] ? String(cleanPayload[titleField.name]).trim() : ''));
+        }
+
+        if (!resolvedName && isUpdateRow && existingRecord?.name) {
+          resolvedName = existingRecord.name;
+        }
+        if (resolvedName) {
+          cleanPayload.name = resolvedName;
+        }
+
         // Required field validation
         if (!isUpdateRow) {
           for (const field of fields) {
@@ -2527,26 +3093,50 @@ const objectService = {
 
         const { name, status, owner_id, parent_id, secondary_parent_id, ...customData } = cleanPayload;
         INTERNAL_ID_KEYS.forEach(k => delete customData[k]);
-        if (rowExternalId && !customData.record_id__c) {
-          customData.record_id__c = rowExternalId;
+
+        let validatedOwnerId = owner_id;
+        if (owner_id && !isUuid(owner_id)) {
+          if (!customData.source_owner_name) {
+            customData.source_owner_name = String(owner_id).trim();
+          }
+          validatedOwnerId = resolvedUserId || null;
+        }
+        if (cleanPayload.source_owner_name && !customData.source_owner_name) {
+          customData.source_owner_name = String(cleanPayload.source_owner_name).trim();
         }
 
-        let resolvedName = '';
-        if (cleanKey === 'company' || cleanKey === 'account' || cleanKey === 'companies' || cleanKey === 'accounts') {
-          const candidate = cleanPayload.name || cleanPayload.company_name || cleanPayload.account_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.company_name));
-          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : '';
-        } else if (cleanKey === 'contact' || cleanKey === 'person' || cleanKey === 'contacts' || cleanKey === 'people') {
-          const explicitName = (!isUuid(cleanPayload.name) && String(cleanPayload.name || '').trim()) ? String(cleanPayload.name).trim() : '';
-          const fn = String(cleanPayload.first_name || (cleanPayload.data && cleanPayload.data.first_name) || '').trim();
-          const ln = String(cleanPayload.last_name || (cleanPayload.data && cleanPayload.data.last_name) || '').trim();
-          const combined = `${fn} ${ln}`.trim();
-          resolvedName = explicitName || combined || (!isUuid(cleanPayload.email) && cleanPayload.email ? String(cleanPayload.email).split('@')[0] : (isUpdateRow ? existingRecord.name : 'Contact'));
-        } else if (cleanKey === 'deal' || cleanKey === 'opportunity' || cleanKey === 'deals' || cleanKey === 'opportunities') {
-          const candidate = cleanPayload.name || cleanPayload.deal_name || (cleanPayload.data && (cleanPayload.data.name || cleanPayload.data.deal_name));
-          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : (isUpdateRow ? existingRecord.name : 'New Deal');
-        } else {
-          const candidate = cleanPayload.name || cleanPayload.title || cleanPayload.subject || (cleanPayload.data && cleanPayload.data.name);
-          resolvedName = (!isUuid(candidate) && String(candidate || '').trim()) ? String(candidate).trim() : (isUpdateRow ? existingRecord.name : 'Untitled');
+        // Preserve legacy source creator and updater if passed from CSV or unmapped source fields
+        if (!customData.source_created_by) {
+          const srcCreated = cleanPayload.source_created_by || cleanPayload.source_created_by_id || cleanPayload['Created By User'] || cleanPayload['created by user'];
+          if (srcCreated) customData.source_created_by = String(srcCreated).trim();
+        }
+        if (!customData.source_updated_by) {
+          const srcUpdated = cleanPayload.source_updated_by || cleanPayload.source_modified_by_id || cleanPayload['Updated by user ID'] || cleanPayload['updated by user id'];
+          if (srcUpdated) customData.source_updated_by = String(srcUpdated).trim();
+        }
+        if (cleanPayload.message || cleanPayload.Message || cleanPayload['message__c']) {
+          if (!customData.message) {
+            customData.message = cleanPayload.message || cleanPayload.Message || cleanPayload['message__c'];
+          }
+        }
+
+        // Safety: Ensure lookup fields never contain non-UUID strings in data (which causes PostgreSQL 22P02 trigger errors)
+        const lookupFieldNames = new Set([
+          ...(fields || []).filter((f) => f.type === 'lookup' || f.field_type === 'lookup').map((f) => f.name),
+          'parent_company', 'associated_company', 'associated_contact', 'contact_with_primary_company', 'associated_lead', 'associated_form_submission'
+        ]);
+        lookupFieldNames.forEach((lk) => {
+          const lkVal = customData[lk];
+          const isValid = isUuid(lkVal) || (Array.isArray(lkVal) && lkVal.every(isUuid));
+          if (lkVal !== undefined && lkVal !== null && !isValid) {
+            if (!customData[`source_${lk}`]) {
+              customData[`source_${lk}`] = Array.isArray(lkVal) ? lkVal.join(';') : String(lkVal).trim();
+            }
+            customData[lk] = null;
+          }
+        });
+        if (rowExternalId && !customData.record_id__c) {
+          customData.record_id__c = rowExternalId;
         }
 
         if (!resolvedName) resolvedName = (!isUuid(name) && String(name || '').trim()) ? String(name).trim() : (isUpdateRow ? existingRecord.name : 'Untitled');
@@ -2578,7 +3168,10 @@ const objectService = {
             if (isUuid(token)) {
               const parentRow = companyByIdMap.get(token);
               if (!parentRow || parentRow.is_deleted) {
-                throw { statusCode: 400, message: `Validation Error: Company ID '${token}' was not found.` };
+                if (isCompanyRequired) {
+                  throw { statusCode: 400, message: `Validation Error: Company ID '${token}' was not found.` };
+                }
+                continue;
               }
               if (parentRow.organization_id !== organizationId) {
                 throw { statusCode: 403, message: `Validation Error: Company ID '${token}' does not belong to the current organization.` };
@@ -2623,7 +3216,11 @@ const objectService = {
                     resolvedParentName = nameMatches[0].name || nameMatches[0].data?.name || nameMatches[0].data?.company_name || token;
                   }
                 } else {
-                  throw { statusCode: 400, message: `Validation Error: Company reference '${token}' was not found.` };
+                  if (isCompanyRequired) {
+                    throw { statusCode: 400, message: `Validation Error: Company reference '${token}' was not found.` };
+                  } else {
+                    if (!customData.source_company_reference) customData.source_company_reference = token;
+                  }
                 }
               }
             }
@@ -2671,6 +3268,11 @@ const objectService = {
         let resolvedSecondaryName = null;
         let resolvedContactIds = [];
 
+        const contactField = (fields || []).find(
+          (f) => (f.name === 'contact' || f.name === 'secondary_parent_id' || f.name === 'contact_id') && f.type === 'lookup'
+        );
+        const isContactRequired = !!contactField?.required;
+
         const contTokens = (relInputs.contactTokens && relInputs.contactTokens.length > 0)
           ? relInputs.contactTokens
           : (relInputs.contactIdInput ? [relInputs.contactIdInput] : (relInputs.contactNameInput ? [relInputs.contactNameInput] : []));
@@ -2681,7 +3283,10 @@ const objectService = {
             if (isUuid(token)) {
               const secRow = contactByIdMap.get(token);
               if (!secRow || secRow.is_deleted) {
-                throw { statusCode: 400, message: `Validation Error: Contact ID '${token}' was not found.` };
+                if (isContactRequired) {
+                  throw { statusCode: 400, message: `Validation Error: Contact ID '${token}' was not found.` };
+                }
+                continue;
               }
               if (secRow.organization_id !== organizationId) {
                 throw { statusCode: 403, message: `Validation Error: Contact ID '${token}' does not belong to the current organization.` };
@@ -2941,8 +3546,23 @@ const objectService = {
             if (resolvedSecondaryName) mergedCustomData.contact_name = resolvedSecondaryName;
           }
 
+          const lookupFieldNames = new Set([
+            ...(fields || []).filter((f) => f.type === 'lookup' || f.field_type === 'lookup').map((f) => f.name),
+            'parent_company', 'associated_company', 'associated_contact', 'contact_with_primary_company', 'associated_lead', 'associated_form_submission'
+          ]);
+          lookupFieldNames.forEach((lk) => {
+            const lkVal = mergedCustomData[lk];
+            const isValid = isUuid(lkVal) || (Array.isArray(lkVal) && lkVal.every(isUuid));
+            if (lkVal !== undefined && lkVal !== null && !isValid) {
+              if (!mergedCustomData[`source_${lk}`]) {
+                mergedCustomData[`source_${lk}`] = Array.isArray(lkVal) ? lkVal.join(';') : String(lkVal).trim();
+              }
+              mergedCustomData[lk] = null;
+            }
+          });
+
           const statusVal = (status && String(status).trim() !== '') ? status : existingRecord.status;
-          const ownerVal = (owner_id && String(owner_id).trim() !== '') ? owner_id : existingRecord.owner_id;
+          const ownerVal = (validatedOwnerId && String(validatedOwnerId).trim() !== '') ? validatedOwnerId : existingRecord.owner_id;
 
           if (dryRun) {
             updatedCount++;
@@ -2953,47 +3573,25 @@ const objectService = {
               recordId: existingRecord.id,
               error: null
             });
-          } else {
-            const updatePayload = {
-              name: finalName,
-              status: statusVal,
-              owner_id: ownerVal,
-              parent_id: resolvedParent,
-              secondary_parent_id: resolvedSecondary,
-              data: mergedCustomData,
-              updated_by: resolvedUserId || null,
-              updated_at: new Date().toISOString()
-            };
-
-            const { data: updatedRow, error: updateErr } = await dbClient
-              .from('universal_table')
-              .update(updatePayload)
-              .eq('id', existingRecord.id)
-              .eq('organization_id', organizationId)
-              .select()
-              .single();
-
-            if (updateErr) {
-              throw { statusCode: 400, message: `Failed to update record '${existingRecord.id}': ${updateErr.message}` };
-            }
-
-            const normRecord = objectService.normalizeRecord(updatedRow);
-            if (isContactObject && resolvedSegmentIds.length > 0) {
-              for (const sId of resolvedSegmentIds) {
-                if (!segmentToContactMap.has(sId)) segmentToContactMap.set(sId, new Set());
-                segmentToContactMap.get(sId).add(existingRecord.id);
-              }
-            }
-            updatedCount++;
-            validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
-            rowResults.push({
-              rowNumber: rowNum,
-              identifier: String(rowIdentifier).trim(),
-              status: 'updated',
-              recordId: normRecord.id,
-              error: null
-            });
+            continue;
           }
+
+          validUpdateRows.push({
+            id: existingRecord.id,
+            organization_id: organizationId,
+            object_type_id: objDef.id,
+            name: finalName,
+            status: statusVal,
+            owner_id: ownerVal,
+            parent_id: resolvedParent,
+            secondary_parent_id: resolvedSecondary,
+            data: mergedCustomData,
+            updated_by: resolvedUserId || null,
+            updated_at: new Date().toISOString(),
+            __rowNum: rowNum,
+            __rowIdentifier: rowIdentifier,
+            __resolvedSegmentIds: resolvedSegmentIds
+          });
           continue;
         }
 
@@ -3019,7 +3617,7 @@ const objectService = {
           object_type_id: objDef.id,
           name: resolvedName,
           status: status || 'Active',
-          owner_id: owner_id || resolvedUserId || null,
+          owner_id: validatedOwnerId || resolvedUserId || null,
           parent_id: resolvedParent,
           secondary_parent_id: resolvedSecondary,
           data: customData,
@@ -3191,6 +3789,109 @@ const objectService = {
           error: null
         });
       });
+    }
+
+    // 7b. Bulk Update Valid Rows into universal_table with Controlled Backend Isolation
+    if (validUpdateRows.length > 0 && !dryRun) {
+      const rowsToUpsert = validUpdateRows.map(r => {
+        const copy = { ...r };
+        delete copy.__rowNum;
+        delete copy.__rowIdentifier;
+        delete copy.__resolvedSegmentIds;
+        return copy;
+      });
+
+      let bulkUpdateSucceeded = false;
+      try {
+        const { data: updatedData, error: bulkUpdErr } = await dbClient
+          .from('universal_table')
+          .upsert(rowsToUpsert, { onConflict: 'id' })
+          .select();
+
+        if (!bulkUpdErr && Array.isArray(updatedData)) {
+          bulkUpdateSucceeded = true;
+          const updatedMap = new Map();
+          updatedData.forEach(r => updatedMap.set(r.id, r));
+
+          validUpdateRows.forEach(item => {
+            const normRecord = objectService.normalizeRecord(updatedMap.get(item.id) || item);
+            const rowNum = item.__rowNum;
+            const rowIdentifier = item.__rowIdentifier;
+            const sIds = item.__resolvedSegmentIds || [];
+            if (sIds.length > 0 && isContactObject) {
+              for (const sId of sIds) {
+                if (!segmentToContactMap.has(sId)) segmentToContactMap.set(sId, new Set());
+                segmentToContactMap.get(sId).add(item.id);
+              }
+            }
+
+            updatedCount++;
+            validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'updated',
+              recordId: normRecord.id,
+              error: null
+            });
+          });
+        } else {
+          console.warn(`Bulk upsert encountered issue for ${objectKey}, falling back to row-by-row:`, bulkUpdErr?.message);
+        }
+      } catch (upsertErr) {
+        console.warn(`Bulk upsert exception for ${objectKey}, falling back to row-by-row:`, upsertErr.message);
+      }
+
+      if (!bulkUpdateSucceeded) {
+        for (let i = 0; i < validUpdateRows.length; i++) {
+          const item = validUpdateRows[i];
+          const rowNum = item.__rowNum;
+          const rowIdentifier = item.__rowIdentifier;
+          try {
+            const updateCopy = { ...item };
+            delete updateCopy.__rowNum;
+            delete updateCopy.__rowIdentifier;
+            delete updateCopy.__resolvedSegmentIds;
+            delete updateCopy.id;
+
+            const { data: updatedRow, error: updateErr } = await dbClient
+              .from('universal_table')
+              .update(updateCopy)
+              .eq('id', item.id)
+              .eq('organization_id', organizationId)
+              .select()
+              .single();
+
+            if (updateErr) {
+              throw { statusCode: 400, message: `Failed to update record '${item.id}': ${updateErr.message}` };
+            }
+
+            const normRecord = objectService.normalizeRecord(updatedRow);
+            const sIds = item.__resolvedSegmentIds || [];
+            if (sIds.length > 0 && isContactObject) {
+              for (const sId of sIds) {
+                if (!segmentToContactMap.has(sId)) segmentToContactMap.set(sId, new Set());
+                segmentToContactMap.get(sId).add(item.id);
+              }
+            }
+
+            updatedCount++;
+            validPayloadsToReturn.push({ ...normRecord, __rowNum: rowNum });
+            rowResults.push({
+              rowNumber: rowNum,
+              identifier: String(rowIdentifier).trim(),
+              status: 'updated',
+              recordId: normRecord.id,
+              error: null
+            });
+          } catch (rowErr) {
+            failedCount++;
+            const errMsg = rowErr.message || rowErr.error || `Failed to update record '${item.id}'`;
+            errorDetails.push({ rowNum, identifier: String(rowIdentifier).trim(), reason: errMsg, error: errMsg });
+            rowResults.push({ rowNumber: rowNum, identifier: String(rowIdentifier).trim(), status: 'failed', recordId: null, error: errMsg });
+          }
+        }
+      }
     }
 
     if (!dryRun && segmentToContactMap.size > 0) {

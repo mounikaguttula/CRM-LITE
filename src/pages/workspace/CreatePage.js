@@ -20,6 +20,49 @@ const C = {
   card: '#ffffff',
 };
 
+/* ─── Timestamp Field Helpers (Preserve Full ISO-8601 Milliseconds) ─── */
+function isTimestampField(field) {
+  if (!field) return false;
+  const name = String(field.name || field.api_name || '').toLowerCase();
+  const type = String(field.type || field.field_type || '').toLowerCase();
+  return type === 'datetime' || type === 'timestamp';
+}
+
+function formatToDatetimeLocal(isoStr) {
+  if (!isoStr || typeof isoStr !== 'string') return '';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n, len = 2) => String(n).padStart(len, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function parseDatetimeLocalToIso(localVal, existingVal) {
+  if (!localVal) return '';
+  try {
+    let localClean = String(localVal).trim();
+    if (localClean.endsWith('Z')) {
+      return localClean;
+    }
+    if (!localClean.includes('.')) {
+      if (existingVal && typeof existingVal === 'string' && existingVal.includes('.')) {
+        const existingMs = existingVal.split('.')[1].replace(/[^0-9]/g, '').slice(0, 3).padEnd(3, '0');
+        localClean = `${localClean}.${existingMs}`;
+      } else {
+        localClean = `${localClean}.000`;
+      }
+    }
+    const d = new Date(localClean);
+    if (isNaN(d.getTime())) return localVal;
+    return d.toISOString();
+  } catch (e) {
+    return localVal;
+  }
+}
+
 function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
   const params = useParams();
   const location = useLocation();
@@ -396,6 +439,56 @@ function CreatePage({ objectTypeId: propObjectTypeId, onSuccess }) {
           onFocus={focusOn}
           onBlur={focusOff(hasError)}
         />
+      );
+    } else if (isTimestampField(f)) {
+      fieldEl = (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              id={`field-${f.name}`}
+              name={f.name}
+              type="text"
+              style={{
+                ...inputStyle(hasError),
+                flex: 1,
+                fontFamily: 'monospace, inherit',
+                fontSize: '0.86rem',
+              }}
+              placeholder="YYYY-MM-DDTHH:mm:ss.sssZ (e.g. 2026-10-27T10:15:30.123Z)"
+              value={formData[f.name] !== undefined ? formData[f.name] : ''}
+              onChange={(e) => handleChange(f.name, e.target.value)}
+              onFocus={focusOn}
+              onBlur={focusOff(hasError)}
+            />
+            <input
+              type="datetime-local"
+              step="0.001"
+              aria-label={`Select date and time for ${f.label}`}
+              style={{
+                height: '46px',
+                padding: '0 10px',
+                border: `1.5px solid ${hasError ? C.danger : C.border}`,
+                borderRadius: '12px',
+                backgroundColor: '#fbfcff',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                color: C.dim,
+                outline: 'none',
+              }}
+              value={formatToDatetimeLocal(formData[f.name])}
+              onChange={(e) => {
+                if (e.target.value) {
+                  const iso = parseDatetimeLocalToIso(e.target.value, formData[f.name]);
+                  handleChange(f.name, iso);
+                }
+              }}
+            />
+          </div>
+          <div style={{ fontSize: '0.72rem', color: C.dim, display: 'flex', justifyContent: 'space-between', marginTop: '4px', padding: '0 4px' }}>
+            <span>ISO-8601 with millisecond precision</span>
+            {formData[f.name] && <span>Preserved: {String(formData[f.name])}</span>}
+          </div>
+        </div>
       );
     } else {
       let typeAttr = 'text';

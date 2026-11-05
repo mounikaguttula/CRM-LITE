@@ -28,6 +28,12 @@ const extraFieldFlags = (f) => ({
   lookup_target_object_type_id: f.lookup_target_object_type_id || null,
 });
 
+const normalizeFieldType = (f) => {
+  if (!f) return 'text';
+  const rawType = f.field_type || f.type || 'text';
+  return rawType === 'dropdown' ? 'picklist' : rawType;
+};
+
 const inMemoryCache = {
   permissions: new Map(),
   objectDefs: new Map(),
@@ -360,7 +366,7 @@ const metadataService = {
       id: fieldDef.id,
       name: fieldDef.api_name,
       label: fieldDef.display_name,
-      type: fieldDef.field_type === 'dropdown' ? 'picklist' : fieldDef.field_type,
+      type: normalizeFieldType(fieldDef),
       description: fieldDef.description || '',
       help_text: fieldDef.help_text || null,
       placeholder: fieldDef.placeholder || null,
@@ -395,40 +401,40 @@ const metadataService = {
 
     let query = supabase.from('object_type_definitions').select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at');
 
+    const targetApiNames = [lowerKey, keyPlural, keySingular];
 
     if (isUuid(objectKey)) {
       query = query.eq('id', objectKey);
     } else {
-      query = query.or(`api_name.eq.${lowerKey},api_name.eq.${keyPlural},api_name.eq.${keySingular}`);
+      query = query.in('api_name', targetApiNames);
     }
-
 
     if (isUuid(organizationId)) {
       query = query.or(`organization_id.eq.${organizationId},organization_id.is.null`);
     }
 
-
     const { data: objDefs, error } = await query;
-
 
     if (error) {
       console.error('Error fetching object_type_definitions:', error.message);
     }
 
-
     if (objDefs && objDefs.length > 0) {
-      const matched = objDefs.find((o) => o.organization_id === organizationId) || objDefs[0];
+      const targetSet = new Set(targetApiNames);
+      const matched = objDefs.find((o) => o.organization_id === organizationId && targetSet.has(String(o.api_name).toLowerCase())) ||
+                      objDefs.find((o) => targetSet.has(String(o.api_name).toLowerCase())) ||
+                      objDefs[0];
       inMemoryCache.objectDefs.set(cacheKey, { timestamp: Date.now(), data: matched });
       return matched;
     }
 
-
-    // Fallback: search without organization_id filter
+    // Fallback: search system object definitions only if tenant-specific not found
     if (organizationId && !isUuid(objectKey)) {
       const { data: fallbackDefs } = await supabase
         .from('object_type_definitions')
         .select('id, organization_id, api_name, display_name, description, is_system, created_at, updated_at')
-        .or(`api_name.eq.${lowerKey},api_name.eq.${keyPlural},api_name.eq.${keySingular}`);
+        .in('api_name', targetApiNames)
+        .eq('is_system', true);
       if (fallbackDefs && fallbackDefs.length > 0) {
         inMemoryCache.objectDefs.set(cacheKey, { timestamp: Date.now(), data: fallbackDefs[0] });
         return fallbackDefs[0];
@@ -634,7 +640,7 @@ const metadataService = {
             fieldLabel = 'Alternate Email ID';
           }
           const isSegField = fieldName === 'segment_ids';
-          let computedType = f.field_type === 'dropdown' ? 'picklist' : f.field_type;
+          let computedType = normalizeFieldType(f);
           if (isSegField) {
             computedType = 'lookup';
           }
@@ -1565,11 +1571,13 @@ const metadataService = {
             fieldName = 'alternate_email';
             fieldLabel = 'Alternate Email ID';
           }
+          const computedType = normalizeFieldType(f);
           return {
             id: f.id,
             name: fieldName,
             label: fieldLabel,
-            type: f.field_type === 'dropdown' ? 'picklist' : f.field_type,
+            type: computedType,
+            field_type: computedType,
             description: f.description || '',
             help_text: f.help_text || null,
             placeholder: f.placeholder || null,
@@ -1903,7 +1911,12 @@ const metadataService = {
       organization_id: isUuid(organizationId) ? organizationId : null,
       api_name: apiName,
       display_name: displayName,
-      field_type: ((fieldData.field_type || fieldData.type || 'text') === 'picklist' ? 'dropdown' : ((fieldData.field_type || fieldData.type) === 'checkbox' ? 'boolean' : (fieldData.field_type || fieldData.type || 'text'))),
+      field_type: (
+        (fieldData.field_type || fieldData.type || 'text') === 'picklist' ? 'dropdown' :
+        ((fieldData.field_type || fieldData.type) === 'checkbox' ? 'boolean' :
+        ((fieldData.field_type || fieldData.type) === 'datetime' || (fieldData.field_type || fieldData.type) === 'timestamp' ? 'datetime' :
+        (fieldData.field_type || fieldData.type || 'text')))
+      ),
       required: !!fieldData.required,
       readonly: fieldData.readonly !== undefined ? !!fieldData.readonly : (fieldData.read_only !== undefined ? !!fieldData.read_only : false),
       hidden: fieldData.hidden !== undefined ? !!fieldData.hidden : (fieldData.visible !== undefined ? !fieldData.visible : false),
@@ -1985,7 +1998,7 @@ const metadataService = {
       id: inserted.id,
       name: inserted.api_name,
       label: inserted.display_name,
-      type: inserted.field_type === 'dropdown' ? 'picklist' : inserted.field_type,
+      type: normalizeFieldType(inserted),
       description: fieldData.description || '',
       help_text: inserted.help_text || null,
       placeholder: inserted.placeholder || null,
@@ -2221,7 +2234,7 @@ const metadataService = {
         id: fieldDef.id,
         name: fieldDef.api_name,
         label: overridePayload.field_label || fieldDef.display_name,
-        type: fieldDef.field_type === 'dropdown' ? 'picklist' : fieldDef.field_type,
+        type: normalizeFieldType(fieldDef),
         description: fieldDef.description || '',
         help_text: overridePayload.help_text !== null ? overridePayload.help_text : (fieldDef.help_text || null),
         placeholder: fieldDef.placeholder || null,
@@ -2441,7 +2454,7 @@ const metadataService = {
       id: updated.id,
       name: updated.api_name,
       label: updated.display_name,
-      type: updated.field_type === 'dropdown' ? 'picklist' : updated.field_type,
+      type: normalizeFieldType(updated),
       description: updated.description || '',
       help_text: updated.help_text || null,
       placeholder: updated.placeholder || null,

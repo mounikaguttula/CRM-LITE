@@ -277,7 +277,7 @@ function formatLookupValue(fieldName, val, record, currentUser, organization, co
 }
 
 /* ─── Clean Date Formatter ─── */
-function formatDateValue(val) {
+function formatDateValue(val, isDateTime = null) {
   if (!val) return '—';
   const str = String(val).trim();
   if (str.includes('T') || str.includes('-') || !isNaN(Date.parse(str))) {
@@ -285,8 +285,8 @@ function formatDateValue(val) {
       const d = new Date(str);
       if (!isNaN(d.getTime())) {
         const datePart = d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-        const hasTime = str.includes('T') || str.includes(':');
-        if (hasTime) {
+        const hasTime = isDateTime === true || (isDateTime === null && (str.includes('T') || str.includes(':')));
+        if (hasTime && isDateTime !== false) {
           const timePart = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
           return `${datePart}, ${timePart}`;
         }
@@ -2523,8 +2523,11 @@ function DetailPage({ recordId: propRecordId, objectTypeId: propObjectTypeId, on
       return <span style={{ fontWeight: 600, color: C.text }}>{displayContactText}</span>;
     }
 
-    if (f.type === 'datetime' || f.type === 'date' || fNameLower.includes('date') || fNameLower.includes('created_at') || fNameLower.includes('updated_at')) {
-      return <span style={{ fontWeight: 600, color: C.text }}>{formatDateValue(val)}</span>;
+    if (f.type === 'datetime' || f.type === 'timestamp' || fNameLower.includes('created_at') || fNameLower.includes('updated_at')) {
+      return <span style={{ fontWeight: 600, color: C.text }}>{formatDateValue(val, true)}</span>;
+    }
+    if (f.type === 'date' || fNameLower.includes('date')) {
+      return <span style={{ fontWeight: 600, color: C.text }}>{formatDateValue(val, false)}</span>;
     }
 
     if (f.type === 'email' && val) {
