@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import {
-  X, UploadCloud, AlertTriangle, Check, RefreshCw,
+  Plus, X, UploadCloud, AlertTriangle, Check, RefreshCw,
   ChevronDown, Link2, Save, Trash2, Sparkles, ArrowRight,
   CheckCircle2, XCircle, HelpCircle, ChevronUp, Search, Download,
   Layers, Users
@@ -34,7 +34,7 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SAMPLE_ROWS_PREVIEW = 5;     // only used for the sample text in the mapping screen
-const BATCH_SIZE = 50;             // records per import request
+const BATCH_SIZE = 200;             // records per import request
 const RESOLVE_CHUNK = 500;         // values per resolve-relationships request
 const PROBE_VALUES = 20;           // values used to suggest a Match By field
 
@@ -146,10 +146,354 @@ function StatusIcon({ status, size = 14 }) {
   return <HelpCircle size={size} style={{ color: '#94a3b8' }} />;
 }
 
+// ─── Type Inference and Duplicate Detection Helpers ───────────────────────────
+
+function inferFieldType(sampleValues = []) {
+  const nonEmp = (sampleValues || []).map((v) => String(v || '').trim()).filter(Boolean);
+  if (nonEmp.length === 0) return 'text';
+
+  // Check date / datetime
+  const allDates = nonEmp.every((v) => {
+    if (/^\d{4}-\d{2}-\d{2}(T|\s|$)/.test(v)) return true;
+    const d = new Date(v);
+    return !isNaN(d.getTime()) && v.length >= 8 && /\d/.test(v);
+  });
+  if (allDates) return 'date';
+
+  // Check number / currency
+  const allNumbers = nonEmp.every((v) => {
+    const clean = v.replace(/^[$£€₹¥A-Za-z]{1,3}\s*/, '').replace(/,/g, '').trim();
+    return clean !== '' && !isNaN(Number(clean)) && isFinite(Number(clean));
+  });
+  if (allNumbers) return 'number';
+
+  // Check boolean
+  const allBooleans = nonEmp.every((v) => {
+    const l = v.toLowerCase();
+    return l === 'true' || l === 'false' || l === 'yes' || l === 'no' || l === '1' || l === '0';
+  });
+  if (allBooleans) return 'boolean';
+
+  return 'text';
+}
+
+function findEquivalentField(rawHeader, fields = []) {
+  const normH = String(rawHeader || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!normH) return null;
+  return (
+    fields.find((f) => {
+      const normK = String(f.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normL = String(f.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return normK === normH || normL === normH;
+    }) || null
+  );
+}
+
+// ─── Sub-component: CreateFieldModal ──────────────────────────────────────────
+
+function CreateFieldModal({
+  isOpen, onClose, header, sampleValues, objectTypeId,
+  fieldMetadataList, onFieldCreated
+}) {
+  const [label, setLabel] = useState('');
+  const [apiName, setApiName] = useState('');
+  const [fieldType, setFieldType] = useState('text');
+  const [picklistOptions, setPicklistOptions] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const initialLabel = header ? String(header).trim() : '';
+    setLabel(initialLabel);
+
+    const safeApi = initialLabel.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+    setApiName(safeApi ? (safeApi.endsWith('__c') ? safeApi : `${safeApi}__c`) : '');
+
+    const inferred = inferFieldType(sampleValues);
+    setFieldType(inferred);
+    setPicklistOptions('');
+    setError(null);
+
+    const existing = findEquivalentField(initialLabel, fieldMetadataList);
+    setDuplicateWarning(existing || null);
+  }, [isOpen, header, sampleValues, fieldMetadataList]);
+
+  if (!isOpen) return null;
+
+  const handleLabelChange = (e) => {
+    const newLabel = e.target.value;
+    setLabel(newLabel);
+    const safeApi = newLabel.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+    setApiName(safeApi ? (safeApi.endsWith('__c') ? safeApi : `${safeApi}__c`) : '');
+    const existing = findEquivalentField(newLabel, fieldMetadataList);
+    setDuplicateWarning(existing || null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!label.trim()) {
+      setError('Field Label is required.');
+      return;
+    }
+    const cleanApi = apiName.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+    if (!cleanApi) {
+      setError('Field API Name is required.');
+      return;
+    }
+    const finalApi = cleanApi.endsWith('__c') ? cleanApi : `${cleanApi}__c`;
+
+    // Check if field already exists in metadata
+    if (fieldMetadataList.some((f) => f.key.toLowerCase() === finalApi.toLowerCase())) {
+      setError(`A field with API name '${finalApi}' already exists in this module.`);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const optionsList = fieldType === 'dropdown'
+        ? picklistOptions.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+
+      const payload = {
+        display_name: label.trim(),
+        api_name: finalApi,
+        field_type: fieldType === 'dropdown' ? 'dropdown' : fieldType,
+        required: false,
+        ...(fieldType === 'dropdown' && optionsList.length > 0 ? { picklist_values: optionsList } : {})
+      };
+
+      const res = await apiPost(`/metadata/objects/${objectTypeId}/fields`, payload);
+      const created = res?.data || res;
+      const normalizedNew = {
+        key: created.api_name || created.name || finalApi,
+        label: created.display_name || created.label || label.trim(),
+        type: created.field_type || fieldType,
+        isSystem: false,
+        isRequired: false,
+        isUnique: false,
+        isSearchable: true,
+        isTitle: false,
+        isRelationship: false,
+        targetObject: null
+      };
+
+      onFieldCreated(normalizedNew, header);
+      onClose();
+    } catch (err) {
+      setError(err?.message || err?.error || 'Failed to create field.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return ReactDOM.createPortal(
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 100005,
+      background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(2px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+    }}>
+      <div style={{
+        background: '#ffffff', borderRadius: 16, width: '100%', maxWidth: 480,
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+        border: '1px solid #e2e8f0', overflow: 'hidden'
+      }}>
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid #e2e8f0',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#f8fafc'
+        }}>
+          <div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+              Create New Field
+            </div>
+            <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 2 }}>
+              For CSV Column: <strong>"{header}"</strong>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: 20 }}>
+          {error && (
+            <div style={{
+              marginBottom: 14, padding: '10px 12px', borderRadius: 8,
+              background: '#fff1f2', border: '1px solid #fecdd3', color: '#9f1239',
+              fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 8
+            }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {duplicateWarning && (
+            <div style={{
+              marginBottom: 14, padding: '10px 12px', borderRadius: 8,
+              background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e',
+              fontSize: '0.76rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 4 }}>
+                <AlertTriangle size={14} />
+                <span>Existing Equivalent Field Detected</span>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                An existing field <strong>"{duplicateWarning.label}"</strong> (<code>{duplicateWarning.key}</code>) is already available.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onFieldCreated(duplicateWarning, header);
+                  onClose();
+                }}
+                style={{
+                  padding: '4px 10px', borderRadius: 6, background: '#d97706',
+                  border: 'none', color: '#ffffff', fontSize: '0.72rem', fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Map to Existing "{duplicateWarning.label}" Instead
+              </button>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+              Field Label
+            </label>
+            <input
+              type="text"
+              value={label}
+              onChange={handleLabelChange}
+              required
+              disabled={isSubmitting}
+              placeholder="e.g. Total Money Raised"
+              style={{
+                width: '100%', padding: '7px 10px', borderRadius: 8,
+                border: '1px solid #cbd5e1', fontSize: '0.82rem', outline: 'none'
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+              API Name
+            </label>
+            <input
+              type="text"
+              value={apiName}
+              onChange={(e) => setApiName(e.target.value)}
+              required
+              disabled={isSubmitting}
+              placeholder="e.g. total_money_raised__c"
+              style={{
+                width: '100%', padding: '7px 10px', borderRadius: 8,
+                border: '1px solid #cbd5e1', fontSize: '0.82rem', outline: 'none',
+                fontFamily: 'monospace'
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+              Data Type (inferred from sample values)
+            </label>
+            <select
+              value={fieldType}
+              onChange={(e) => setFieldType(e.target.value)}
+              disabled={isSubmitting}
+              style={{
+                width: '100%', padding: '7px 10px', borderRadius: 8,
+                border: '1px solid #cbd5e1', fontSize: '0.82rem', outline: 'none',
+                background: '#ffffff'
+              }}
+            >
+              <option value="text">Text</option>
+              <option value="number">Number / Currency</option>
+              <option value="date">Date</option>
+              <option value="datetime">DateTime</option>
+              <option value="boolean">Boolean (True / False)</option>
+              <option value="dropdown">Dropdown / Picklist</option>
+            </select>
+            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 4 }}>
+              Note: Lookups must be created in Object Settings to establish verified relationship targets.
+            </div>
+          </div>
+
+          {fieldType === 'dropdown' && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                Allowed Picklist Values (comma-separated)
+              </label>
+              <input
+                type="text"
+                value={picklistOptions}
+                onChange={(e) => setPicklistOptions(e.target.value)}
+                placeholder="Standard, Expedited, Priority"
+                disabled={isSubmitting}
+                style={{
+                  width: '100%', padding: '7px 10px', borderRadius: 8,
+                  border: '1px solid #cbd5e1', fontSize: '0.82rem', outline: 'none'
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              style={{
+                padding: '7px 14px', borderRadius: 8, background: '#ffffff',
+                border: '1px solid #cbd5e1', color: '#475569', fontSize: '0.8rem',
+                fontWeight: 600, cursor: 'pointer'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{
+                padding: '7px 16px', borderRadius: 8, background: '#7c3aed',
+                border: 'none', color: '#ffffff', fontSize: '0.8rem', fontWeight: 700,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6
+              }}
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw size={13} style={{ animation: 'ep-spin .8s linear infinite' }} />
+                  <span>Creating…</span>
+                </>
+              ) : (
+                <>
+                  <Check size={14} />
+                  <span>Create & Map Field</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Sub-component: SearchableSelect ─────────────────────────────────────────
 // A custom dropdown with an inline search input for filtering options.
 
-function SearchableSelect({ value, onChange, options, placeholder = '— Unmapped —', disabled = false, style = {} }) {
+function SearchableSelect({ value, onChange, options, placeholder = '— Unmapped —', disabled = false, style = {}, onCreateField }) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [highlightIdx, setHighlightIdx] = useState(-1);
@@ -313,6 +657,25 @@ function SearchableSelect({ value, onChange, options, placeholder = '— Unmappe
               </div>
             )}
 
+            {onCreateField && (
+              <div
+                onClick={() => {
+                  setIsOpen(false);
+                  onCreateField();
+                }}
+                style={{
+                  padding: '8px 12px', fontSize: '0.78rem', cursor: 'pointer',
+                  color: '#6d28d9', fontWeight: 700, background: '#faf5ff',
+                  borderTop: '1px solid #f3e8ff', display: 'flex', alignItems: 'center', gap: 6,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#f3e8ff'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#faf5ff'; }}
+              >
+                <Plus size={13} style={{ color: '#6d28d9' }} />
+                <span>Create New Field…</span>
+              </div>
+            )}
+
             {filtered.map((o, idx) => {
               const isHighlighted = idx === highlightIdx;
               const isSelected = o.value === value;
@@ -347,7 +710,7 @@ function SearchableSelect({ value, onChange, options, placeholder = '— Unmappe
 
 function FieldMappingRow({
   header, sampleValues, mapping, fieldMetadataList, lookupFieldOptions,
-  onMappingChange, isDisabled, allMappings
+  onMappingChange, isDisabled, allMappings, onOpenCreateField
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -440,6 +803,7 @@ function FieldMappingRow({
             value: f.key,
             label: `${f.label || f.key}${f.isRelationship ? ' 🔗' : ''}`,
           }))}
+          onCreateField={onOpenCreateField ? () => onOpenCreateField(header, sampleValues) : undefined}
         />
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
@@ -907,6 +1271,23 @@ export default function CSVFieldMappingModal({
   // ── Validation state ───────────────────────────────────────────────────────
   const [relationshipPreviews, setRelationshipPreviews] = useState({}); // { header: { value: { status, resolvedId, resolvedName, reason } } }
   const [validating, setValidating] = useState(false);
+  const [step1Error, setStep1Error] = useState(null);
+  const [createFieldTarget, setCreateFieldTarget] = useState(null);
+
+  const handleFieldCreated = (newField, hdr) => {
+    setFieldMetadataList((prev) => [...prev, newField]);
+    setMappings((prev) => ({
+      ...prev,
+      [hdr]: {
+        targetField: newField.key,
+        isRelationship: false,
+        targetObjectType: null,
+        matchField: null,
+        priority: 1
+      }
+    }));
+    setCreateFieldTarget(null);
+  };
 
   // ── Import state ───────────────────────────────────────────────────────────
   const [importProgress, setImportProgress] = useState('');
@@ -927,6 +1308,7 @@ export default function CSVFieldMappingModal({
     setAllRows([]);
     setMappings({});
     setRowSearchTerm('');
+    setStep1Error(null);
     setRelationshipPreviews({});
     setValidating(false);
     setImportProgress('');
@@ -1102,10 +1484,41 @@ export default function CSVFieldMappingModal({
   // An empty column is skipped entirely: nothing to configure.
   const autoPickMatchField = useCallback(async (header, m, rows) => {
     if (!m?.isRelationship || !m.targetObjectType || m.matchField) return;
-    const values = [...new Set(rows.map((r) => cellValue(r[header])).filter(Boolean))].slice(0, PROBE_VALUES);
-    if (!values.length) return;
+    const rawProbeVals = rows.map((r) => cellValue(r[header])).filter(Boolean);
+    const probeTokens = [];
+    rawProbeVals.slice(0, PROBE_VALUES).forEach((pv) => {
+      if (String(pv).includes(';')) {
+        String(pv).split(';').map((t) => t.trim()).filter(Boolean).forEach((t) => probeTokens.push(t));
+      } else {
+        probeTokens.push(pv);
+      }
+    });
+    const values = [...new Set(probeTokens)].slice(0, PROBE_VALUES);
     const options = await loadLookupOptions(m.targetObjectType);
-    const best = await suggestMatchField(m.targetObjectType, options, values);
+    if (!options || options.length === 0) return;
+
+    let best = null;
+    if (values.length > 0) {
+      best = await suggestMatchField(m.targetObjectType, options, values);
+    }
+
+    if (!best && options.length > 0) {
+      const hasOnlyNumbers = values.length > 0 && values.every((v) => /^\d+$/.test(v.replace(/;/g, '').trim()));
+      const extCandidate = options.find((o) => o.key === 'record_id__c' || o.key === 'external_id' || o.key === 'hubspot_record_id');
+      const idCandidate = options.find((o) => o.key === 'id');
+      const nameCandidate = options.find((o) => o.key === 'name');
+
+      if (hasOnlyNumbers && extCandidate) {
+        best = extCandidate.key;
+      } else if (nameCandidate && values.length > 0 && !hasOnlyNumbers) {
+        best = nameCandidate.key;
+      } else if (idCandidate) {
+        best = idCandidate.key;
+      } else {
+        best = options[0].key;
+      }
+    }
+
     if (best) {
       setMappings((prev) =>
         prev[header]?.targetField === m.targetField && !prev[header].matchField
@@ -1207,6 +1620,19 @@ export default function CSVFieldMappingModal({
   // Unmapped lookup/relationship columns (e.g. "Associated Contact IDs") are
   // completely ignored — no Match By, no validation, no resolve-relationships call.
   const handleValidate = useCallback(async () => {
+    setStep1Error(null);
+
+    // Verify that all relationship columns with values have both targetObjectType and matchField configured
+    const unconfiguredHeaders = headers.filter((h) => {
+      const cfg = mappings[h];
+      return cfg?.isRelationship && cfg.targetField && columnHasValues(h) && (!cfg.targetObjectType || !cfg.matchField);
+    });
+
+    if (unconfiguredHeaders.length > 0) {
+      setStep1Error(`Relationship configuration required: Please select a valid Match By field for: ${unconfiguredHeaders.map((h) => `"${h}"`).join(', ')}`);
+      return;
+    }
+
     setValidating(true);
     const previews = {};
 
@@ -1218,7 +1644,9 @@ export default function CSVFieldMappingModal({
 
     // Group by (targetObjectType, matchField) so we batch the resolver calls
     const groupMap = {};
+    const headerValuesMap = {};
     lookupHeaders.forEach((h) => {
+      headerValuesMap[h] = new Set();
       const cfg = mappings[h];
       const gKey = `${cfg.targetObjectType}::${cfg.matchField}`;
       if (!groupMap[gKey]) {
@@ -1233,19 +1661,23 @@ export default function CSVFieldMappingModal({
       allRows.forEach((row) => {
         const val = cellValue(row[h]);
         if (val) {
-          if (cfg.isMultiValue) {
+          if (cfg.isMultiValue || String(val).includes(cfg.delimiter || ';')) {
             const delim = cfg.delimiter || ';';
             const tokens = String(val)
               .split(delim)
               .map((t) => t.trim())
               .filter(Boolean);
             tokens.forEach((tok) => {
+              headerValuesMap[h].add(tok);
               if (!isPlaceholder(tok)) {
                 groupMap[gKey].valueSet.add(tok);
               }
             });
           } else {
-            groupMap[gKey].valueSet.add(val);
+            headerValuesMap[h].add(val);
+            if (!isPlaceholder(val)) {
+              groupMap[gKey].valueSet.add(val);
+            }
           }
         }
       });
@@ -1269,10 +1701,17 @@ export default function CSVFieldMappingModal({
         }
       }
 
-      // Store results under each header that feeds into this group
+      // Store results strictly under each header that actually contains these values
       group.headers.forEach((h) => {
         previews[h] = previews[h] || {};
-        values.forEach((v) => { previews[h][v] = results[v]; });
+        const hValues = headerValuesMap[h] || new Set();
+        hValues.forEach((v) => {
+          if (isPlaceholder(v)) {
+            previews[h][v] = { status: 'empty', isPlaceholder: true };
+          } else {
+            previews[h][v] = results[v] || { status: 'not_found' };
+          }
+        });
       });
     }));
 
@@ -1320,12 +1759,18 @@ export default function CSVFieldMappingModal({
         for (const { header, cfg } of sorted) {
           const val = cellValue(row[header]);
           if (!val) continue; // blank → try the next priority
-          if (!cfg.targetObjectType || !cfg.matchField) {
-            relErrors.set(record.__rowNum, `${targetField}: "${val}" has no Match By configured`);
-            break;
-          }
           const targetMeta = fieldMetadataList.find((f) => f.key === targetField);
           const isRequired = !!targetMeta?.isRequired;
+
+          if (!cfg.targetObjectType || !cfg.matchField) {
+            if (isRequired) {
+              relErrors.set(record.__rowNum, `${targetField}: "${val}" has no Match By configured`);
+            } else {
+              record[targetField] = null;
+              record[`source_${targetField}`] = val;
+            }
+            break;
+          }
 
           if (cfg.isMultiValue) {
             const delim = cfg.delimiter || ';';
@@ -1359,12 +1804,14 @@ export default function CSVFieldMappingModal({
               }
             }
 
-            if (unresolvedTokens.length > 0) {
+            if (unresolvedTokens.length > 0 && isRequired) {
               const errDetails = unresolvedTokens.map((u) => `"${u.token}" (${u.reason})`).join(', ');
               relErrors.set(record.__rowNum, `${targetField}: Unresolved reference(s): ${errDetails}`);
               break;
             }
 
+            // Always preserve all raw source tokens in source attribute so they are never lost
+            record[`source_${targetField}`] = val;
             record[targetField] = resolvedIds;
             record[`__strategy_${targetField}`] = cfg.updateStrategy || 'merge';
             break;
@@ -1393,7 +1840,12 @@ export default function CSVFieldMappingModal({
               record[targetField] = null;
             }
           } else {
-            relErrors.set(record.__rowNum, `${targetField}: "${val}" → ${r?.reason || r?.status || 'not validated'}`);
+            if (isRequired) {
+              relErrors.set(record.__rowNum, `${targetField}: "${val}" → ${r?.reason || r?.status || 'not validated'}`);
+            } else {
+              record[targetField] = null;
+              record[`source_${targetField}`] = val;
+            }
           }
           break;
         }
@@ -1571,7 +2023,8 @@ export default function CSVFieldMappingModal({
       const isUpdated = updatedRowNums.has(r.__rowNum);
       const errObjs = backendErrors.filter((e) => e.rowNum === r.__rowNum);
       const reasons = errObjs.map((e) => e.reason).filter(Boolean);
-      const combinedReason = reasons.length > 0 ? reasons.join('; ') : 'Validation error';
+      const uniqueReasons = [...new Set(reasons)];
+      const combinedReason = uniqueReasons.length > 0 ? uniqueReasons.join('; ') : 'Validation error';
       const status = isCreated ? 'imported' : (isUpdated ? 'updated' : 'failed');
       return {
         rowNum: i + 1,
@@ -1748,7 +2201,7 @@ export default function CSVFieldMappingModal({
   const uploadBlocked = fileParsing || metaLoading || !!metaError;
   const errorCount = validationIssues.filter((i) => i.type === 'error').length;
 
-  return ReactDOM.createPortal(
+  const modalPortal = ReactDOM.createPortal(
     <div style={{
       position: 'fixed', inset: 0, zIndex: 99999,
       background: 'rgba(11, 18, 32, 0.65)', backdropFilter: 'blur(10px)',
@@ -2035,6 +2488,15 @@ export default function CSVFieldMappingModal({
           {/* STEP 1: Map Fields */}
           {step === 1 && (
             <div>
+              {step1Error && (
+                <div style={{ marginBottom: 14, padding: '12px 16px', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, color: '#9f1239', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                    <span>{step1Error}</span>
+                  </div>
+                  <button type="button" onClick={() => setStep1Error(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9f1239', fontWeight: 700 }}>✕</button>
+                </div>
+              )}
               {foundSavedMapping && (
                 <div style={{ marginBottom: 14, padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2140,6 +2602,7 @@ export default function CSVFieldMappingModal({
                       onMappingChange={handleMappingChange}
                       isDisabled={validating}
                       allMappings={mappings}
+                      onOpenCreateField={(hdr, sVals) => setCreateFieldTarget({ header: hdr, sampleValues: sVals })}
                     />
                   ))
                 )}
@@ -2454,5 +2917,22 @@ export default function CSVFieldMappingModal({
       </div>
     </div>,
     document.body
+  );
+
+  return (
+    <>
+      {modalPortal}
+      {createFieldTarget && (
+        <CreateFieldModal
+          isOpen={Boolean(createFieldTarget)}
+          onClose={() => setCreateFieldTarget(null)}
+          header={createFieldTarget.header}
+          sampleValues={createFieldTarget.sampleValues || []}
+          objectTypeId={objectTypeId}
+          fieldMetadataList={fieldMetadataList}
+          onFieldCreated={handleFieldCreated}
+        />
+      )}
+    </>
   );
 }

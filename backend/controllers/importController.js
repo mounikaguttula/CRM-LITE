@@ -60,6 +60,21 @@ const getNormalizedKeys = (val) => {
   keys.add(lower);
   keys.add(str.toUpperCase());
 
+  // Generic composite name/email extraction: "Display Name (email@domain.com)" or "Display Name <email@domain.com>"
+  const emailInParensMatch = str.match(/^(.*?)\s*[\(<]([^\s\(\)<>]+@[^\s\(\)<>]+)[\)>]$/);
+  if (emailInParensMatch) {
+    const extractedName = emailInParensMatch[1].trim();
+    const extractedEmail = emailInParensMatch[2].trim();
+    if (extractedName) {
+      keys.add(extractedName.toLowerCase());
+      keys.add(extractedName.toUpperCase());
+    }
+    if (extractedEmail) {
+      keys.add(extractedEmail.toLowerCase());
+      keys.add(extractedEmail.toUpperCase());
+    }
+  }
+
   const num = Number(str);
   if (!Number.isNaN(num) && num > 0) {
     try {
@@ -163,6 +178,21 @@ exports.resolveRelationships = async (req, res) => {
     const targetDef = await metadataService.getObjectTypeByApiName(targetObjectType, organizationId).catch(() => null);
     if (!targetDef || !targetDef.id) {
       return res.status(404).json({ error: `Object type '${targetObjectType}' not found.` });
+    }
+
+    // Validate that matchField belongs to the target object metadata or is a standard platform identifier
+    const targetObjectMeta = await metadataService.getObjectDefinition(targetObjectType, organizationId).catch(() => null);
+    const targetFields = targetObjectMeta?.fields || [];
+    const isValidMatchField = matchByInternalId ||
+      mfLower === 'name' ||
+      mfLower === 'status' ||
+      targetFields.some((f) => {
+        const fn = (f.name || f.api_name || '').toLowerCase();
+        return fn === mfLower;
+      });
+
+    if (!isValidMatchField) {
+      return res.status(400).json({ error: `Match field '${matchField}' is not a valid field on target object '${targetObjectType}'.` });
     }
 
 const PLACEHOLDERS = new Set(['not found', 'n/a', 'na', 'none', 'null', '-', '--', 'undefined', 'nil']);

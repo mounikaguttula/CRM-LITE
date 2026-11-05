@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 
 // Redis Initialization (Commented out for testing)
@@ -50,7 +51,6 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Static Assets – email icons and images (publicly accessible for email clients)
-const path = require('path');
 app.use('/email-assets', express.static(path.join(__dirname, 'public', 'email-assets')));
 
 
@@ -109,20 +109,18 @@ app.use(errorHandler);
 
 const validationRuleService = require('./services/validationRuleService');
 
-// Start Server: verify platform system rules BEFORE opening HTTP listener
+// Start Server: resilient listener with background system rule verification
 const startServer = async () => {
-  try {
-    // Idempotent self-healing check for platform system validation rules
-    await validationRuleService.ensureSystemRules();
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 FounderCRM Metadata Platform Engine running on http://localhost:${PORT}`);
+    console.log(`📡 Health Check: http://localhost:${PORT}/health`);
+  });
 
-    app.listen(PORT, () => {
-      console.log(`🚀 FounderCRM Metadata Platform Engine running on http://localhost:${PORT}`);
-      console.log(`📡 Health Check: http://localhost:${PORT}/health`);
-    });
+  try {
+    await validationRuleService.ensureSystemRules();
+    console.log('✅ Platform system validation rules verified.');
   } catch (err) {
-    console.error('❌ Critical Startup Failure: System validation rules initialization failed.');
-    console.error(err.message || err);
-    process.exit(1);
+    console.warn('⚠️ Warning: System validation rules initialization deferred or failed:', err.message || err);
   }
 };
 
