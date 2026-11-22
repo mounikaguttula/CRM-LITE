@@ -108,7 +108,9 @@ const infoRow = (rowIconSvg, label, value, isLink = false) => `
 /** Clean compact "Need help?" UI component matching modern email design */
 const needHelpSection = (customContactEmail = null) => {
   const rawEmail = customContactEmail || process.env.SUPPORT_EMAIL || 'mounika@csnow.io';
-  const cleanEmail = rawEmail.includes('<') ? rawEmail.match(/<(.*)>/)[1].trim() : rawEmail.trim();
+  const cleanEmail = (typeof rawEmail === 'string' && rawEmail.includes('<'))
+    ? (rawEmail.match(/<(.*)>/)?.[1] || rawEmail).trim()
+    : String(rawEmail || '').trim();
 
   return `
   <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 12px;border-top:1px solid #f1f5f9;padding-top:16px;border-collapse:collapse;">
@@ -202,35 +204,85 @@ const getTransporter = () => {
   return nodemailer.createTransport(cfg);
 };
 
+// ─── SendGrid Error Diagnostic Helper ────────────────────────────────────────
+function formatSendGridError(status, rawError, fromAddress) {
+  let msg = '';
+  try {
+    const parsed = typeof rawError === 'string' ? JSON.parse(rawError) : rawError;
+    if (parsed?.errors && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+      msg = parsed.errors.map(e => e.message).filter(Boolean).join('; ');
+    } else if (parsed?.message) {
+      msg = parsed.message;
+    }
+  } catch {
+    msg = typeof rawError === 'string' ? rawError : 'Unknown SendGrid error';
+  }
+
+  const lower = (msg || '').toLowerCase();
+  if (lower.includes('maximum credits exceeded') || lower.includes('credit limit')) {
+    return {
+      code: 'SENDGRID_CREDITS_EXCEEDED',
+      status: 402,
+      message: 'SendGrid quota exceeded (Maximum credits exceeded). Upgrade your SendGrid plan or wait for the daily quota reset.',
+      raw: msg,
+    };
+  }
+  if (lower.includes('verified sender identity') || lower.includes('sender identity')) {
+    return {
+      code: 'SENDGRID_UNVERIFIED_SENDER',
+      status: 403,
+      message: `SendGrid Sender Identity verification required. Please verify sender email '${fromAddress}' in SendGrid settings.`,
+      raw: msg,
+    };
+  }
+  if (lower.includes('authorization grant is invalid') || lower.includes('bad credentials') || status === 401) {
+    return {
+      code: 'SENDGRID_AUTH_FAILED',
+      status: 401,
+      message: 'SendGrid authentication failed. Please verify SENDGRID_API_KEY in your server environment.',
+      raw: msg,
+    };
+  }
+
+  return {
+    code: 'SENDGRID_API_ERROR',
+    status: status || 400,
+    message: `SendGrid error (${status}): ${msg || 'Failed to dispatch email.'}`,
+    raw: msg,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const emailService = {
 
   sendEmail: async ({ to, subject, html, text, replyTo }) => {
-    try {
-      const fromEmail = process.env.SMTP_FROM || 'FounderCRM <noreply@crmplatform.io>';
+    const fromEmail = process.env.SMTP_FROM || 'FounderCRM <noreply@crmplatform.io>';
+    const isProduction = process.env.NODE_ENV === 'production';
+    const allowDevFallback = process.env.EMAIL_FALLBACK === 'true' && !isProduction;
 
-      // ── SendGrid ──────────────────────────────────────────────────────────
-      if (process.env.SENDGRID_API_KEY) {
-        let fromAddress = fromEmail, fromName = 'FounderCRM';
-        const m = fromEmail.match(/(.*)<(.*)>/);
-        if (m) { fromName = m[1].trim(); fromAddress = m[2].trim(); }
-        const toArray = Array.isArray(to) ? to : [to];
+    // ── 1. SENDGRID (Strict Primary Gateway) ─────────────────────────────────
+    if (process.env.SENDGRID_API_KEY) {
+      let fromAddress = fromEmail, fromName = 'FounderCRM';
+      const m = fromEmail.match(/(.*)<(.*)>/);
+      if (m) { fromName = m[1].trim(); fromAddress = m[2].trim(); }
+      const toArray = Array.isArray(to) ? to : [to];
 
-        const sgBody = {
-          personalizations: [{ to: toArray.map(e => ({ email: e.trim() })) }],
-          from: { email: fromAddress, name: fromName },
-          subject,
-          content: [{ type: 'text/html', value: html }],
-        };
+      const sgBody = {
+        personalizations: [{ to: toArray.map(e => ({ email: e.trim() })) }],
+        from: { email: fromAddress, name: fromName },
+        subject,
+        content: [{ type: 'text/html', value: html || '' }],
+      };
 
-        if (replyTo) {
-          let rAddress = replyTo, rName = 'Support Team';
-          const rm = replyTo.match(/(.*)<(.*)>/);
-          if (rm) { rName = rm[1].trim(); rAddress = rm[2].trim(); }
-          sgBody.reply_to = { email: rAddress, name: rName };
-        }
+      if (replyTo) {
+        let rAddress = replyTo, rName = 'Support Team';
+        const rm = replyTo.match(/(.*)<(.*)>/);
+        if (rm) { rName = rm[1].trim(); rAddress = rm[2].trim(); }
+        sgBody.reply_to = { email: rAddress, name: rName };
+      }
 
+      try {
         const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method: 'POST',
           headers: {
@@ -239,42 +291,81 @@ const emailService = {
           },
           body: JSON.stringify(sgBody),
         });
-        if (!res.ok) { const err = await res.text(); console.error('❌ SendGrid error:', err); return null; }
-        console.log(`✅ [SENDGRID] Sent to ${to}`);
-        return { success: true };
-      }
 
-      // ── Resend ────────────────────────────────────────────────────────────
-      if (process.env.RESEND_API_KEY) {
-        const resendPayload = {
-          from: fromEmail,
-          to: Array.isArray(to) ? to : [to],
-          subject,
-          html,
-        };
-        if (replyTo) {
-          resendPayload.reply_to = replyTo;
+        if (res.ok) {
+          console.log(`✅ [SENDGRID] Sent to ${to}`);
+          return { success: true, provider: 'sendgrid' };
         }
 
+        const rawErrText = await res.text();
+        const diag = formatSendGridError(res.status, rawErrText, fromAddress);
+        console.error(`❌ [SENDGRID] Delivery Rejected (${res.status}):`, diag.message);
+
+        // In production or default strict mode, DO NOT hide SendGrid errors! Fail fast.
+        if (!allowDevFallback) {
+          const customErr = new Error(diag.message);
+          customErr.code = diag.code;
+          customErr.statusCode = diag.status;
+          customErr.provider = 'sendgrid';
+          customErr.raw = diag.raw;
+          throw customErr;
+        }
+
+        console.warn('⚠️ [DEV FALLBACK] Falling back to backup SMTP because EMAIL_FALLBACK=true...');
+      } catch (sgErr) {
+        // If it was already a diagnostic Error we threw above, rethrow it
+        if (sgErr.code?.startsWith('SENDGRID_')) throw sgErr;
+
+        console.error(`❌ [SENDGRID] Network / Runtime Error: ${sgErr.message}`);
+        if (!allowDevFallback) {
+          const netErr = new Error(`SendGrid network error: ${sgErr.message}`);
+          netErr.code = 'SENDGRID_NETWORK_ERROR';
+          netErr.statusCode = 502;
+          netErr.provider = 'sendgrid';
+          throw netErr;
+        }
+        console.warn('⚠️ [DEV FALLBACK] Falling back to backup SMTP because EMAIL_FALLBACK=true...');
+      }
+    }
+
+    // ── 2. RESEND (Secondary Cloud Gateway if configured) ────────────────────
+    if (process.env.RESEND_API_KEY) {
+      const resendPayload = {
+        from: fromEmail,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        html,
+      };
+      if (replyTo) {
+        resendPayload.reply_to = replyTo;
+      }
+
+      try {
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
           body: JSON.stringify(resendPayload),
         });
         const data = await res.json();
-        if (!res.ok) { console.error('❌ Resend error:', data); return null; }
-        console.log(`✅ [RESEND] Sent to ${to}`);
-        return data;
+        if (res.ok) {
+          console.log(`✅ [RESEND] Sent to ${to}`);
+          return { success: true, provider: 'resend', data };
+        }
+        console.warn('⚠️ [RESEND] Send failed:', data);
+      } catch (resendErr) {
+        console.warn('⚠️ [RESEND] Network error:', resendErr.message);
       }
+    }
 
-      // ── SMTP ──────────────────────────────────────────────────────────────
+    // ── 3. SMTP (Local Development / Testing Only) ──────────────────────────
+    try {
       const transporter = getTransporter();
       const mailOpts = {
         from: fromEmail,
         to,
         subject,
-        html,
-        text: text || html.replace(/<[^>]*>?/gm, ''),
+        html: html || '',
+        text: text || (typeof html === 'string' ? html.replace(/<[^>]*>?/gm, '') : ''),
       };
       if (replyTo) {
         mailOpts.replyTo = replyTo;
@@ -282,11 +373,12 @@ const emailService = {
 
       const info = await transporter.sendMail(mailOpts);
       console.log(`✅ [SMTP] Sent to ${to}`);
-      return info;
-
-    } catch (err) {
-      console.error('❌ Email send failed:', err.message);
-      return null;
+      return { success: true, provider: 'smtp', info };
+    } catch (smtpErr) {
+      console.error('❌ Email send failed:', smtpErr.message);
+      const finalErr = new Error(`Email dispatch failed: ${smtpErr.message}`);
+      finalErr.statusCode = 500;
+      throw finalErr;
     }
   },
 

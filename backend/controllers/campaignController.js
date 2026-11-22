@@ -3,232 +3,64 @@ const objectService = require('../services/objectService');
 const emailService = require('../services/emailService');
 const supabase = require('../config/supabase');
 
-// ─── TEMPLATE 1: Welcome Email ───────────────────────────────────────────────
-const welcomeTemplate = (name, body, formLink) => `
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>${name}</title></head>
-<body style="margin:0;padding:0;background:#0f0c29;font-family:'Segoe UI',Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(160deg,#1a1040,#0f0c29 50%,#1a0a2e);padding:48px 16px;">
-  <tr><td align="center">
-    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);">
-      <tr>
-        <td style="background:linear-gradient(135deg,#7c4dff,#e040fb 60%,#ff6090);padding:48px 40px 40px;text-align:center;">
-          <div style="display:inline-block;background:rgba(255,255,255,0.15);border-radius:12px;padding:8px 20px;margin-bottom:24px;">
-            <span style="color:#fff;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">FounderCRM</span>
-          </div>
-          <h1 style="margin:0;color:#fff;font-size:30px;font-weight:800;line-height:1.2;">Welcome aboard!</h1>
-          <p style="margin:14px 0 0;color:rgba(255,255,255,0.8);font-size:15px;">${name}</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#16112b;padding:40px;">
-          <p style="margin:0 0 10px;color:rgba(240,234,255,0.6);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Hello there,</p>
-          <p style="margin:0 0 28px;color:#e8e0ff;font-size:16px;line-height:1.8;">${body.replace(/\n/g, '<br/>')}</p>
-          <div style="height:1px;background:rgba(255,255,255,0.08);margin:0 0 28px;"></div>
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
-            <tr>
-              <td width="31%" style="background:rgba(124,77,255,0.12);border:1px solid rgba(124,77,255,0.25);border-radius:12px;padding:18px 12px;text-align:center;">
-                <div style="font-size:24px;margin-bottom:8px;">⏱️</div>
-                <p style="margin:0;color:#c4b5fd;font-size:12px;font-weight:600;">2 min to fill</p>
-              </td>
-              <td width="4%"></td>
-              <td width="31%" style="background:rgba(224,64,251,0.12);border:1px solid rgba(224,64,251,0.25);border-radius:12px;padding:18px 12px;text-align:center;">
-                <div style="font-size:24px;margin-bottom:8px;">🔒</div>
-                <p style="margin:0;color:#f0abfc;font-size:12px;font-weight:600;">Data secure</p>
-              </td>
-              <td width="4%"></td>
-              <td width="31%" style="background:rgba(255,96,144,0.12);border:1px solid rgba(255,96,144,0.25);border-radius:12px;padding:18px 12px;text-align:center;">
-                <div style="font-size:24px;margin-bottom:8px;">✅</div>
-                <p style="margin:0;color:#fda4af;font-size:12px;font-weight:600;">100% free</p>
-              </td>
-            </tr>
-          </table>
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td align="center">
-                <a href="${formLink}" style="display:inline-block;background:linear-gradient(135deg,#7c4dff,#e040fb);color:#fff;text-decoration:none;padding:16px 48px;border-radius:12px;font-size:16px;font-weight:700;letter-spacing:0.3px;">
-                  Get Started →
-                </a>
-              </td>
-            </tr>
-          </table>
-          <div style="height:1px;background:rgba(255,255,255,0.08);margin:32px 0 28px;"></div>
-          <p style="margin:0;color:rgba(240,234,255,0.5);font-size:14px;">Thank you,<br/><strong style="color:#c4b5fd;">The FounderCRM Team</strong></p>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#0d0a1f;padding:24px 40px;text-align:center;border-top:1px solid rgba(255,255,255,0.06);">
-          <p style="margin:0 0 6px;color:rgba(255,255,255,0.3);font-size:12px;">© 2026 FounderCRM. All rights reserved.</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body></html>`;
+// ─── Resolve Recipient Details (Contact Lookup or Email Parsing) ─────────────
+function resolveRecipientDetails(recipientEmail, matchedContact) {
+  let fullName = '';
+  let firstName = '';
+  let lastName = '';
 
-// ─── TEMPLATE 2: Product Promotion ───────────────────────────────────────────
-const promotionTemplate = (name, body, formLink) => `
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>${name}</title></head>
-<body style="margin:0;padding:0;background:#fff8f0;font-family:'Segoe UI',Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#fff8f0;padding:48px 16px;">
-  <tr><td align="center">
-    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;border-radius:20px;overflow:hidden;border:1px solid #ffe0cc;">
-      <tr>
-        <td style="background:linear-gradient(135deg,#ff6b35,#f7931e);padding:48px 40px;text-align:center;position:relative;overflow:hidden;">
-          <div style="display:inline-block;background:rgba(255,255,255,0.2);border-radius:20px;padding:6px 18px;margin-bottom:20px;">
-            <span style="color:#fff;font-size:13px;font-weight:700;letter-spacing:1px;">⚡ LIMITED TIME OFFER</span>
-          </div>
-          <div style="background:#fff;display:inline-block;border-radius:14px;padding:10px 28px;margin-bottom:16px;">
-            <span style="font-size:36px;font-weight:900;color:#ff6b35;">40% OFF</span>
-          </div>
-          <h1 style="margin:0;color:#fff;font-size:26px;font-weight:800;">${name}</h1>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#fff;padding:40px;">
-          <p style="margin:0 0 24px;color:#555;font-size:16px;line-height:1.8;">${body.replace(/\n/g, '<br/>')}</p>
-          <div style="background:#fff8f0;border:2px dashed #ffd4b3;border-radius:14px;padding:20px;text-align:center;margin-bottom:28px;">
-            <p style="margin:0 0 6px;color:#ff6b35;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Use code at checkout</p>
-            <p style="margin:0;color:#333;font-size:28px;font-weight:900;letter-spacing:6px;">SAVE40</p>
-          </div>
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td align="center">
-                <a href="${formLink}" style="display:inline-block;background:linear-gradient(135deg,#ff6b35,#f7931e);color:#fff;text-decoration:none;padding:16px 48px;border-radius:12px;font-size:16px;font-weight:700;box-shadow:0 8px 24px rgba(255,107,53,0.4);">
-                  Claim Your Offer →
-                </a>
-              </td>
-            </tr>
-          </table>
-          <div style="height:1px;background:#f0f0f0;margin:32px 0 24px;"></div>
-          <p style="margin:0;color:#999;font-size:14px;">Best regards,<br/><strong style="color:#ff6b35;">The FounderCRM Team</strong></p>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#fff8f0;padding:20px 40px;text-align:center;border-top:1px solid #ffe0cc;">
-          <p style="margin:0 0 6px;color:#ccc;font-size:12px;">© 2026 FounderCRM. All rights reserved.</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body></html>`;
-
-// ─── TEMPLATE 3: Newsletter ───────────────────────────────────────────────────
-const newsletterTemplate = (name, body, formLink) => `
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>${name}</title></head>
-<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:48px 16px;">
-  <tr><td align="center">
-    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;border-radius:20px;overflow:hidden;border:1px solid #dce3ea;">
-      <tr>
-        <td style="background:#0d1b2a;padding:16px 32px;">
-          <table width="100%"><tr>
-            <td style="color:#fff;font-size:14px;font-weight:700;letter-spacing:2px;">FOUNDERCRM</td>
-            <td align="right" style="color:#64b5f6;font-size:13px;">${name}</td>
-          </tr></table>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#1565c0;padding:32px;">
-          <h1 style="margin:0 0 8px;color:#fff;font-size:26px;font-weight:800;">Monthly Newsletter</h1>
-          <p style="margin:0;color:#90caf9;font-size:14px;">Your latest updates, news & highlights</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#fff;padding:40px;">
-          <div style="border-left:4px solid #1565c0;padding-left:20px;margin-bottom:28px;">
-            <p style="margin:0 0 6px;color:#1565c0;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">This Month</p>
-            <p style="margin:0;color:#333;font-size:16px;line-height:1.8;">${body.replace(/\n/g, '<br/>')}</p>
-          </div>
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td align="center">
-                <a href="${formLink}" style="display:inline-block;background:#1565c0;color:#fff;text-decoration:none;padding:14px 40px;border-radius:10px;font-size:15px;font-weight:700;">
-                  Submit Interest Form →
-                </a>
-              </td>
-            </tr>
-          </table>
-          <div style="height:1px;background:#f0f0f0;margin:28px 0 20px;"></div>
-          <p style="margin:0;color:#999;font-size:14px;">Best regards,<br/><strong style="color:#1565c0;">The FounderCRM Team</strong></p>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#0d1b2a;padding:20px 40px;text-align:center;">
-          <p style="margin:0 0 6px;color:rgba(255,255,255,0.3);font-size:12px;">© 2026 FounderCRM. All rights reserved.</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body></html>`;
-
-// ─── TEMPLATE 4: Event Invitation ────────────────────────────────────────────
-const eventTemplate = (name, body, formLink) => `
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>${name}</title></head>
-<body style="margin:0;padding:0;background:#0a0a0a;font-family:Georgia,serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(160deg,#0a0a0a,#1a1a2e);padding:48px 16px;">
-  <tr><td align="center">
-    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;border-radius:20px;overflow:hidden;border:1px solid #222;">
-      <tr>
-        <td style="background:linear-gradient(160deg,#0a0a0a,#1a1a2e);padding:48px 40px;text-align:center;">
-          <div style="display:inline-block;border:1px solid #333;border-radius:4px;padding:6px 18px;margin-bottom:28px;">
-            <span style="color:#888;font-size:11px;letter-spacing:3px;font-family:Arial;">YOU ARE INVITED</span>
-          </div>
-          <h1 style="margin:0 0 12px;color:#f0e8d0;font-size:28px;font-weight:normal;font-style:italic;">${name}</h1>
-          <div style="width:80px;height:1px;background:linear-gradient(to right,transparent,#c9a84c,transparent);margin:0 auto 28px;"></div>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#111;padding:40px;border-top:1px solid #222;">
-          <p style="margin:0 0 28px;color:#aaa;font-size:15px;line-height:1.8;text-align:center;">${body.replace(/\n/g, '<br/>')}</p>
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td align="center">
-                <a href="${formLink}" style="display:inline-block;border:1px solid #c9a84c;color:#c9a84c;text-decoration:none;padding:14px 48px;border-radius:4px;font-size:14px;letter-spacing:2px;font-family:Arial;">
-                  RSVP NOW →
-                </a>
-              </td>
-            </tr>
-          </table>
-          <div style="height:1px;background:#222;margin:32px 0 24px;"></div>
-          <p style="margin:0;color:#555;font-size:13px;text-align:center;">We look forward to seeing you there.<br/><span style="color:#c9a84c;">— The FounderCRM Team</span></p>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#0a0a0a;padding:20px 40px;text-align:center;border-top:1px solid #1a1a1a;">
-          <p style="margin:0 0 6px;color:#444;font-size:12px;font-family:Arial;">© 2026 FounderCRM. All rights reserved.</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body></html>`;
-
-// ─── Template Selector Helper ───
-function buildEmailHtml(templateId, name, body, formLink) {
-  switch (templateId) {
-    case 'product_promo':
-    case 'promotion':
-      return promotionTemplate(name, body, formLink);
-    case 'newsletter':
-      return newsletterTemplate(name, body, formLink);
-    case 'event_invitation':
-    case 'event':
-      return eventTemplate(name, body, formLink);
-    case 'welcome_email':
-    case 'welcome':
-    default:
-      return welcomeTemplate(name, body, formLink);
+  if (matchedContact) {
+    const d = matchedContact.data || {};
+    firstName = d.first_name || d.firstName || '';
+    lastName = d.last_name || d.lastName || '';
+    fullName = matchedContact.name || d.full_name || `${firstName} ${lastName}`.trim();
   }
+
+  const cleanEmail = (typeof recipientEmail === 'string') ? recipientEmail.trim() : '';
+
+  if (!fullName && cleanEmail.includes('@')) {
+    const localPart = cleanEmail.split('@')[0];
+    const parts = localPart.split(/[._-]/).filter(Boolean);
+    if (parts.length > 0) {
+      firstName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+      if (parts.length > 1) {
+        lastName = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
+        fullName = `${firstName} ${lastName}`;
+      } else {
+        fullName = firstName;
+      }
+    }
+  }
+
+  if (!firstName) firstName = 'Subscriber';
+  if (!fullName) fullName = firstName;
+
+  return { fullName, firstName, lastName, email: cleanEmail };
+}
+
+// ─── Process Merge Tags (HubSpot Style) ──────────────────────────────────────
+function processMergeTags(rawHtml, { recipient, formLink, subject, orgName }) {
+  if (!rawHtml || typeof rawHtml !== 'string') return '';
+  const firstName = recipient?.firstName || 'Subscriber';
+  const lastName = recipient?.lastName || '';
+  const fullName = recipient?.fullName || firstName;
+  const cleanEmail = recipient?.email || '';
+
+  return String(rawHtml)
+    // First Name: {{first_name}}, {{first name}}, {{firstname}}, {{firstName}}
+    .replace(/\{\{\s*first[_\s-]?name\s*\}\}/gi, firstName)
+    // Last Name: {{last_name}}, {{last name}}, {{lastname}}, {{lastName}}
+    .replace(/\{\{\s*last[_\s-]?name\s*\}\}/gi, lastName)
+    // Full Name: {{name}}, {{full_name}}, {{full name}}, {{fullname}}, {{fullName}}
+    .replace(/\{\{\s*(?:full[_\s-]?)?name\s*\}\}/gi, fullName)
+    // Email: {{email}}
+    .replace(/\{\{\s*email\s*\}\}/gi, cleanEmail)
+    // Form & RSVP links: {{form_link}}, {{form link}}, {{rsvp_link}}
+    .replace(/\{\{\s*(?:form|rsvp)[_\s-]?link\s*\}\}/gi, typeof formLink === 'string' ? formLink : '#')
+    // Subject: {{subject}}
+    .replace(/\{\{\s*subject\s*\}\}/gi, typeof subject === 'string' ? subject : '')
+    // Company & Organization: {{company}}, {{organization}}
+    .replace(/\{\{\s*(?:company|organization)\s*\}\}/gi, typeof orgName === 'string' && orgName ? orgName : 'FounderCRM');
 }
 
 const metadataService = require('../services/metadataService');
@@ -317,7 +149,7 @@ const campaignController = {
 
       const organizationId = req.user?.organization_id;
       const userId = req.user?.id;
-      const { name, subject, body, template_id, template_name, target_emails, type } = req.body || {};
+      const { name, subject, body, html, template_id, template_name, target_emails, type, custom_html } = req.body || {};
 
       if (!name || !name.trim()) {
         return res.status(400).json({ message: 'Campaign name is required.' });
@@ -347,30 +179,108 @@ const campaignController = {
       // Generate valid UUID for campaign ID so Postgres primary key matches cleanly
       const campaignId = crypto.randomUUID();
 
-      // Dispatch emails in parallel
+      // Look up existing contacts/leads to resolve recipient names accurately
+      const contactMap = new Map();
+      try {
+        const { data: matchedContacts } = await supabase
+          .from('universal_table')
+          .select('id, name, data')
+          .eq('organization_id', organizationId)
+          .eq('is_deleted', false);
+
+        if (Array.isArray(matchedContacts)) {
+          for (const c of matchedContacts) {
+            const cEmail = (c.data?.email || c.data?.email_address || c.email || '').trim().toLowerCase();
+            if (cEmail) contactMap.set(cEmail, c);
+          }
+        }
+      } catch (cErr) {
+        console.warn('[CampaignController] Contact lookup warning:', cErr.message);
+      }
+
+      // Dispatch emails
       const trackingRecords = [];
       let successCount = 0;
+      let failureCount = 0;
+      let lastErrorMessage = '';
 
       for (const recipient of recipientList) {
+        const cleanRecipientEmail = recipient.trim().toLowerCase();
+        const matchedContact = contactMap.get(cleanRecipientEmail);
+        const recipientDetails = resolveRecipientDetails(recipient, matchedContact);
+
         const recipientFormLink = `${clientUrl}/public/campaign-form?campaign_id=${campaignId}&org_id=${organizationId}&email=${encodeURIComponent(recipient)}`;
-        const emailHtml = buildEmailHtml(template_id, name, body, recipientFormLink);
+        
+        const rawContent = (typeof html === 'string' && html.trim())
+          ? html
+          : ((typeof custom_html === 'string' && custom_html.trim()) ? custom_html : (typeof body === 'string' && body.trim() ? body : `<html><body><h1>${subject}</h1><p>${name}</p><a href="${recipientFormLink}">Get Started &rarr;</a></body></html>`));
+
+        // Personalize HTML body with recipient details (First Name, Last Name, Full Name, Email, etc.)
+        const emailHtml = processMergeTags(rawContent, {
+          recipient: recipientDetails,
+          formLink: recipientFormLink,
+          subject,
+          orgName: req.user?.organization_name,
+        });
+
+        // Personalize Subject Line with recipient details (e.g. "Welcome, Bhanu!")
+        const personalizedSubject = processMergeTags(subject, {
+          recipient: recipientDetails,
+          formLink: recipientFormLink,
+          subject,
+          orgName: req.user?.organization_name,
+        });
+
         const trackingPixel = `<img src="${backendUrl}/api/public/track/open?campaign_id=${campaignId}&email=${encodeURIComponent(recipient)}" width="1" height="1" style="display:none;" />`;
-        const finalHtml = emailHtml + trackingPixel;
+        
+        let finalHtml = emailHtml || '';
+        if (typeof emailHtml === 'string' && emailHtml.includes('</body>')) {
+          finalHtml = emailHtml.replace('</body>', `${trackingPixel}\n</body>`);
+        } else {
+          finalHtml = String(emailHtml || '') + trackingPixel;
+        }
 
-        const dispatchResult = await emailService.sendEmail({
-          to: recipient,
-          subject: subject,
-          html: finalHtml,
-        });
+        try {
+          const dispatchResult = await emailService.sendEmail({
+            to: recipient,
+            subject: personalizedSubject,
+            html: finalHtml,
+          });
 
-        if (dispatchResult) successCount++;
-
-        trackingRecords.push({
-          email: recipient,
-          status: 'sent',
-          sent_at: new Date().toISOString(),
-          opened_at: null,
-        });
+          if (dispatchResult?.success) {
+            successCount++;
+            trackingRecords.push({
+              email: recipient,
+              status: 'sent',
+              provider: dispatchResult.provider || 'sendgrid',
+              sent_at: new Date().toISOString(),
+              opened_at: null,
+            });
+          } else {
+            failureCount++;
+            lastErrorMessage = dispatchResult?.error || 'Unknown send failure';
+            trackingRecords.push({
+              email: recipient,
+              status: 'failed',
+              provider: 'sendgrid',
+              error: lastErrorMessage,
+              failed_at: new Date().toISOString(),
+              opened_at: null,
+            });
+          }
+        } catch (dispatchErr) {
+          failureCount++;
+          lastErrorMessage = dispatchErr.message || 'SendGrid dispatch failed';
+          console.error(`❌ [sendCampaign] Failed to dispatch to ${recipient}:`, lastErrorMessage);
+          trackingRecords.push({
+            email: recipient,
+            status: 'failed',
+            provider: 'sendgrid',
+            error: lastErrorMessage,
+            failed_at: new Date().toISOString(),
+            opened_at: null,
+          });
+        }
       }
 
       const baseFormLink = `${clientUrl}/public/campaign-form?campaign_id=${campaignId}&org_id=${organizationId}`;
@@ -380,28 +290,39 @@ const campaignController = {
         product_promo: 'Product Promotion',
         newsletter: 'Monthly Newsletter',
         event_invitation: 'Event Invitation',
+        custom_html: 'Custom HTML',
       };
       const campaignType = type || templateTypeMap[template_id] || (template_name ? (templateTypeMap[String(template_name).toLowerCase()] || template_name) : 'Welcome Email');
 
-      // Create payload for universal_table
+      // Resolve valid campaign status
+      let overallStatus = 'Sent';
+      if (successCount === 0) {
+        overallStatus = 'Failed';
+      } else if (failureCount > 0) {
+        overallStatus = 'Partially Sent';
+      }
+
+      // Create payload for universal_table JSONB data column
       const campaignPayload = {
         id: campaignId,
         name: name.trim(),
-        status: 'Sent',
+        status: overallStatus,
+        failure_reason: failureCount > 0 ? lastErrorMessage : null,
         type: campaignType,
-        template_id: template_id || 'welcome_email',
-        template_name: template_name || 'Welcome Email',
+        template_id: template_id || (html || custom_html ? 'custom_html' : 'welcome_email'),
+        template_name: template_name || (template_id === 'custom_html' ? 'Custom HTML' : 'Campaign Email'),
         subject: subject.trim(),
-        body: body || '',
+        html: html || custom_html || body || '',
         target_emails: recipientList,
-        total_sent: recipientList.length,
+        total_sent: successCount,
+        total_failed: failureCount,
         opened_count: 0,
-        sent_at: new Date().toISOString(),
+        sent_at: successCount > 0 ? new Date().toISOString() : null,
         tracking: trackingRecords,
         form_url: baseFormLink,
       };
 
-      console.log(`[Campaigns] Dispatched campaign '${name}' (ID: ${campaignId}) for orgId=${organizationId} to ${recipientList.length} recipients`);
+      console.log(`[Campaigns] Dispatched campaign '${name}' (ID: ${campaignId}) for orgId=${organizationId}: ${successCount} sent, ${failureCount} failed`);
 
       // Resolve valid object_type_id from object_type_definitions table to satisfy FK constraint
       let validObjectTypeId = null;
@@ -431,23 +352,14 @@ const campaignController = {
         }
       }
 
+      // Restrict newRow strictly to valid columns of public.universal_table
       const newRow = {
         id: campaignId,
         organization_id: organizationId,
         object_type_id: validObjectTypeId,
         name: name.trim(),
-        status: 'Sent',
-        type: campaignType,
+        status: overallStatus,
         owner_id: userId || null,
-        template_id: template_id || 'welcome_email',
-        template_name: template_name || 'Welcome Email',
-        subject: subject.trim(),
-        body: body || '',
-        target_emails: recipientList,
-        total_sent: recipientList.length,
-        opened_count: 0,
-        sent_at: new Date().toISOString(),
-        tracking: trackingRecords,
         data: campaignPayload,
         created_by: userId || null,
         created_at: new Date().toISOString(),
@@ -467,13 +379,33 @@ const campaignController = {
 
       const record = objectService.normalizeRecord(row);
 
+      if (overallStatus === 'Failed') {
+        return res.status(400).json({
+          success: false,
+          message: `Failed to dispatch campaign: ${lastErrorMessage || 'SendGrid failed to deliver the email.'}`,
+          data: record,
+        });
+      }
+
+      if (overallStatus === 'Partially Sent') {
+        return res.status(200).json({
+          success: true,
+          message: `Campaign "${name}" partially sent: ${successCount} delivered, ${failureCount} failed (${lastErrorMessage}).`,
+          data: record,
+        });
+      }
+
       return res.status(201).json({
         success: true,
-        message: `Campaign "${name}" sent to ${recipientList.length} recipient(s).`,
+        message: `Campaign "${name}" sent successfully to ${recipientList.length} recipient(s).`,
         data: record,
       });
     } catch (err) {
-      next(err);
+      console.error('❌ [sendCampaign Error]:', err.stack || err);
+      return res.status(err.statusCode || err.status || 500).json({
+        success: false,
+        message: err.message || 'Failed to dispatch campaign.',
+      });
     }
   },
 
@@ -597,8 +529,6 @@ const campaignController = {
             .from('universal_table')
             .update({
               status: newStatus,
-              opened_count: openedCount,
-              tracking: updatedTracking,
               data: {
                 ...(campaign.data || {}),
                 status: newStatus,

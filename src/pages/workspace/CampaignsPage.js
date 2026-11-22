@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { useAuth } from '../../context/AuthContext';
 import { apiGet, apiPost, apiDelete } from '../../api/client';
+import { EMAIL_TEMPLATES, buildTemplateHtml } from '../../templates/emailTemplates';
 import {
   Megaphone, Plus, Search, Trash2, BarChart2, Check, ArrowRight, ArrowLeft,
   X, Send, RefreshCw, Mail, Eye, TrendingUp, Clock,
-  CheckCircle2, AlertCircle, AlertTriangle
+  CheckCircle2, AlertCircle, AlertTriangle, Code, FileCode,
+  Smartphone, Monitor, RotateCcw, Sliders, Layout, Sparkles, Type
 } from 'lucide-react';
 
 /* ──────────────────────────────────────────
@@ -38,60 +41,15 @@ const inputBase = {
   height: '44px',
 };
 
-const EMAIL_TEMPLATES = [
-  {
-    id: 'welcome_email',
-    title: 'Welcome Email',
-    category: 'Onboarding',
-    emoji: '👋',
-    accent: '#7c3aed',
-    bg: 'linear-gradient(140deg, #1e1b4b 0%, #312e81 60%, #4c1d95 100%)',
-    headerText: 'Welcome aboard!',
-    headerSub: "We're thrilled to have you",
-    subject: 'Welcome to Our Company!',
-    body: `Dear [Recipient Name],\n\nWelcome to our company! We're excited to have you as part of our community.\n\nBest regards,\nThe Team`,
-  },
-  {
-    id: 'product_promo',
-    title: 'Product Promotion',
-    category: 'Special Offer',
-    emoji: '🔥',
-    accent: '#ea580c',
-    bg: 'linear-gradient(140deg, #7c2d12 0%, #c2410c 55%, #ea580c 100%)',
-    headerText: 'LIMITED OFFER 40% OFF',
-    headerSub: 'Exclusive deal — today only',
-    subject: 'Special Offer: 40% Discount!',
-    body: `Hi [Recipient Name],\n\nWe are excited to announce a special 40% discount on our premier products! Don't miss out on this limited-time offer.\n\nUse Code: SAVE40`,
-  },
-  {
-    id: 'newsletter',
-    title: 'Monthly Newsletter',
-    category: 'Update',
-    emoji: '📰',
-    accent: '#0369a1',
-    bg: 'linear-gradient(140deg, #0c4a6e 0%, #0369a1 55%, #0284c7 100%)',
-    headerText: 'MONTHLY NEWSLETTER',
-    headerSub: 'Latest updates & insights',
-    subject: 'FounderCRM Monthly Updates',
-    body: `Hello,\n\nHere are the top product updates, features, and community highlights for this month.\n\nThank you for growing with us!`,
-  },
-  {
-    id: 'event_invitation',
-    title: 'Event Invitation',
-    category: 'VIP Event',
-    emoji: '🎟️',
-    accent: '#b45309',
-    bg: 'linear-gradient(140deg, #1c1917 0%, #292524 55%, #44403c 100%)',
-    headerText: 'YOU ARE INVITED',
-    headerSub: 'Exclusive VIP Summit',
-    subject: 'Exclusive Invitation: VIP Annual Summit',
-    body: `Dear Member,\n\nYou are cordially invited to our upcoming Annual VIP Leadership Summit.\n\nPlease RSVP below to confirm your attendance.`,
-  },
-];
-
 /* ── Status Badge Config ── */
 function getStatusBadge(status) {
   const s = String(status || '').toLowerCase();
+  if (s.includes('fail')) {
+    return { label: 'Failed', icon: '❌', bg: '#fef2f2', color: '#dc2626', border: '#fecaca', dot: '#ef4444' };
+  }
+  if (s.includes('partial')) {
+    return { label: 'Partially Sent', icon: '⚠️', bg: '#fffbeb', color: '#b45309', border: '#fde68a', dot: '#f59e0b' };
+  }
   if (s.includes('submit') || s.includes('form')) {
     return { label: 'Form Submitted', icon: '📝', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', dot: '#3b82f6' };
   }
@@ -264,12 +222,23 @@ function CampaignCard({ campaign, onTrack, onDelete, canDelete = true, onCardCli
 function CampaignsPage() {
   const navigate = useNavigate();
   const workspace = useWorkspace() || {};
+  const { user } = useAuth() || {};
   const permissions = workspace.permissions;
   const campaignPerm = permissions?.campaign || permissions?.campaigns;
 
   const canRead = campaignPerm?.canRead !== false;
   const canCreate = campaignPerm?.canCreate !== false && campaignPerm?.canUpdate !== false;
   const canDelete = campaignPerm?.canDelete !== false;
+
+  // Resolve user's actual company / organization name for clean prefilling
+  const companyName = (workspace?.company?.name && workspace?.company?.name !== 'Acme Corp')
+    ? workspace.company.name
+    : (user?.organization_name || user?.company_name || 'TechMantra');
+
+  const resolveCompanyTag = (val) => {
+    if (typeof val !== 'string') return val || '';
+    return val.replace(/\{\{\s*company\s*\}\}/gi, companyName);
+  };
 
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -279,8 +248,31 @@ function CampaignsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [step, setStep] = useState(1);
   const [selectedTemplate, setSelectedTemplate] = useState(EMAIL_TEMPLATES[0]);
+  const [editorMode, setEditorMode] = useState('form'); // 'form' (structured inputs) | 'code' (raw HTML)
+  const [previewDevice, setPreviewDevice] = useState('desktop'); // 'desktop' | 'mobile'
+
+  const initialTemplate = EMAIL_TEMPLATES[0];
+  const initialFields = initialTemplate.defaultFields || {};
+  const resolvedInitialFields = {
+    ...initialFields,
+    headline: resolveCompanyTag(initialFields.headline || ''),
+    subheadline: resolveCompanyTag(initialFields.subheadline || ''),
+    body: resolveCompanyTag(initialFields.body || ''),
+    footerSignoff: resolveCompanyTag(initialFields.footerSignoff || ''),
+  };
+
   const [formData, setFormData] = useState({
-    name: '', subject: EMAIL_TEMPLATES[0].subject, body: EMAIL_TEMPLATES[0].body, target_emails: '',
+    name: '',
+    subject: resolveCompanyTag(initialTemplate.subject),
+    headline: resolvedInitialFields.headline || '',
+    subheadline: resolvedInitialFields.subheadline || '',
+    body: resolvedInitialFields.body || '',
+    buttonText: resolvedInitialFields.buttonText || '',
+    buttonUrl: resolvedInitialFields.buttonUrl || '{{form_link}}',
+    promoCode: resolvedInitialFields.promoCode || '',
+    footerSignoff: resolvedInitialFields.footerSignoff || '',
+    custom_html: buildTemplateHtml(initialTemplate.id, resolvedInitialFields),
+    target_emails: '',
   });
   const [sending, setSending] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -312,8 +304,30 @@ function CampaignsPage() {
       return;
     }
     const t = EMAIL_TEMPLATES[0];
+    const def = t.defaultFields || {};
+    const resolvedDef = {
+      ...def,
+      headline: resolveCompanyTag(def.headline || ''),
+      subheadline: resolveCompanyTag(def.subheadline || ''),
+      body: resolveCompanyTag(def.body || ''),
+      footerSignoff: resolveCompanyTag(def.footerSignoff || ''),
+    };
     setSelectedTemplate(t);
-    setFormData({ name: '', subject: t.subject, body: t.body, target_emails: '' });
+    setEditorMode('form');
+    setPreviewDevice('desktop');
+    setFormData({
+      name: '',
+      subject: resolveCompanyTag(t.subject),
+      headline: resolvedDef.headline || '',
+      subheadline: resolvedDef.subheadline || '',
+      body: resolvedDef.body || '',
+      buttonText: resolvedDef.buttonText || '',
+      buttonUrl: resolvedDef.buttonUrl || '{{form_link}}',
+      promoCode: resolvedDef.promoCode || '',
+      footerSignoff: resolvedDef.footerSignoff || '',
+      custom_html: buildTemplateHtml(t.id, resolvedDef),
+      target_emails: '',
+    });
     setStep(0);
     setErrorMsg('');
     setSuccessMsg('');
@@ -322,14 +336,123 @@ function CampaignsPage() {
 
   const handleSelectTemplate = (tpl) => {
     setSelectedTemplate(tpl);
-    setFormData(prev => ({ ...prev, subject: tpl.subject, body: tpl.body }));
+    const def = tpl.defaultFields || {};
+    const resolvedDef = {
+      ...def,
+      headline: resolveCompanyTag(def.headline || ''),
+      subheadline: resolveCompanyTag(def.subheadline || ''),
+      body: resolveCompanyTag(def.body || ''),
+      footerSignoff: resolveCompanyTag(def.footerSignoff || ''),
+    };
+    const compiled = buildTemplateHtml(tpl.id, resolvedDef);
+    setFormData(prev => ({
+      ...prev,
+      subject: resolveCompanyTag(tpl.subject),
+      headline: resolvedDef.headline || '',
+      subheadline: resolvedDef.subheadline || '',
+      body: resolvedDef.body || '',
+      buttonText: resolvedDef.buttonText || '',
+      buttonUrl: resolvedDef.buttonUrl || '{{form_link}}',
+      promoCode: resolvedDef.promoCode || '',
+      footerSignoff: resolvedDef.footerSignoff || '',
+      custom_html: compiled,
+    }));
+  };
+
+  const updateFormField = (field, value) => {
+    setFormData(prev => {
+      const updated = { ...prev, [field]: value };
+      // If we are in structured form mode, regenerate custom_html so preview updates live
+      if (editorMode === 'form') {
+        updated.custom_html = buildTemplateHtml(selectedTemplate.id, {
+          headline: updated.headline,
+          subheadline: updated.subheadline,
+          body: updated.body,
+          buttonText: updated.buttonText,
+          buttonUrl: updated.buttonUrl,
+          promoCode: updated.promoCode,
+          footerSignoff: updated.footerSignoff,
+        });
+      }
+      return updated;
+    });
+  };
+
+  const handleInsertTag = (tag) => {
+    if (editorMode === 'code') {
+      setFormData(prev => ({
+        ...prev,
+        custom_html: (prev.custom_html || '') + tag,
+      }));
+    } else {
+      // Append to body by default
+      setFormData(prev => {
+        const newBody = (prev.body || '') + ' ' + tag;
+        return {
+          ...prev,
+          body: newBody,
+          custom_html: buildTemplateHtml(selectedTemplate.id, {
+            headline: prev.headline,
+            subheadline: prev.subheadline,
+            body: newBody,
+            buttonText: prev.buttonText,
+            buttonUrl: prev.buttonUrl,
+            promoCode: prev.promoCode,
+            footerSignoff: prev.footerSignoff,
+          }),
+        };
+      });
+    }
+  };
+
+  const handleResetTemplate = () => {
+    if (selectedTemplate) {
+      const def = selectedTemplate.defaultFields || {};
+      const resolvedDef = {
+        ...def,
+        headline: resolveCompanyTag(def.headline || ''),
+        subheadline: resolveCompanyTag(def.subheadline || ''),
+        body: resolveCompanyTag(def.body || ''),
+        footerSignoff: resolveCompanyTag(def.footerSignoff || ''),
+      };
+      const compiled = buildTemplateHtml(selectedTemplate.id, resolvedDef);
+      setFormData(prev => ({
+        ...prev,
+        headline: resolvedDef.headline || '',
+        subheadline: resolvedDef.subheadline || '',
+        body: resolvedDef.body || '',
+        buttonText: resolvedDef.buttonText || '',
+        buttonUrl: resolvedDef.buttonUrl || '{{form_link}}',
+        promoCode: resolvedDef.promoCode || '',
+        footerSignoff: resolvedDef.footerSignoff || '',
+        custom_html: compiled,
+      }));
+    }
   };
 
   const handleSendCampaign = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) { setErrorMsg('Campaign name is required.'); return; }
-    if (!formData.subject.trim()) { setErrorMsg('Email subject is required.'); return; }
-    if (!formData.target_emails.trim()) { setErrorMsg('At least one target email is required.'); return; }
+    if (!formData.name || !formData.name.trim()) { setErrorMsg('Campaign name is required.'); return; }
+    if (!formData.subject || !formData.subject.trim()) { setErrorMsg('Email subject is required.'); return; }
+    if (!formData.target_emails || !formData.target_emails.trim()) { setErrorMsg('At least one target email is required.'); return; }
+
+    let finalHtml = formData.custom_html;
+    if (!finalHtml || !finalHtml.trim()) {
+      finalHtml = buildTemplateHtml(selectedTemplate?.id || 'welcome_email', {
+        headline: formData.headline,
+        subheadline: formData.subheadline,
+        body: formData.body,
+        buttonText: formData.buttonText,
+        buttonUrl: formData.buttonUrl,
+        promoCode: formData.promoCode,
+        footerSignoff: formData.footerSignoff,
+      });
+    }
+
+    if (!finalHtml || !finalHtml.trim()) {
+      setErrorMsg('Please select or provide an email template.');
+      return;
+    }
 
     setSending(true);
     setErrorMsg('');
@@ -339,6 +462,7 @@ function CampaignsPage() {
       product_promo: 'Product Promotion',
       newsletter: 'Monthly Newsletter',
       event_invitation: 'Event Invitation',
+      custom_html: 'Custom HTML',
     };
     const campaignType = templateTypeMap[selectedTemplate?.id] || selectedTemplate?.title || 'Welcome Email';
 
@@ -346,10 +470,10 @@ function CampaignsPage() {
       await apiPost('/api/campaigns/send', {
         name: formData.name.trim(),
         subject: formData.subject.trim(),
-        body: formData.body,
+        html: finalHtml,
         type: campaignType,
-        template_id: selectedTemplate.id,
-        template_name: selectedTemplate.title,
+        template_id: selectedTemplate?.id || 'welcome_email',
+        template_name: selectedTemplate?.title || 'Email Campaign',
         target_emails: formData.target_emails,
       });
       setModalOpen(false);
@@ -677,27 +801,33 @@ function CampaignsPage() {
       ══════════════════════════════════════════════ */}
       {modalOpen && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', top: 0, right: 0, bottom: 0, left: 260, zIndex: 1000,
+          position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1000,
           background: 'rgba(15,23,42,0.7)',
           backdropFilter: 'blur(10px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 24,
+          padding: step === 2 ? 16 : 24,
         }}>
           <div style={{
             background: '#ffffff', borderRadius: 24,
-            width: '100%', maxWidth: 800,
-            maxHeight: '92vh', overflowY: 'auto',
+            width: '100%',
+            maxWidth: step === 2 ? 1220 : step === 1 ? 840 : 680,
+            height: step === 2 ? '92vh' : 'auto',
+            maxHeight: '94vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: step === 2 ? 'hidden' : 'auto',
             boxShadow: '0 32px 80px rgba(0,0,0,0.25)',
-            padding: 32,
+            padding: step === 2 ? '22px 28px' : 32,
+            transition: 'max-width 0.2s ease',
           }}>
             {/* Modal Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: step === 2 ? 18 : 28, flexShrink: 0 }}>
               <div>
                 <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
-                  {step === 0 ? 'Select Campaign Type' : step === 1 ? 'Choose Email Template' : 'Campaign Details & Recipients'}
+                  {step === 0 ? 'Select Campaign Type' : step === 1 ? 'Choose Email Template' : 'Design & Dispatch Campaign'}
                 </h2>
                 <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>
-                  {step === 0 ? 'Choose the type of campaign you want to create' : step === 1 ? 'Pick a pre-designed template for your campaign' : 'Customize your message and add target recipients'}
+                  {step === 0 ? 'Choose the type of campaign you want to create' : step === 1 ? 'Pick a pre-designed template for your campaign' : 'Customize template copy on the left and preview live rendering on the right'}
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -731,7 +861,7 @@ function CampaignsPage() {
             </div>
 
             {errorMsg && (
-              <div style={{ padding: '12px 16px', borderRadius: 12, background: '#fff1f2', border: '1px solid #fecdd3', color: '#be123c', fontSize: 13, fontWeight: 600, marginBottom: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ padding: '12px 16px', borderRadius: 12, background: '#fff1f2', border: '1px solid #fecdd3', color: '#be123c', fontSize: 13, fontWeight: 600, marginBottom: 18, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <AlertCircle size={16} /> {errorMsg}
               </div>
             )}
@@ -835,71 +965,457 @@ function CampaignsPage() {
                     Cancel
                   </button>
                   <button onClick={() => setStep(2)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 24px', borderRadius: 11, fontSize: 13.5, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg, #6366f1, #3b82f6)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.35)' }}>
-                    Next: Fill Details <ArrowRight size={15} />
+                    Next: Customize & Preview <ArrowRight size={15} />
                   </button>
                 </div>
               </>
             )}
 
-            {/* STEP 2: Campaign Details Form */}
+            {/* STEP 2: Two-Panel Campaign Editor & Live Preview */}
             {step === 2 && (
-              <form onSubmit={handleSendCampaign} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* Selected Template Pill */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 12, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#6366f1' }} />
-                  <span style={{ fontSize: 12.5, color: '#64748b', fontWeight: 600 }}>Template:</span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>{selectedTemplate.title} {selectedTemplate.emoji}</span>
-                  <button type="button" onClick={() => setStep(1)} style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: 12, fontWeight: 700, color: '#6366f1', cursor: 'pointer' }}>Change</button>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.05fr 0.95fr', gap: 24, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                
+                {/* ── LEFT PANEL: Form Inputs / Code Editor ── */}
+                <form onSubmit={handleSendCampaign} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', paddingRight: 10, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    
+                    {/* Selected Template Pill */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 12, background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#6366f1' }} />
+                      <span style={{ fontSize: 12.5, color: '#64748b', fontWeight: 600 }}>Active Template:</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>{selectedTemplate.title} {selectedTemplate.emoji}</span>
+                      <button type="button" onClick={() => setStep(1)} style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: 12, fontWeight: 700, color: '#6366f1', cursor: 'pointer' }}>Change</button>
+                    </div>
+
+                    {/* Campaign Name & Subject Line */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={labelStyle}>Campaign Name *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Summer Outreach 2026"
+                          value={formData.name}
+                          onChange={e => setFormData({ ...formData, name: e.target.value })}
+                          style={inputBase}
+                        />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Email Subject Line *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Special Offer from our Team"
+                          value={formData.subject}
+                          onChange={e => setFormData({ ...formData, subject: e.target.value })}
+                          style={inputBase}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Mode Toggle: Visual Form Customizer vs Developer HTML */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditorMode('form')}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '7px 14px', borderRadius: 9, fontSize: 12, fontWeight: 700,
+                            cursor: 'pointer', border: '1.5px solid',
+                            background: editorMode === 'form' ? '#eef2ff' : '#ffffff',
+                            color: editorMode === 'form' ? '#4f46e5' : '#64748b',
+                            borderColor: editorMode === 'form' ? '#6366f1' : '#e2e8f0',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <Sliders size={13} /> Visual Editor
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditorMode('code')}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '7px 14px', borderRadius: 9, fontSize: 12, fontWeight: 700,
+                            cursor: 'pointer', border: '1.5px solid',
+                            background: editorMode === 'code' ? '#0f172a' : '#ffffff',
+                            color: editorMode === 'code' ? '#ffffff' : '#64748b',
+                            borderColor: editorMode === 'code' ? '#0f172a' : '#e2e8f0',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <Code size={13} /> Developer HTML
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleResetTemplate}
+                        style={{
+                          background: 'none', border: 'none', fontSize: 11.5, color: '#6366f1',
+                          fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                        }}
+                        title="Reset template to original defaults"
+                      >
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                    </div>
+
+                    {/* ── VISUAL FORM BUILDER MODE ── */}
+                    {editorMode === 'form' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, background: '#f8fafc', padding: '16px', borderRadius: 14, border: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                            Edit Message Copy (Header to Footer)
+                          </span>
+                          <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>• Real-time Preview Sync</span>
+                        </div>
+
+                        {/* 1. Headline */}
+                        <div>
+                          <label style={labelStyle}>Headline / Main Heading *</label>
+                          <input
+                            type="text"
+                            required
+                            value={formData.headline}
+                            onChange={e => updateFormField('headline', e.target.value)}
+                            placeholder="e.g. Welcome to the community, {{first_name}}!"
+                            style={inputBase}
+                          />
+                        </div>
+
+                        {/* 2. Subheadline */}
+                        <div>
+                          <label style={labelStyle}>Sub-headline / Greeting</label>
+                          <input
+                            type="text"
+                            value={formData.subheadline}
+                            onChange={e => updateFormField('subheadline', e.target.value)}
+                            placeholder="e.g. We're thrilled to have you with us on {{company}}."
+                            style={inputBase}
+                          />
+                        </div>
+
+                        {/* 3. Description Box */}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <label style={{ ...labelStyle, marginBottom: 0 }}>Email Body / Message Description *</label>
+                            <span style={{ fontSize: 11, color: '#94a3b8' }}>Paragraphs supported</span>
+                          </div>
+                          <textarea
+                            rows={5}
+                            required
+                            value={formData.body}
+                            onChange={e => updateFormField('body', e.target.value)}
+                            placeholder="Type your campaign message here. Multiple paragraphs and merge tags are supported..."
+                            style={{ ...inputBase, height: 'auto', minHeight: 110, padding: '12px 14px', lineHeight: 1.6 }}
+                          />
+                        </div>
+
+                        {/* 4. Action Button Section */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Button Text / Label *</label>
+                            <input
+                              type="text"
+                              required
+                              value={formData.buttonText}
+                              onChange={e => updateFormField('buttonText', e.target.value)}
+                              placeholder="e.g. Get Started Now &rarr;"
+                              style={inputBase}
+                            />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Button Destination URL</label>
+                            <input
+                              type="text"
+                              value={formData.buttonUrl}
+                              onChange={e => updateFormField('buttonUrl', e.target.value)}
+                              placeholder="{{form_link}} or https://..."
+                              style={inputBase}
+                            />
+                          </div>
+                        </div>
+
+                        {/* 5. Promo Code (when available) */}
+                        {selectedTemplate.id === 'product_promo' && (
+                          <div>
+                            <label style={labelStyle}>Promo / Voucher Code</label>
+                            <input
+                              type="text"
+                              value={formData.promoCode}
+                              onChange={e => updateFormField('promoCode', e.target.value)}
+                              placeholder="e.g. SAVE40"
+                              style={{ ...inputBase, fontFamily: 'monospace', letterSpacing: 2, fontWeight: 700 }}
+                            />
+                          </div>
+                        )}
+
+                        {/* 6. Footer Sign-off */}
+                        <div>
+                          <label style={labelStyle}>Footer Sign-off / Signature</label>
+                          <input
+                            type="text"
+                            value={formData.footerSignoff}
+                            onChange={e => updateFormField('footerSignoff', e.target.value)}
+                            placeholder="e.g. The {{company}} Team"
+                            style={inputBase}
+                          />
+                        </div>
+
+                        {/* Quick Tags Toolbar */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingTop: 2 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Insert Tags:</span>
+                          {[
+                            { label: 'First Name', tag: '{{first_name}}' },
+                            { label: 'Company', tag: '{{company}}' },
+                            { label: 'Recipient Email', tag: '{{email}}' },
+                            { label: 'Form Link', tag: '{{form_link}}' },
+                          ].map(t => (
+                            <button
+                              key={t.tag}
+                              type="button"
+                              onClick={() => handleInsertTag(t.tag)}
+                              style={{
+                                background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 6,
+                                padding: '2px 8px', fontSize: 11, fontFamily: 'monospace', color: '#4f46e5',
+                                fontWeight: 600, cursor: 'pointer'
+                              }}
+                            >
+                              + {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      /* ── DEVELOPER CODE MODE ── */
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '8px 12px', borderRadius: 10, background: '#f8fafc', border: '1px solid #f1f5f9' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5 }}>Insert Tags:</span>
+                          {[
+                            { label: 'First Name', tag: '{{first_name}}' },
+                            { label: 'Full Name', tag: '{{name}}' },
+                            { label: 'Company', tag: '{{company}}' },
+                            { label: 'Recipient Email', tag: '{{email}}' },
+                            { label: 'RSVP / Form Link', tag: '{{form_link}}' },
+                          ].map(t => (
+                            <button
+                              key={t.tag}
+                              type="button"
+                              onClick={() => handleInsertTag(t.tag)}
+                              style={{
+                                background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 6,
+                                padding: '2px 8px', fontSize: 11, fontFamily: 'monospace', color: '#4f46e5',
+                                fontWeight: 600, cursor: 'pointer'
+                              }}
+                            >
+                              + {t.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <textarea
+                          rows={16}
+                          required
+                          value={formData.custom_html}
+                          onChange={e => setFormData({ ...formData, custom_html: e.target.value })}
+                          spellCheck={false}
+                          placeholder="<!DOCTYPE html><html>...</html>"
+                          style={{
+                            width: '100%',
+                            minHeight: 330,
+                            padding: '14px 16px',
+                            borderRadius: 12,
+                            background: '#090d16',
+                            color: '#38bdf8',
+                            border: '1.5px solid #1e293b',
+                            fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+                            fontSize: '12px',
+                            lineHeight: 1.6,
+                            boxSizing: 'border-box',
+                            resize: 'vertical',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Target Recipient Emails */}
+                    <div>
+                      <label style={labelStyle}>Target Recipient Emails *</label>
+                      <textarea
+                        rows={2}
+                        required
+                        placeholder="user1@company.com, user2@company.com, user3@company.com"
+                        value={formData.target_emails}
+                        onChange={e => setFormData({ ...formData, target_emails: e.target.value })}
+                        style={{ ...inputBase, height: 'auto', minHeight: 64, padding: '10px 14px' }}
+                      />
+                      <p style={{ margin: '4px 0 0', fontSize: 11.5, color: '#94a3b8' }}>
+                        Separate multiple emails with commas. Each recipient gets a unique trackable form link & open pixel.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Left Action Footer */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: '1px solid #f1f5f9', marginTop: 10, flexShrink: 0 }}>
+                    <button type="button" onClick={() => setStep(1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 11, fontSize: 13.5, fontWeight: 600, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer' }}>
+                      <ArrowLeft size={15} /> Back
+                    </button>
+                    <button type="submit" disabled={sending} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 12, fontSize: 14, fontWeight: 700, color: '#fff', background: sending ? '#94a3b8' : 'linear-gradient(135deg, #6366f1, #3b82f6)', border: 'none', cursor: sending ? 'not-allowed' : 'pointer', boxShadow: sending ? 'none' : '0 6px 18px rgba(99,102,241,0.35)', transition: 'all 0.2s ease' }}>
+                      <Send size={15} /> {sending ? 'Dispatching...' : 'Send Campaign'}
+                    </button>
+                  </div>
+                </form>
+
+                {/* ── RIGHT PANEL: Sticky Live Preview ── */}
+                <div style={{
+                  background: '#f8fafc',
+                  borderRadius: 18,
+                  border: '1.5px solid #e2e8f0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  height: '100%',
+                  minHeight: 0,
+                }}>
+                  {/* Preview Header Bar */}
+                  <div style={{
+                    padding: '10px 16px',
+                    background: '#ffffff',
+                    borderBottom: '1px solid #e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexShrink: 0,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Eye size={15} color="#4f46e5" />
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a' }}>Live Preview</span>
+                      <span style={{ fontSize: 11, color: '#10b981', fontWeight: 700, background: '#ecfdf5', padding: '2px 8px', borderRadius: 99, border: '1px solid #a7f3d0' }}>
+                        • Instant Sync
+                      </span>
+                    </div>
+
+                    {/* Desktop / Mobile Switcher */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f1f5f9', padding: 3, borderRadius: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewDevice('desktop')}
+                        title="Desktop View"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          padding: '4px 9px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                          background: previewDevice === 'desktop' ? '#ffffff' : 'transparent',
+                          color: previewDevice === 'desktop' ? '#0f172a' : '#64748b',
+                          boxShadow: previewDevice === 'desktop' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                          fontSize: 11.5, fontWeight: 700,
+                        }}
+                      >
+                        <Monitor size={13} /> Desktop
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewDevice('mobile')}
+                        title="Mobile View"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          padding: '4px 9px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                          background: previewDevice === 'mobile' ? '#ffffff' : 'transparent',
+                          color: previewDevice === 'mobile' ? '#0f172a' : '#64748b',
+                          boxShadow: previewDevice === 'mobile' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                          fontSize: 11.5, fontWeight: 700,
+                        }}
+                      >
+                        <Smartphone size={13} /> Mobile
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Preview Canvas */}
+                  <div style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    background: '#f1f5f9',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'flex-start',
+                    padding: previewDevice === 'mobile' ? '24px 16px' : '0',
+                  }}>
+                    {previewDevice === 'mobile' ? (
+                      /* Mobile Simulated Device */
+                      <div style={{
+                        width: 375,
+                        minHeight: 620,
+                        background: '#ffffff',
+                        borderRadius: 36,
+                        boxShadow: '0 25px 50px -12px rgba(15,23,42,0.25), 0 0 0 10px #0f172a',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                      }}>
+                        <div style={{ background: '#0f172a', padding: '8px 0 6px', textAlign: 'center' }}>
+                          <div style={{ width: 110, height: 16, background: '#1e293b', borderRadius: 99, margin: '0 auto' }} />
+                        </div>
+                        <iframe
+                          title="Mobile Email Preview"
+                          srcDoc={String(formData.custom_html || '')
+                            .replace(/\{\{\s*first[_\s-]?name\s*\}\}/gi, 'Alex')
+                            .replace(/\{\{\s*last[_\s-]?name\s*\}\}/gi, 'Morgan')
+                            .replace(/\{\{\s*(?:full[_\s-]?)?name\s*\}\}/gi, 'Alex Morgan')
+                            .replace(/\{\{\s*(?:company|organization)\s*\}\}/gi, companyName)
+                            .replace(/\{\{\s*email\s*\}\}/gi, 'alex@example.com')
+                            .replace(/\{\{\s*(?:form|rsvp)[_\s-]?link\s*\}\}/gi, '#')}
+                          style={{
+                            width: '100%',
+                            height: 580,
+                            border: 'none',
+                            display: 'block',
+                            backgroundColor: '#ffffff',
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      /* Desktop Frame */
+                      <iframe
+                        title="Desktop Email Preview"
+                        srcDoc={String(formData.custom_html || '')
+                          .replace(/\{\{\s*first[_\s-]?name\s*\}\}/gi, 'Alex')
+                          .replace(/\{\{\s*last[_\s-]?name\s*\}\}/gi, 'Morgan')
+                          .replace(/\{\{\s*(?:full[_\s-]?)?name\s*\}\}/gi, 'Alex Morgan')
+                          .replace(/\{\{\s*(?:company|organization)\s*\}\}/gi, companyName)
+                          .replace(/\{\{\s*email\s*\}\}/gi, 'alex@example.com')
+                          .replace(/\{\{\s*(?:form|rsvp)[_\s-]?link\s*\}\}/gi, '#')}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          minHeight: 520,
+                          border: 'none',
+                          display: 'block',
+                          backgroundColor: '#ffffff',
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  {/* Recipient Simulation Status */}
+                  <div style={{
+                    padding: '8px 16px',
+                    background: '#ffffff',
+                    borderTop: '1px solid #e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 11.5,
+                    color: '#64748b',
+                    flexShrink: 0,
+                  }}>
+                    <span>👤 Sample Recipient: <strong>Alex Morgan</strong> (alex@example.com)</span>
+                    <span style={{ color: '#94a3b8' }}>Live rendered</span>
+                  </div>
                 </div>
 
-                <div>
-                  <label style={labelStyle}>Campaign Name *</label>
-                  <input type="text" required placeholder="e.g. Summer Sale 2026" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} style={inputBase} />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>Email Subject Line *</label>
-                  <input type="text" required placeholder="e.g. Exclusive Offer Just for You!" value={formData.subject} onChange={e => setFormData({ ...formData, subject: e.target.value })} style={inputBase} />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>Email Body Message</label>
-                  <textarea
-                    rows={4}
-                    placeholder="Enter your email content here..."
-                    value={formData.body}
-                    onChange={e => setFormData({ ...formData, body: e.target.value })}
-                    style={{ ...inputBase, height: 'auto', minHeight: 100, padding: '12px 14px', resize: 'vertical', lineHeight: 1.6 }}
-                  />
-                  <p style={{ margin: '5px 0 0', fontSize: 11.5, color: '#94a3b8' }}>
-                    💡 A personalized response form link and open-tracking pixel will be appended automatically.
-                  </p>
-                </div>
-
-                <div>
-                  <label style={labelStyle}>Target Recipient Emails *</label>
-                  <textarea
-                    rows={2}
-                    required
-                    placeholder="user1@company.com, user2@company.com, user3@company.com"
-                    value={formData.target_emails}
-                    onChange={e => setFormData({ ...formData, target_emails: e.target.value })}
-                    style={{ ...inputBase, height: 'auto', minHeight: 72, padding: '12px 14px' }}
-                  />
-                  <p style={{ margin: '5px 0 0', fontSize: 11.5, color: '#94a3b8' }}>
-                    Separate multiple emails with commas. Each recipient gets a unique trackable form link.
-                  </p>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
-                  <button type="button" onClick={() => setStep(1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 11, fontSize: 13.5, fontWeight: 600, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer' }}>
-                    <ArrowLeft size={15} /> Back
-                  </button>
-                  <button type="submit" disabled={sending} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 12, fontSize: 14, fontWeight: 700, color: '#fff', background: sending ? '#94a3b8' : 'linear-gradient(135deg, #6366f1, #3b82f6)', border: 'none', cursor: sending ? 'not-allowed' : 'pointer', boxShadow: sending ? 'none' : '0 6px 18px rgba(99,102,241,0.35)', transition: 'all 0.2s ease' }}>
-                    <Send size={15} /> {sending ? 'Dispatching...' : 'Send Campaign'}
-                  </button>
-                </div>
-              </form>
+              </div>
             )}
           </div>
         </div>
@@ -975,9 +1491,9 @@ function CampaignsPage() {
                   const items = emails.length > 0
                     ? emails.map(email => {
                         const match = tracking.find(t => String(t.email).toLowerCase() === String(email).toLowerCase());
-                        return { email, status: match?.status || 'Sent' };
+                        return { email, status: match?.status || 'Sent', error: match?.error || null };
                       })
-                    : tracking.map(t => ({ email: t.email, status: t.status || 'Sent' }));
+                    : tracking.map(t => ({ email: t.email, status: t.status || 'Sent', error: t.error || null }));
 
                   if (items.length === 0) {
                     return <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: 13 }}>No recipient data yet.</div>;
@@ -992,10 +1508,15 @@ function CampaignsPage() {
                         background: '#f8fafc', border: '1px solid #f1f5f9',
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(99,102,241,0.1)', color: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div style={{ width: 34, height: 34, borderRadius: 10, background: badge.bg, color: badge.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <Mail size={15} />
                           </div>
-                          <span style={{ fontSize: 13.5, fontWeight: 600, color: '#1e293b' }}>{item.email}</span>
+                          <div>
+                            <span style={{ fontSize: 13.5, fontWeight: 600, color: '#1e293b' }}>{item.email}</span>
+                            {item.error && (
+                              <div style={{ fontSize: 11.5, color: '#ef4444', marginTop: 2 }}>{item.error}</div>
+                            )}
+                          </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 12px', borderRadius: 99, background: badge.bg, border: `1px solid ${badge.border}` }}>
                           <div style={{ width: 6, height: 6, borderRadius: '50%', background: badge.dot }} />
