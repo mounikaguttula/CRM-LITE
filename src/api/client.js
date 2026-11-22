@@ -53,7 +53,7 @@ const apiFetch = async (endpoint, options = {}) => {
       const preMatch = text.match(/<pre>(.*?)<\/pre>/i);
       const bodyMatch = text.match(/<body>(.*?)<\/body>/i);
       let cleanMsg = preMatch ? preMatch[1] : (bodyMatch ? bodyMatch[1] : text);
-      cleanMsg = cleanMsg.replace(/<[^>]+>/g, '').trim();
+      cleanMsg = String(cleanMsg || '').replace(/<[^>]+>/g, '').trim();
       data = { message: cleanMsg || `Server error (${res.status})` };
     }
 
